@@ -36,7 +36,7 @@ function startAnim() {
     const cy      = H / 2;
 
     // Center reference line
-    ctx.strokeStyle = anim.accent + '28';
+    ctx.strokeStyle = anim.accent + '30';
     ctx.lineWidth   = 0.5;
     ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(W, cy); ctx.stroke();
 
@@ -159,7 +159,7 @@ function renderEnergySection(energy, energyId, accent) {
   return `
     <div class="dimension">
       <div class="dimension-label" style="color:${accent}">Energy</div>
-      <canvas id="waveform-canvas" style="width:100%;height:72px;display:block;border-radius:8px;background:#161412"></canvas>
+      <canvas id="waveform-canvas" style="width:100%;height:72px;display:block;border-radius:8px;background:#faf7f2;border:1px solid #ddd6c8"></canvas>
       <input type="range" class="energy-slider" id="energy-slider" min="0" max="100" value="${energy}">
       <div class="energy-labels">${labels}</div>
     </div>

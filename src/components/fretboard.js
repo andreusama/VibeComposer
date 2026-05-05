@@ -25,31 +25,31 @@ export function fretboardSVG(frets, accent = '#d4845a') {
 
   const fretLines = Array.from({ length: NUM_FRETS }, (_, i) => {
     const y = NUT_Y + nutH + FRET_H * (i + 1);
-    return `<line x1="${PAD}" y1="${y}" x2="${W - PAD}" y2="${y}" stroke="#2e2a26" stroke-width="1"/>`;
+    return `<line x1="${PAD}" y1="${y}" x2="${W - PAD}" y2="${y}" stroke="#d0c8bc" stroke-width="1"/>`;
   }).join('');
 
   const stringLines = STRINGS.map((_, i) => {
     const x  = PAD + STRING_W * i;
     const sw = i === 0 ? 1.8 : 1;
-    return `<line x1="${x}" y1="${NUT_Y}" x2="${x}" y2="${NUT_Y + nutH + FRET_H * NUM_FRETS}" stroke="#5a5248" stroke-width="${sw}"/>`;
+    return `<line x1="${x}" y1="${NUT_Y}" x2="${x}" y2="${NUT_Y + nutH + FRET_H * NUM_FRETS}" stroke="#a09080" stroke-width="${sw}"/>`;
   }).join('');
 
   const markers = frets.map((f, i) => {
     const cx = PAD + STRING_W * i;
 
-    if (f === -1) return `<text x="${cx}" y="${NUT_Y - 10}" text-anchor="middle" fill="#4a4540" font-size="15" font-family="monospace">×</text>`;
+    if (f === -1) return `<text x="${cx}" y="${NUT_Y - 10}" text-anchor="middle" fill="#8b7a6a" font-size="15" font-family="monospace">×</text>`;
 
     if (f === 0)  return `<circle cx="${cx}" cy="${NUT_Y - 13}" r="7" fill="none" stroke="${accent}" stroke-width="2"/>`;
 
     const cy = dotCy(f);
     return `
       <circle cx="${cx}" cy="${cy}" r="12" fill="${accent}"/>
-      <text x="${cx}" y="${cy + 5}" text-anchor="middle" fill="var(--bg)" font-size="12" font-weight="bold" font-family="monospace">${f}</text>
+      <text x="${cx}" y="${cy + 5}" text-anchor="middle" fill="#faf7f2" font-size="12" font-weight="bold" font-family="monospace">${f}</text>
     `;
   }).join('');
 
   const stringLabels = STRINGS.map((s, i) =>
-    `<text x="${PAD + STRING_W * i}" y="${totalH - 4}" text-anchor="middle" fill="#4a4540" font-size="10" font-family="monospace">${s}</text>`
+    `<text x="${PAD + STRING_W * i}" y="${totalH - 4}" text-anchor="middle" fill="#8b7a6a" font-size="10" font-family="monospace">${s}</text>`
   ).join('');
 
   const fretIndicator = !isAtNut

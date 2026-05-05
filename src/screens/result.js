@@ -45,10 +45,10 @@ function renderChordCard(chord, index, accent) {
       onmouseover="this.style.borderColor='${accent}99'"
       onmouseout="this.style.borderColor='${accent}33'">
       <div class="chord-beat">beat ${index + 1}</div>
-      <div class="chord-name" style="color:${accent}">${chord.chord}</div>
+      <div class="chord-name">${chord.chord}</div>
       <div class="chord-function">${chord.function}</div>
       <div class="chord-feel">${chord.feel}</div>
-      <div class="chord-tap" style="color:${accent};border-top-color:${accent}33">tap to play</div>
+      <div class="chord-tap">tap to play</div>
     </button>
   `;
 }

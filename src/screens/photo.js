@@ -129,6 +129,7 @@ export function attach(state) {
     setState({
       skipPhoto: skip,
       rgb:       (!skip && extractedRgb) ? extractedRgb : state.rgb,
+      photoUrl:  (!skip && preview.src) ? preview.src : null,
       screen:    'builder',
     });
   });

@@ -61,7 +61,7 @@ export function render(state) {
         <div class="artifact-footer">
           <div class="artifact-footer-text">
             <div class="artifact-phrase">"${phrase}"</div>
-            ${place ? `<div class="artifact-place">📍 ${place}</div>` : ''}
+            ${place ? `<div class="artifact-place">  ${place}</div>` : ''}
             <div class="artifact-vibe">${state.vibeLabel || ''}</div>
           </div>
           <div class="artifact-swatches">

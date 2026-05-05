@@ -4,7 +4,7 @@ const API_URL   = '/api/claude';
 const API_MODEL = 'claude-sonnet-4-5';
 
 // ─── Toggle to avoid API calls during visual development ──────────────────────
-const MOCK_MODE = true;
+const MOCK_MODE = false;
 
 const MOCK_RESPONSES = {
   happy:       { key:'C',  title:'sunny afternoon',   summary:'A bright, bouncy progression that feels like warm sunlight.',         progression:[{chord:'C',   function:'I',   feel:'bright, open',     ukulele:[0,0,0,3]},{chord:'G',   function:'V',   feel:'lift, momentum',   ukulele:[0,2,3,2]},{chord:'Am',  function:'vi',  feel:'bittersweet dip',  ukulele:[2,0,0,0]},{chord:'F',   function:'IV',  feel:'warm resolve',     ukulele:[2,0,1,0]}]},

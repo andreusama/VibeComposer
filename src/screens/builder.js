@@ -73,8 +73,14 @@ export function render(state) {
     <div class="body">
 
       <div class="muse-recap">
-        <div class="muse-recap-phrase">"${state.phrase}"</div>
-        ${state.place ? `<div class="muse-recap-place">📍 ${state.place}</div>` : ''}
+        <div class="muse-recap-left">
+          <div class="muse-recap-phrase">"${state.phrase}"</div>
+          ${state.place ? `<div class="muse-recap-place">${state.place}</div>` : ''}
+        </div>
+        ${state.photoUrl ? `
+          <div class="muse-recap-photo">
+            <img src="${state.photoUrl}" alt="muse" />
+          </div>` : ''}
       </div>
 
       ${state.error ? `<div class="error-banner">${state.error}</div>` : ''}
@@ -194,22 +200,6 @@ export function attach(state) {
     document.documentElement.style.setProperty('--accent', accent);
     const recap = document.querySelector('.muse-recap');
     if (recap) recap.style.borderLeftColor = accent;
-
-    // Update all dimension card borders and labels live
-    document.querySelectorAll('.dimension').forEach(el => {
-      el.style.borderLeftColor = accent;
-    });
-    document.querySelectorAll('.dimension-label').forEach(el => {
-      const text = el.textContent.trim().toLowerCase();
-      if (text === 'mood' || text === 'energy') el.style.color = accent;
-    });
-
-    // Update compose button live
-    const btn = document.getElementById('compose-btn');
-    if (btn && !btn.disabled) {
-      btn.style.background   = accent;
-      btn.style.borderColor  = accent;
-    }
   }
 
   ['r', 'g', 'b'].forEach(ch => {

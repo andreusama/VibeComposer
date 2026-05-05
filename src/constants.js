@@ -85,6 +85,7 @@ Given a JSON vibe profile, generate a 4-chord progression for a 4/4 song.
 
 The profile includes a "phrase" — the emotional anchor of the song written by the user.
 This is the most important input. Let it guide the harmonic mood deeply.
+If no phrase is provided, rely entirely on the other vibe parameters to generate the progression.
 If a "place" is included, let its geography subtly inform the flavour.
 
 Return ONLY raw JSON. No markdown, no backticks, no explanation text.

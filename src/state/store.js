@@ -7,6 +7,7 @@ let state = {
   // Muse inputs
   phrase:      '',
   place:       '',
+  skipPhrase:  false,
   skipPlace:   false,
   skipPhoto:   false,
   // Vibe refinement
@@ -19,6 +20,7 @@ let state = {
   vibeLabel:   null,
   progression: null,
   activeChord: 0,
+  photoUrl:    null,
   error:       null,
 };
 
@@ -44,8 +46,9 @@ export function setState(partial) {
 export function reset() {
   setState({
     screen:      'muse',
-    phrase:      '',
+    phrase:      null,
     place:       '',
+    skipPhrase:  false,
     skipPlace:   false,
     skipPhoto:   false,
     rgb:         { r: 107, g: 140, b: 174 },

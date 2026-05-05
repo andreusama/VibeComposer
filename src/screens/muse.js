@@ -11,7 +11,7 @@ export function render(state) {
 
       <div class="muse-step-label">01 — the muse</div>
 
-      <div class="muse-prompt">what's the song about?</div>
+      <div class="muse-prompt">can you find the words?</div>
       <div class="muse-sub">a feeling, a memory, a moment. write anything.</div>
 
       <textarea
@@ -22,13 +22,22 @@ export function render(state) {
       >${state.phrase || ''}</textarea>
 
       <div class="muse-footer">
-        <span class="char-count" id="char-count">${(state.phrase || '').length}/280</span>
-        <button class="continue-btn ${state.phrase && state.phrase.trim().length > 2 ? 'enabled' : 'disabled'}"
-          id="muse-continue"
-          ${state.phrase && state.phrase.trim().length > 2 ? '' : 'disabled'}>
-          continue →
-        </button>
-      </div>
+  <label class="skip-label">
+    <input type="checkbox" id="skip-phrase" ${state.skipPhrase ? 'checked' : ''} />
+    <div class="skip-box ${state.skipPhrase ? 'checked' : ''}">
+      ${state.skipPhrase ? '✓' : ''}
+    </div>
+    <span>Can't put it into words</span>
+  </label>
+  <div class="muse-footer-right">
+    <span class="char-count" id="char-count">${(state.phrase || '').length}/280</span>
+    <button class="continue-btn ${state.skipPhrase || (state.phrase && state.phrase.trim().length > 2) ? 'enabled' : 'disabled'}"
+      id="muse-continue"
+      ${state.skipPhrase || (state.phrase && state.phrase.trim().length > 2) ? '' : 'disabled'}>
+      continue →
+    </button>
+  </div>
+</div>
 
     </div>
   `;
@@ -40,6 +49,8 @@ export function attach(state) {
   const input    = document.getElementById('phrase-input');
   const btn      = document.getElementById('muse-continue');
   const counter  = document.getElementById('char-count');
+  const skipCheck = document.getElementById('skip-phrase');
+  const box = document.querySelector('.skip-box');
 
   input.addEventListener('input', () => {
     const val = input.value;
@@ -51,6 +62,18 @@ export function attach(state) {
     // Soft state sync (no re-render)
     state = { ...state, phrase: val };
   });
+  
+  skipCheck.addEventListener('change', () => {
+  const skip = skipCheck.checked;
+  box.classList.toggle('checked', skip);
+  box.textContent = skip ? '✓' : '';
+  input.disabled = skip;
+  input.style.opacity = skip ? '0.3' : '1';
+  btn.disabled = !skip;
+  btn.classList.toggle('enabled', !skip || skip);
+  btn.classList.remove('disabled');
+  state = { ...state, phrase: skip ? null : '' };
+});
 
   // Focus textarea on load
   input.focus();

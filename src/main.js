@@ -26,5 +26,18 @@ function render(state) {
   screen.attach?.(state);
 }
 
-subscribe(render);
+// Set accent color from default RGB on boot so treble clef is always visible
+function setAccentFromState(state) {
+  const { r, g, b } = state.rgb;
+  const hex = (v) => Math.round(v).toString(16).padStart(2, '0');
+  const accent = `#${hex(r)}${hex(g)}${hex(b)}`;
+  document.documentElement.style.setProperty('--accent', accent);
+}
+
+subscribe((state) => {
+  setAccentFromState(state);
+  render(state);
+});
+
+setAccentFromState(getState());
 render(getState());

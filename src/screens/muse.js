@@ -55,7 +55,7 @@ export function attach(state) {
   input.addEventListener('input', () => {
     const val = input.value;
     counter.textContent = `${val.length}/280`;
-    const hasContent = val.trim().length > 2;
+    const hasContent = val.trim().length > 0;
     btn.disabled = !hasContent;
     btn.classList.toggle('enabled',  hasContent);
     btn.classList.toggle('disabled', !hasContent);

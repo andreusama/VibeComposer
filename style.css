@@ -861,8 +861,8 @@ body::before {
 }
 
 .artifact-meta-right { text-align: right; flex-shrink: 0; }
-.artifact-key  { font-family: var(--font-mono); font-size: 11px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; }
-.artifact-date { font-family: var(--font-mono); font-size: 10px; color: var(--faint); margin-top: 3px; }
+.artifact-key  { font-family: var(--font-mono); font-size: 13px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; }
+.artifact-date { font-family: var(--font-mono); font-size: 12px; color: var(--faint); margin-top: 3px; }
 
 /* Chords on staff */
 .artifact-staff {
@@ -975,9 +975,10 @@ body::before {
 
 .artifact-place {
   font-family:    var(--font-mono);
-  font-size:      12px;
-  color:          rgba(26,17,8,0.65);
+  font-size:      17px;
+  color:          rgba(26,17,8,0.75);
   letter-spacing: 0.5px;
+  margin-top:     4px;
 }
 
 .artifact-vibe {

@@ -1,33 +1,30 @@
 import { subscribe, getState } from './state/store.js';
+import * as MuseScreen    from './screens/muse.js';
+import * as PlaceScreen   from './screens/place.js';
+import * as PhotoScreen   from './screens/photo.js';
 import * as LoadingScreen from './screens/loading.js';
 import * as BuilderScreen from './screens/builder.js';
 import * as ResultScreen  from './screens/result.js';
 import * as ChordScreen   from './screens/chord.js';
 
-// ─── Screen registry ───────────────────────────────────────────────────────────
-// Maps screen names to their render/attach modules.
-// Adding a new screen = add one entry here.
-
 const SCREENS = {
+  muse:    MuseScreen,
+  place:   PlaceScreen,
+  photo:   PhotoScreen,
   loading: LoadingScreen,
   builder: BuilderScreen,
   result:  ResultScreen,
   chord:   ChordScreen,
 };
 
-// ─── Render loop ───────────────────────────────────────────────────────────────
-
 const app = document.getElementById('app');
 
 function render(state) {
   const screen = SCREENS[state.screen];
   if (!screen) return;
-
   app.innerHTML = screen.render(state);
-  screen.attach?.(state);   // attach is optional (loading screen has none)
+  screen.attach?.(state);
 }
 
-// ─── Boot ──────────────────────────────────────────────────────────────────────
-
 subscribe(render);
-render(getState());   // draw the initial screen on page load
+render(getState());

@@ -55,7 +55,7 @@ export function energyIdFromValue(v) {
   return 'intense';
 }
 
-// ─── Tag taxonomy (flavour + texture only) ────────────────────────────────────
+// ─── Tag taxonomy ─────────────────────────────────────────────────────────────
 
 export const DIMENSIONS = {
   flavour: {
@@ -83,13 +83,17 @@ export const ENERGY_LABELS = [
 export const SYSTEM_PROMPT = `You are a chord composition assistant for ukulele players.
 Given a JSON vibe profile, generate a 4-chord progression for a 4/4 song.
 
+The profile includes a "phrase" — the emotional anchor of the song written by the user.
+This is the most important input. Let it guide the harmonic mood deeply.
+If a "place" is included, let its geography subtly inform the flavour.
+
 Return ONLY raw JSON. No markdown, no backticks, no explanation text.
 
 Schema:
 {
   "key": "Am",
-  "title": "short evocative title (2-4 words, lowercase)",
-  "summary": "one sentence describing the feeling of this progression",
+  "title": "short evocative title (2-4 words, lowercase, inspired by the phrase)",
+  "summary": "one sentence describing the feeling of this progression, referencing the phrase's emotion",
   "progression": [
     { "chord": "Am", "function": "i",   "feel": "somber, open",    "ukulele": [2, 0, 0, 0] },
     { "chord": "G",  "function": "VII", "feel": "hopeful release", "ukulele": [0, 2, 3, 2] },

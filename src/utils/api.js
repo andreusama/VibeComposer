@@ -3,7 +3,7 @@ import { SYSTEM_PROMPT } from '../constants.js';
 const API_URL   = '/api/claude';
 const API_MODEL = 'claude-sonnet-4-5';
 
-// ─── Toggle this to avoid API calls during visual development ─────────────────
+// ─── Toggle to avoid API calls during visual development ──────────────────────
 const MOCK_MODE = true;
 
 const MOCK_RESPONSES = {
@@ -17,12 +17,9 @@ const MOCK_RESPONSES = {
   dreamy:      { key:'C',  title:'half asleep',       summary:'Floating and blurred at the edges, soft landing.',                    progression:[{chord:'Cmaj7',function:'I',  feel:'hazy warmth',      ukulele:[0,0,0,2]},{chord:'Am7', function:'vi',  feel:'soft drift',       ukulele:[0,0,0,0]},{chord:'Fmaj7',function:'IV', feel:'suspended',        ukulele:[2,0,1,0]},{chord:'G',   function:'V',   feel:'gentle return',    ukulele:[0,2,3,2]}]},
 };
 
-// ─── Main export ──────────────────────────────────────────────────────────────
-
 export async function composeProgression(vibeProfile) {
   if (MOCK_MODE) {
-    // Simulate network delay so loading screen is visible
-    await new Promise(r => setTimeout(r, 600));
+    await new Promise(r => setTimeout(r, 800));
     return MOCK_RESPONSES[vibeProfile.mood] || MOCK_RESPONSES.melancholic;
   }
 
@@ -37,13 +34,9 @@ export async function composeProgression(vibeProfile) {
     }),
   });
 
-  if (!response.ok) throw new Error(`Claude API responded with ${response.status}`);
+  if (!response.ok) throw new Error(`API error ${response.status}`);
 
   const data  = await response.json();
-  const text  = data.content
-    .filter((block) => block.type === 'text')
-    .map((block) => block.text)
-    .join('');
-
+  const text  = data.content.filter(b => b.type === 'text').map(b => b.text).join('');
   return JSON.parse(text.replace(/```json|```/g, '').trim());
 }

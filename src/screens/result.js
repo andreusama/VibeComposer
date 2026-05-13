@@ -1,17 +1,18 @@
-import { setState, reset } from '../state/store.js';
-import { copyCurrentUrl } from '../utils/share.js';
-import { paletteFromRgb } from '../constants.js';
-import { fretboardSVG } from '../components/fretboard.js';
+import {setState, reset} from '../state/store.js';
+import {copyCurrentUrl} from '../utils/share.js';
+import {paletteFromRgb, energyIdFromValue} from '../constants.js';
+import {playProgression} from '../audio/player.js';
+import {fretboardSVG} from '../components/fretboard.js';
 
 // ─── Render ────────────────────────────────────────────────────────────────────
 
 export function render(state) {
-  const { progression, phrase, place, rgb } = state;
-  const accent  = paletteFromRgb(rgb.r, rgb.g, rgb.b)[0];
-  const palette = paletteFromRgb(rgb.r, rgb.g, rgb.b);
-  const date    = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+    const {progression, phrase, place, rgb} = state;
+    const accent = paletteFromRgb(rgb.r, rgb.g, rgb.b)[0];
+    const palette = paletteFromRgb(rgb.r, rgb.g, rgb.b);
+    const date = new Date().toLocaleDateString('en-GB', {day: 'numeric', month: 'long', year: 'numeric'});
 
-  return `
+    return `
     <div class="header">
       <h1>vibe composer</h1>
       <span class="tagline">ukulele · 4/4</span>
@@ -57,15 +58,15 @@ export function render(state) {
           </div>
         </div>
 
-        <!-- Polaroid bottom — text + Adobe-style palette swatches -->
+        <!-- Polaroid bottom margin -->
         <div class="artifact-footer">
-          <div class="artifact-footer-text">
+          <div class="artifact-footer-left">
             <div class="artifact-phrase">"${phrase}"</div>
-            ${place ? `<div class="artifact-place">  ${place}</div>` : ''}
+            ${place ? `<div class="artifact-place">${place}</div>` : ''}
             <div class="artifact-vibe">${state.vibeLabel || ''}</div>
           </div>
-          <div class="artifact-swatches">
-            ${palette.map(col => `<div class="artifact-swatch" style="background:${col}"></div>`).join('')}
+          <div class="artifact-color-stripe">
+            ${palette.map(c => `<div class="stripe-segment" style="background:${c}"></div>`).join('')}
           </div>
         </div>
 
@@ -73,6 +74,8 @@ export function render(state) {
 
       <!-- Actions -->
       <div class="action-row" style="margin-top:20px">
+        <button class="ghost-btn" id="btn-play-prog">▶ play all</button>
+        <button class="ghost-btn" id="btn-studio">🎹 open studio</button>
         <button class="ghost-btn" id="btn-reset">← new vibe</button>
         <button class="ghost-btn" id="btn-share">share progression</button>
       </div>
@@ -84,28 +87,38 @@ export function render(state) {
 // ─── Attach ────────────────────────────────────────────────────────────────────
 
 export function attach(state) {
-  const accent = paletteFromRgb(state.rgb.r, state.rgb.g, state.rgb.b)[0];
-  document.documentElement.style.setProperty('--accent', accent);
+    const accent = paletteFromRgb(state.rgb.r, state.rgb.g, state.rgb.b)[0];
+    document.documentElement.style.setProperty('--accent', accent);
 
-  // Chord tap → chord screen
-  document.querySelectorAll('.artifact-chord').forEach(el => {
-    el.addEventListener('click', () => {
-      setState({ activeChord: Number(el.dataset.index), screen: 'chord' });
+    // Chord tap → chord screen
+    document.querySelectorAll('.artifact-chord').forEach(el => {
+        el.addEventListener('click', () => {
+            setState({activeChord: Number(el.dataset.index), screen: 'chord'});
+        });
     });
-  });
 
-  document.getElementById('btn-reset').addEventListener('click', () => reset());
+    const energyId = energyIdFromValue(state.energy);
 
-  document.getElementById('btn-share').addEventListener('click', async () => {
-    const btn = document.getElementById('btn-share');
-    const ok  = await copyCurrentUrl();
-    if (ok) {
-      btn.textContent = 'link copied ✓';
-      btn.classList.add('success');
-      setTimeout(() => {
-        btn.textContent = 'share progression';
-        btn.classList.remove('success');
-      }, 2000);
-    }
-  });
+    document.getElementById('btn-studio').addEventListener('click', () => {
+        setState({screen: 'studio'});
+    });
+
+    document.getElementById('btn-play-prog').addEventListener('click', () => {
+        playProgression(state.progression.progression, energyId);
+    });
+
+    document.getElementById('btn-reset').addEventListener('click', () => reset());
+
+    document.getElementById('btn-share').addEventListener('click', async () => {
+        const btn = document.getElementById('btn-share');
+        const ok = await copyCurrentUrl();
+        if (ok) {
+            btn.textContent = 'link copied ✓';
+            btn.classList.add('success');
+            setTimeout(() => {
+                btn.textContent = 'share progression';
+                btn.classList.remove('success');
+            }, 2000);
+        }
+    });
 }

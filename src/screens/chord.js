@@ -1,6 +1,7 @@
 import { setState } from '../state/store.js';
 import { fretboardSVG } from '../components/fretboard.js';
-import { paletteFromRgb } from '../constants.js';
+import { paletteFromRgb, energyIdFromValue } from '../constants.js';
+import { playChord } from '../audio/player.js';
 
 const TOTAL = 4;
 
@@ -8,8 +9,9 @@ const TOTAL = 4;
 
 export function render(state) {
   const { progression, activeChord } = state;
-  const chord  = progression.progression[activeChord];
-  const accent = paletteFromRgb(state.rgb.r, state.rgb.g, state.rgb.b)[0];
+  const chord    = progression.progression[activeChord];
+  const accent   = paletteFromRgb(state.rgb.r, state.rgb.g, state.rgb.b)[0];
+  const energyId = energyIdFromValue(state.energy);
 
   return `
     <div class="header">
@@ -30,6 +32,9 @@ export function render(state) {
         <div class="fretboard-chord-name">${chord.chord}</div>
         ${fretboardSVG(chord.ukulele, accent)}
         <div class="fretboard-meta">${chord.function} · ${chord.feel}</div>
+        <button class="play-btn" id="btn-play-chord" style="border-color:${accent};color:${accent}">
+          ▶ play ${chord.chord}
+        </button>
       </div>
 
       <div class="chord-nav">
@@ -38,7 +43,7 @@ export function render(state) {
         <button class="ghost-btn" id="btn-next">next →</button>
       </div>
 
-      <p class="uke-label">UKULELE · GCEA</p>
+      <p class="uke-label">UKULELE · GCEA · ${energyId}</p>
 
     </div>
   `;
@@ -47,11 +52,20 @@ export function render(state) {
 // ─── Attach ────────────────────────────────────────────────────────────────────
 
 export function attach(state) {
-  // Propagate mood accent color
-  const accent = paletteFromRgb(state.rgb.r, state.rgb.g, state.rgb.b)[0];
+  const accent   = paletteFromRgb(state.rgb.r, state.rgb.g, state.rgb.b)[0];
+  const energyId = energyIdFromValue(state.energy);
   document.documentElement.style.setProperty('--accent', accent);
 
   const { activeChord } = state;
+
+  // Play chord automatically on load
+  const chord = state.progression.progression[activeChord];
+  playChord(chord.ukulele, energyId);
+
+  // Play button
+  document.getElementById('btn-play-chord').addEventListener('click', () => {
+    playChord(chord.ukulele, energyId);
+  });
 
   document.querySelectorAll('.beat-dot').forEach((btn) => {
     btn.addEventListener('click', () => {

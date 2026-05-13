@@ -263,6 +263,9 @@ async function handleCompose(state) {
     writeShareUrl({ progression: result, vibeLabel, phrase: state.phrase, place: state.place, rgb: state.rgb });
     setState({ progression: result, vibeLabel, screen: 'result' });
   } catch {
-    setState({ error: "Couldn't compose — adjust your vibe and try again.", screen: 'builder' });
+    const msg = e.message === 'LIMIT_REACHED'
+      ? "You've reached today's 5 free composes. Come back tomorrow."
+      : "Couldn't compose — adjust your vibe and try again.";
+    setState({ error: msg, screen: 'builder' });
   }
 }

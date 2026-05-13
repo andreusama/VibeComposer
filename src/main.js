@@ -6,6 +6,7 @@ import * as LoadingScreen from './screens/loading.js';
 import * as BuilderScreen from './screens/builder.js';
 import * as ResultScreen  from './screens/result.js';
 import * as ChordScreen   from './screens/chord.js';
+import * as StudioScreen  from './screens/studio.js';
 
 const SCREENS = {
   muse:    MuseScreen,
@@ -15,6 +16,7 @@ const SCREENS = {
   builder: BuilderScreen,
   result:  ResultScreen,
   chord:   ChordScreen,
+  studio:  StudioScreen,
 };
 
 const app = document.getElementById('app');

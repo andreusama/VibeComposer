@@ -22,6 +22,8 @@ export async function composeProgression(vibeProfile) {
     await new Promise(r => setTimeout(r, 800));
     return MOCK_RESPONSES[vibeProfile.mood] || MOCK_RESPONSES.melancholic;
   }
+  
+   checkAndIncrementLimit();
 
   const response = await fetch(API_URL, {
     method:  'POST',
@@ -39,4 +41,23 @@ export async function composeProgression(vibeProfile) {
   const data  = await response.json();
   const text  = data.content.filter(b => b.type === 'text').map(b => b.text).join('');
   return JSON.parse(text.replace(/```json|```/g, '').trim());
+}
+
+const DAILY_LIMIT = 1;
+const TODAY = new Date().toDateString();
+
+function checkAndIncrementLimit() {
+  const stored = JSON.parse(localStorage.getItem('vc_usage') || '{}');
+  
+  if (stored.date !== TODAY) {
+    // New day — reset count
+    localStorage.setItem('vc_usage', JSON.stringify({ date: TODAY, count: 0 }));
+    stored.count = 0;
+  }
+
+  if (stored.count >= DAILY_LIMIT) {
+    throw new Error('LIMIT_REACHED');
+  }
+
+  localStorage.setItem('vc_usage', JSON.stringify({ date: TODAY, count: stored.count + 1 }));
 }

@@ -1662,3 +1662,141 @@ body::before {
 .studio-nav {
     margin-top: 8px;
 }
+
+/* ─── Studio tabs ─────────────────────────────────────────────────────────────── */
+.studio-tabs {
+  display:       flex;
+  gap:           4px;
+  margin-bottom: 16px;
+}
+
+.studio-tab {
+  padding:        8px 20px;
+  font-family:    var(--font-mono);
+  font-size:      11px;
+  letter-spacing: 2px;
+  background:     transparent;
+  border:         1px solid rgba(255,255,255,0.1);
+  color:          rgba(255,255,255,0.3);
+  border-radius:  var(--radius-sm);
+  cursor:         pointer;
+  transition:     all 0.15s;
+}
+
+.studio-tab.active {
+  border-color: var(--accent);
+  color:        var(--accent);
+  background:   rgba(255,255,255,0.04);
+}
+
+/* ─── Song structure mode ─────────────────────────────────────────────────────── */
+.studio-timeline {
+  display:       flex;
+  gap:           4px;
+  margin-bottom: 12px;
+}
+
+.studio-tl-block {
+  flex:          1;
+  padding:       6px 4px;
+  text-align:    center;
+  border-radius: var(--radius-sm);
+  border:        1px solid rgba(255,255,255,0.06);
+  font-family:   var(--font-mono);
+  font-size:     9px;
+  color:         rgba(255,255,255,0.2);
+  letter-spacing: 1px;
+  transition:    all 0.2s;
+  cursor:        default;
+}
+
+.studio-tl-block.active { background: rgba(255,255,255,0.06); }
+
+.studio-section-panel {
+  border-radius: var(--radius-sm);
+  border:        1px solid rgba(255,255,255,0.08);
+  background:    rgba(255,255,255,0.02);
+  padding:       14px 16px;
+  margin-bottom: 10px;
+  min-height:    80px;
+  transition:    all 0.3s;
+}
+
+.studio-sp-chorus { border-color: rgba(245,200,66,0.2);  background: rgba(245,200,66,0.03);  }
+.studio-sp-bridge { border-color: rgba(192,128,224,0.2); background: rgba(192,128,224,0.03); }
+
+.studio-section-top {
+  display:         flex;
+  justify-content: space-between;
+  align-items:     flex-start;
+  margin-bottom:   10px;
+}
+
+.studio-section-name {
+  font-family:    var(--font-display);
+  font-size:      18px;
+  color:          rgba(255,255,255,0.5);
+  letter-spacing: 2px;
+}
+
+.studio-sp-chorus .studio-section-name { color: rgba(245,200,66,0.7);  }
+.studio-sp-bridge .studio-section-name { color: rgba(192,128,224,0.7); }
+
+.studio-section-insight {
+  font-family:    var(--font-mono);
+  font-size:      9px;
+  color:          rgba(255,255,255,0.2);
+  text-align:     right;
+  line-height:    1.8;
+  white-space:    pre-line;
+  letter-spacing: 0.5px;
+}
+
+.studio-chord-row {
+  display:     flex;
+  align-items: center;
+  gap:         6px;
+  flex-wrap:   wrap;
+}
+
+.studio-chord-arrow { font-size: 10px; color: rgba(255,255,255,0.15); }
+
+.studio-song-chord {
+  position:      relative;
+  padding:       6px 10px;
+  border-radius: var(--radius-sm);
+  border:        1px solid rgba(255,255,255,0.08);
+  background:    rgba(255,255,255,0.03);
+  text-align:    center;
+  transition:    all 0.1s;
+}
+
+.studio-song-chord.active  { background: rgba(255,255,255,0.08); }
+.studio-song-chord.borrowed { border-color: rgba(192,128,224,0.3); }
+
+.studio-sc-name { font-family: var(--font-display); font-size: 16px; color: rgba(255,255,255,0.5); }
+.studio-sc-fn   { font-family: var(--font-mono); font-size: 8px; color: rgba(255,255,255,0.2); margin-top: 2px; }
+
+.studio-borrowed-badge {
+  position:     absolute;
+  top:          -8px;
+  left:         50%;
+  transform:    translateX(-50%);
+  font-family:  var(--font-mono);
+  font-size:    7px;
+  background:   rgba(192,128,224,0.2);
+  color:        rgba(192,128,224,0.8);
+  border:       1px solid rgba(192,128,224,0.3);
+  padding:      1px 5px;
+  border-radius: 3px;
+  white-space:  nowrap;
+}
+
+.studio-theory-note {
+  font-family:    var(--font-mono);
+  font-size:      10px;
+  color:          rgba(255,255,255,0.2);
+  letter-spacing: 0.5px;
+  margin-bottom:  14px;
+  min-height:     16px;
+}

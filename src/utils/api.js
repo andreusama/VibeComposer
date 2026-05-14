@@ -43,7 +43,7 @@ export async function composeProgression(vibeProfile) {
   return JSON.parse(text.replace(/```json|```/g, '').trim());
 }
 
-const DAILY_LIMIT = 1;
+const DAILY_LIMIT = 100;
 const TODAY = new Date().toDateString();
 
 function checkAndIncrementLimit() {

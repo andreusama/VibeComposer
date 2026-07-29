@@ -1,4 +1,7 @@
-import { subscribe, getState } from './state/store.js';
+import { createElement } from 'react';
+import { createRoot } from 'react-dom/client';
+import { subscribe, getState, setState } from './state/store.js';
+import CanvasScreen from './canvas/CanvasScreen.jsx';
 import * as MuseScreen        from './screens/muse.js';
 import * as PlaceScreen       from './screens/place.js';
 import * as PhotoScreen       from './screens/photo.js';
@@ -42,8 +45,17 @@ const app = document.getElementById('app');
 // setState on completion, loop forever).
 let lastEffectiveScreen = null;
 
+// The canvas screen is React-rendered (React Flow) — everything else is the
+// existing vanilla innerHTML-based renderer. One React root gets mounted
+// into #app only while the canvas is the effective screen, and explicitly
+// unmounted before any vanilla screen writes to app.innerHTML again — letting
+// vanilla code clobber #app while React still thinks it owns that subtree
+// would desync React's internal tree from the real DOM.
+let reactRoot = null;
+
 function render(state) {
   if (!state.sessionChecked) {
+    if (reactRoot) { reactRoot.unmount(); reactRoot = null; }
     app.innerHTML = LoadingScreen.render();
     lastEffectiveScreen = null;
     return;
@@ -53,11 +65,24 @@ function render(state) {
     || (state.publicView && PUBLIC_VIEW_SCREENS.has(state.screen));
 
   const screenKey = (state.session || isPublic) ? state.screen : 'auth';
-  const screen = SCREENS[screenKey];
-  if (!screen) return;
 
   const justEntered = screenKey !== lastEffectiveScreen;
   lastEffectiveScreen = screenKey;
+
+  if (screenKey === 'canvas') {
+    if (!reactRoot) reactRoot = createRoot(app);
+    reactRoot.render(createElement(CanvasScreen, {
+      state,
+      justEntered,
+      onExit: () => setState({ screen: 'home' }),
+    }));
+    return;
+  }
+
+  if (reactRoot) { reactRoot.unmount(); reactRoot = null; }
+
+  const screen = SCREENS[screenKey];
+  if (!screen) return;
 
   app.innerHTML = screen.render(state);
   screen.attach?.(state, justEntered);

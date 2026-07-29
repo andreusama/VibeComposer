@@ -74,7 +74,7 @@ export async function attach(state, justEntered) {
   document.querySelectorAll('[data-action="lyrics"]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const song = (state.songs || []).find((s) => s.id === btn.dataset.id);
-      if (song) setState({ activeSong: song, screen: 'lyrics-editor' });
+      if (song) setState({ activeSong: song, screen: 'canvas' });
     });
   });
 

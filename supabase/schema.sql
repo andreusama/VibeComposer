@@ -248,3 +248,97 @@ create policy ideas_owner on ideas_notebook
 -- easyMode, vibeLabel, photoUrl, progression. Written every time "compose" runs
 -- inside a project; read back when a project's chords part is reopened.
 alter table songs add column if not exists vibe_snapshot jsonb;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Canvas mode — Figma-style infinite canvas, notes as nodes.
+-- A "note" IS a `sections` row (same lines/variants/annotations underneath),
+-- just placed on a canvas instead of stacked in a list.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- ─── chord_progressions ─────────────────────────────────────────────────────────
+-- Independent node type. A project can hold several at once (try a few before
+-- deciding); each can be assigned as "definitive" to one text note.
+create table if not exists chord_progressions (
+  id            uuid primary key default gen_random_uuid(),
+  song_id       uuid not null references songs(id) on delete cascade,
+  title         text not null default 'untitled progression',
+  canvas_x      double precision not null default 0,
+  canvas_y      double precision not null default 0,
+  canvas_width  double precision not null default 260,
+  canvas_height double precision,
+  key           text,
+  -- same shape as the composer's output: [{chord, function, feel, ukulele}, ...]
+  progression   jsonb not null default '[]'::jsonb,
+  -- 'manual' = built by hand in this pass; 'vibe' reserved for the step-by-step
+  -- assisted generation flow (phrase → place → photo → settings), next iteration.
+  source        text not null default 'manual' check (source in ('manual', 'vibe')),
+  vibe_meta     jsonb,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
+);
+
+drop trigger if exists trg_chord_progressions_updated_at on chord_progressions;
+create trigger trg_chord_progressions_updated_at
+  before update on chord_progressions
+  for each row execute function set_updated_at();
+
+create index if not exists idx_chord_progressions_song on chord_progressions(song_id);
+
+-- ─── sections: canvas placement + assigned progression ─────────────────────────
+alter table sections add column if not exists canvas_x double precision not null default 0;
+alter table sections add column if not exists canvas_y double precision not null default 0;
+alter table sections add column if not exists canvas_width double precision not null default 280;
+alter table sections add column if not exists canvas_height double precision;
+
+alter table sections drop constraint if exists sections_chord_progression_id_fkey;
+alter table sections add column if not exists chord_progression_id uuid;
+alter table sections
+  add constraint sections_chord_progression_id_fkey
+  foreign key (chord_progression_id) references chord_progressions(id) on delete set null;
+
+-- ─── note_links ─────────────────────────────────────────────────────────────────
+-- Generic, extensible connection between two notes. Only 'main-thread' exists
+-- today (marks which notes make up the clean-view lyric, and their order) —
+-- widen the check constraint to add new types later without touching existing rows.
+create table if not exists note_links (
+  id              uuid primary key default gen_random_uuid(),
+  song_id         uuid not null references songs(id) on delete cascade,
+  source_note_id  uuid not null references sections(id) on delete cascade,
+  target_note_id  uuid not null references sections(id) on delete cascade,
+  type            text not null default 'main-thread' check (type in ('main-thread')),
+  position        integer not null default 0,
+  created_at      timestamptz not null default now()
+);
+
+create index if not exists idx_note_links_song on note_links(song_id, type, position);
+
+-- ─── RLS for the new tables ─────────────────────────────────────────────────────
+alter table chord_progressions enable row level security;
+alter table note_links         enable row level security;
+
+drop policy if exists chord_progressions_owner on chord_progressions;
+create policy chord_progressions_owner on chord_progressions
+  for all using (
+    exists (select 1 from songs s where s.id = chord_progressions.song_id and s.user_id = auth.uid())
+  ) with check (
+    exists (select 1 from songs s where s.id = chord_progressions.song_id and s.user_id = auth.uid())
+  );
+
+drop policy if exists note_links_owner on note_links;
+create policy note_links_owner on note_links
+  for all using (
+    exists (select 1 from songs s where s.id = note_links.song_id and s.user_id = auth.uid())
+  ) with check (
+    exists (select 1 from songs s where s.id = note_links.song_id and s.user_id = auth.uid())
+  );
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Phase 1 — lyric composing side panel.
+-- Variants (line_variants) and history (section_versions) already exist and
+-- are reused as-is. Only new thing needed: optional categorization on apuntes.
+-- ─────────────────────────────────────────────────────────────────────────────
+alter table annotations add column if not exists category text;
+alter table annotations drop constraint if exists annotations_category_check;
+alter table annotations
+  add constraint annotations_category_check
+  check (category is null or category in ('duda', 'idea', 'referencia'));

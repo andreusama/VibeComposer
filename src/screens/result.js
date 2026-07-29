@@ -109,7 +109,7 @@ export function attach(state) {
     });
 
     document.getElementById('btn-lyrics').addEventListener('click', () => {
-        setState({screen: state.session ? 'lyrics-editor' : 'auth'});
+        setState({screen: state.session ? 'canvas' : 'auth'});
     });
 
     const projectsBtn = document.getElementById('btn-projects');

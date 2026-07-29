@@ -6,8 +6,11 @@ export function render(state) {
   return `
     <div class="header">
       <h1>vibe composer</h1>
+      <span class="tagline">${state.activeSong ? state.activeSong.title : ''}</span>
     </div>
     <div class="muse-screen">
+
+      <a href="#" class="lyrics-standalone-link" id="btn-back-home">← projects</a>
 
       <div class="muse-step-label">01 — the muse</div>
 
@@ -46,6 +49,13 @@ export function render(state) {
 // ─── Attach ────────────────────────────────────────────────────────────────────
 
 export function attach(state) {
+  if (!state.activeSong) { setState({ screen: 'home' }); return; }
+
+  document.getElementById('btn-back-home').addEventListener('click', (e) => {
+    e.preventDefault();
+    setState({ screen: 'home' });
+  });
+
   const input    = document.getElementById('phrase-input');
   const btn      = document.getElementById('muse-continue');
   const counter  = document.getElementById('char-count');

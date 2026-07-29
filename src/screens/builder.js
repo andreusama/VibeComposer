@@ -7,7 +7,7 @@ import {
     rgbToHex,
     energyIdFromValue
 } from '../constants.js';
-import {setState} from '../state/store.js';
+import {setState, saveProjectSnapshot} from '../state/store.js';
 import {composeProgression} from '../utils/api.js';
 import {writeShareUrl} from '../utils/share.js';
 
@@ -291,8 +291,18 @@ async function handleCompose(state) {
             texture: state.texture,
             easyMode: state.easyMode,
         });
+
+        let saveError = null;
+        if (state.activeSong) {
+            const {error: updateError} = await saveProjectSnapshot({...state, progression: result, vibeLabel});
+            if (updateError) {
+                console.error('Failed to save vibe_snapshot to project:', updateError);
+                saveError = `Composed, but couldn't save to the project: ${updateError.message}`;
+            }
+        }
+
         writeShareUrl({progression: result, vibeLabel, phrase: state.phrase, place: state.place, rgb: state.rgb});
-        setState({progression: result, vibeLabel, screen: 'result'});
+        setState({progression: result, vibeLabel, screen: 'result', projectError: saveError});
     } catch (e) {
         const msg = e.message === 'LIMIT_REACHED'
             ? "You've reached today's 5 free composes. Come back tomorrow."

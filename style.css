@@ -1832,3 +1832,439 @@ body::before {
     margin-bottom: 14px;
     min-height: 16px;
 }
+
+/* ─── Generic utility ────────────────────────────────────────────────────────── */
+.hidden { display: none !important; }
+
+/* ─── Lyrics editor: standalone entry link (muse screen) ─────────────────────── */
+.lyrics-standalone-link {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 1px;
+    color: rgba(255, 255, 255, 0.3);
+    text-decoration: none;
+    margin-bottom: 24px;
+    transition: color 0.2s;
+}
+
+.lyrics-standalone-link:hover {
+    color: rgba(255, 255, 255, 0.7);
+}
+
+/* ─── Lyrics home (song list) ────────────────────────────────────────────────── */
+.lyrics-home-top {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 24px;
+}
+
+.lyrics-song-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.lyrics-song-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    width: 100%;
+    padding: 16px 20px;
+    border-radius: var(--radius-sm);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.03);
+    transition: all 0.2s;
+    flex-wrap: wrap;
+}
+
+.lyrics-song-row:hover {
+    border-color: rgba(255, 255, 255, 0.3);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.lyrics-song-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 160px;
+}
+
+.lyrics-song-title {
+    font-family: var(--font-display);
+    font-size: 20px;
+    color: #e8e0d0;
+}
+
+.lyrics-song-chip {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.35);
+    letter-spacing: 0.5px;
+}
+
+.lyrics-song-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.lyrics-song-date {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.3);
+    white-space: nowrap;
+}
+
+/* ─── Lyrics editor: toolbar ──────────────────────────────────────────────────── */
+.lyrics-editor-wrap {
+    padding: 32px;
+    position: relative;
+}
+
+.lyrics-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 28px;
+    flex-wrap: wrap;
+}
+
+.lyrics-title-input {
+    font-family: var(--font-display);
+    font-size: 28px;
+    color: #e8e0d0;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid rgba(255, 255, 255, 0.15);
+    padding: 4px 0;
+    outline: none;
+    min-width: 200px;
+    flex: 1;
+}
+
+.lyrics-title-input:focus {
+    border-bottom-color: rgba(255, 255, 255, 0.5);
+}
+
+.lyrics-toolbar-right {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.lyrics-toolbar-btn {
+    padding: 8px 14px;
+    border-radius: var(--radius-pill);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.5);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.lyrics-toolbar-btn:hover {
+    border-color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.lyrics-toolbar-btn.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+/* ─── Lyrics editor: sections ─────────────────────────────────────────────────── */
+.lyrics-sections {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+.lyrics-section {
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-left: 3px solid rgba(255, 255, 255, 0.2);
+    border-radius: var(--radius-md);
+    background: rgba(255, 255, 255, 0.02);
+    padding: 14px 16px;
+}
+
+.lyrics-section-pre-chorus { border-left-color: rgba(90, 196, 154, 0.5); }
+.lyrics-section-chorus     { border-left-color: rgba(245, 200, 66, 0.5); }
+.lyrics-section-bridge     { border-left-color: rgba(192, 128, 224, 0.5); }
+.lyrics-section-outro      { border-left-color: rgba(120, 150, 190, 0.5); }
+.lyrics-section-custom     { border-left-color: var(--accent); }
+
+.lyrics-section-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.lyrics-drag-handle {
+    cursor: grab;
+    color: rgba(255, 255, 255, 0.25);
+    font-size: 14px;
+    user-select: none;
+}
+
+.lyrics-drag-handle:active { cursor: grabbing; }
+
+.lyrics-section-type {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: var(--radius-sm);
+    color: rgba(255, 255, 255, 0.7);
+    padding: 4px 8px;
+}
+
+.lyrics-custom-label {
+    font-family: var(--font-body);
+    font-size: 13px;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+    color: #e8e0d0;
+    padding: 2px 4px;
+    outline: none;
+    flex: 1;
+    max-width: 200px;
+}
+
+.lyrics-delete-section {
+    margin-left: auto;
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.25);
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.lyrics-delete-section:hover { color: #cc4444; }
+
+/* ─── Lyrics editor: lines ────────────────────────────────────────────────────── */
+.lyrics-lines {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 10px;
+}
+
+.lyrics-line {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: var(--radius-sm);
+    transition: background 0.15s;
+}
+
+.lyrics-line:hover { background: rgba(255, 255, 255, 0.03); }
+
+.lyrics-line-main {
+    flex: 1;
+    min-width: 0;
+}
+
+.lyrics-line-text {
+    width: 100%;
+    resize: none;
+    overflow: hidden;
+    background: transparent;
+    border: none;
+    outline: none;
+    font-family: var(--font-body);
+    font-size: 17px;
+    line-height: 1.6;
+    color: #e8e0d0;
+    padding: 4px 2px;
+}
+
+.lyrics-line-meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.25);
+    letter-spacing: 0.5px;
+    margin-top: 2px;
+}
+
+.lyrics-syllable-count { white-space: nowrap; }
+
+.lyrics-status-pill,
+.lyrics-variant-toggle,
+.lyrics-annotation-toggle,
+.lyrics-delete-line {
+    background: none;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: var(--radius-pill);
+    color: rgba(255, 255, 255, 0.4);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.5px;
+    padding: 2px 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.lyrics-delete-line {
+    border: none;
+    padding: 2px 4px;
+}
+
+.lyrics-delete-line:hover { color: #cc4444; }
+
+.lyrics-status-unresolved { border-color: rgba(204, 68, 68, 0.4);  color: #d47070; }
+.lyrics-status-provisional { border-color: rgba(212, 160, 32, 0.4); color: #d4a860; }
+.lyrics-status-closed      { border-color: rgba(74, 139, 74, 0.4);  color: #6ab06a; }
+
+.lyrics-variant-toggle:hover,
+.lyrics-annotation-toggle:hover {
+    border-color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.85);
+}
+
+/* ─── Lyrics editor: variants + annotations panels ────────────────────────────── */
+.lyrics-variants-panel,
+.lyrics-annotations-panel {
+    margin: 8px 0 4px 24px;
+    padding: 10px 14px;
+    border-radius: var(--radius-sm);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.03);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.lyrics-variant-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: var(--font-body);
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.lyrics-variant-text { flex: 1; }
+
+.lyrics-variant-use,
+.lyrics-variant-save {
+    background: none;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    padding: 3px 10px;
+    cursor: pointer;
+}
+
+.lyrics-variant-delete,
+.lyrics-annotation-delete {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.25);
+    cursor: pointer;
+}
+
+.lyrics-variant-delete:hover,
+.lyrics-annotation-delete:hover { color: #cc4444; }
+
+.lyrics-variant-add,
+.lyrics-annotation-add {
+    display: flex;
+    gap: 8px;
+}
+
+.lyrics-variant-input,
+.lyrics-annotation-input {
+    flex: 1;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: var(--radius-sm);
+    color: #e8e0d0;
+    font-family: var(--font-body);
+    font-size: 14px;
+    padding: 6px 10px;
+    outline: none;
+}
+
+.lyrics-annotation-row {
+    padding: 8px 10px;
+    border-radius: var(--radius-sm);
+    background: rgba(255, 255, 255, 0.03);
+    font-size: 13px;
+}
+
+.lyrics-annotation-row.resolved { opacity: 0.4; }
+
+.lyrics-annotation-anchor {
+    font-family: var(--font-body);
+    font-style: italic;
+    color: rgba(255, 255, 255, 0.4);
+    margin-bottom: 4px;
+}
+
+.lyrics-annotation-body {
+    font-family: var(--font-body);
+    color: #e8e0d0;
+    margin-bottom: 6px;
+}
+
+.lyrics-annotation-actions {
+    display: flex;
+    gap: 12px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+}
+
+.lyrics-annotation-actions button {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.4);
+    cursor: pointer;
+}
+
+.lyrics-annotation-actions button:hover { color: rgba(255, 255, 255, 0.8); }
+
+.lyrics-annotation-hint {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.3);
+    font-style: italic;
+}
+
+.lyrics-add-line { margin-left: 24px; padding: 6px 14px; font-size: 11px; }
+.lyrics-add-section { margin-top: 4px; }
+
+/* ─── Lyrics editor: clean view ───────────────────────────────────────────────── */
+.lyrics-clean .lyrics-drag-handle,
+.lyrics-clean .lyrics-line-meta,
+.lyrics-clean .lyrics-variants-panel,
+.lyrics-clean .lyrics-annotations-panel,
+.lyrics-clean .lyrics-delete-section,
+.lyrics-clean .lyrics-add-line,
+.lyrics-clean .lyrics-section-type,
+.lyrics-clean .lyrics-custom-label {
+    display: none;
+}
+
+.lyrics-clean .lyrics-line-text {
+    font-size: 19px;
+    cursor: default;
+}
+
+.lyrics-clean + .lyrics-add-section { display: none; }

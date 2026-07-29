@@ -1,4 +1,4 @@
-import {setState, reset} from '../state/store.js';
+import {setState, reset, saveProjectSnapshot} from '../state/store.js';
 import {copyCurrentUrl} from '../utils/share.js';
 import {paletteFromRgb, energyIdFromValue} from '../constants.js';
 import {playProgression} from '../audio/player.js';
@@ -18,6 +18,8 @@ export function render(state) {
       <span class="tagline">ukulele · 4/4</span>
     </div>
     <div class="body">
+
+      ${state.projectError ? `<div class="error-banner">${state.projectError}</div>` : ''}
 
       <!-- ── The Artifact Card ── -->
       <div class="artifact-card" id="artifact-card">
@@ -76,8 +78,11 @@ export function render(state) {
       <div class="action-row" style="margin-top:20px">
         <button class="ghost-btn" id="btn-play-prog">▶ play all</button>
         <button class="ghost-btn" id="btn-studio">🎹 open studio</button>
+        <button class="ghost-btn" id="btn-lyrics">📝 write lyrics</button>
         <button class="ghost-btn" id="btn-reset">← new vibe</button>
         <button class="ghost-btn" id="btn-share">share progression</button>
+        ${state.activeSong ? '<button class="ghost-btn" id="btn-save-project">💾 save to project</button>' : ''}
+        ${state.session ? '<button class="ghost-btn" id="btn-projects">← projects</button>' : ''}
       </div>
 
     </div>
@@ -103,11 +108,39 @@ export function attach(state) {
         setState({screen: 'studio'});
     });
 
+    document.getElementById('btn-lyrics').addEventListener('click', () => {
+        setState({screen: state.session ? 'lyrics-editor' : 'auth'});
+    });
+
+    const projectsBtn = document.getElementById('btn-projects');
+    if (projectsBtn) {
+        projectsBtn.addEventListener('click', () => setState({screen: 'home'}));
+    }
+
     document.getElementById('btn-play-prog').addEventListener('click', () => {
         playProgression(state.progression.progression, energyId);
     });
 
     document.getElementById('btn-reset').addEventListener('click', () => reset());
+
+    const saveBtn = document.getElementById('btn-save-project');
+    if (saveBtn) {
+        saveBtn.addEventListener('click', async () => {
+            saveBtn.textContent = 'saving…';
+            const {error} = await saveProjectSnapshot(state);
+            if (error) {
+                setState({projectError: `Couldn't save: ${error.message}`});
+                saveBtn.textContent = '💾 save to project';
+                return;
+            }
+            saveBtn.textContent = 'saved ✓';
+            saveBtn.classList.add('success');
+            setTimeout(() => {
+                saveBtn.textContent = '💾 save to project';
+                saveBtn.classList.remove('success');
+            }, 2000);
+        });
+    }
 
     document.getElementById('btn-share').addEventListener('click', async () => {
         const btn = document.getElementById('btn-share');

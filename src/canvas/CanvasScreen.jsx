@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   ReactFlow, Background, Controls, addEdge,
   applyNodeChanges, applyEdgeChanges, ReactFlowProvider,
@@ -6,15 +6,17 @@ import {
 import '@xyflow/react/dist/style.css';
 import TextNoteNode from './TextNoteNode.jsx';
 import ChordProgressionNode from './ChordProgressionNode.jsx';
+import OutputNode from './OutputNode.jsx';
 import NoteSidePanel from './NoteSidePanel.jsx';
 import {
   loadCanvasData, createNote, createChordProgression,
   saveNotePosition, saveProgressionPosition,
   createMainThreadLink, deleteNoteLink, assignProgressionToNote,
   deleteNote, deleteChordProgression,
+  ensureOutputNode, saveOutputPosition, setOutputPluggedNote,
 } from './canvasData.js';
 
-const NODE_TYPES = { textNote: TextNoteNode, chordProgression: ChordProgressionNode };
+const NODE_TYPES = { textNote: TextNoteNode, chordProgression: ChordProgressionNode, outputNode: OutputNode };
 
 // React Flow needs a concrete numeric width/height for every node up front —
 // leaving height undefined (canvas_height has no DB default, unlike
@@ -23,6 +25,8 @@ const NODE_TYPES = { textNote: TextNoteNode, chordProgression: ChordProgressionN
 // edges/handles floating at the wrong spot relative to the note.
 const DEFAULT_NOTE_HEIGHT = 160;
 const DEFAULT_PROGRESSION_HEIGHT = 220;
+const DEFAULT_OUTPUT_WIDTH = 320;
+const DEFAULT_OUTPUT_HEIGHT = 240;
 
 function noteToFlowNode(note, callbacks) {
   return {
@@ -43,6 +47,35 @@ function progressionToFlowNode(cp, onDeleted) {
     width: cp.canvas_width || 260,
     height: cp.canvas_height || DEFAULT_PROGRESSION_HEIGHT,
     data: { progression: cp, onDeleted },
+  };
+}
+
+// Created once per song, never by the user — no onDeleted callback exists
+// for it, and deletable:false keeps React Flow from ever handing it to
+// onNodesDelete via the selection + Backspace/Delete gesture either.
+function outputToFlowNode(output) {
+  return {
+    id: output.id,
+    type: 'outputNode',
+    position: { x: output.canvas_x || 0, y: output.canvas_y || 0 },
+    width: output.canvas_width || DEFAULT_OUTPUT_WIDTH,
+    height: output.canvas_height || DEFAULT_OUTPUT_HEIGHT,
+    deletable: false,
+    data: { output },
+  };
+}
+
+function outputPlugEdge(output) {
+  if (!output.plugged_note_id) return null;
+  return {
+    id: `output-plug-${output.id}`,
+    source: output.plugged_note_id,
+    target: output.id,
+    sourceHandle: 'right',
+    targetHandle: 'output-in',
+    type: 'default',
+    style: { stroke: '#1D1C1A', strokeWidth: 1.5, opacity: 0.5 },
+    data: { kind: 'output' },
   };
 }
 
@@ -133,9 +166,13 @@ export default function CanvasScreen({ state, onExit }) {
     if (!song) { onExit(); return; }
     let cancelled = false;
     (async () => {
-      const { notes, progressions, links, error } = await loadCanvasData(song.id);
+      const [{ notes, progressions, links, error }, { output, error: outputError }] = await Promise.all([
+        loadCanvasData(song.id),
+        ensureOutputNode(song.id),
+      ]);
       if (cancelled) return;
       if (error) { setLoadError(error.message); setLoading(false); return; }
+      if (outputError) { setLoadError(outputError.message); setLoading(false); return; }
       const progressionsById = Object.fromEntries(progressions.map((p) => [p.id, p]));
       setNodes([
         ...notes.map((n) => noteToFlowNode(n, {
@@ -143,8 +180,10 @@ export default function CanvasScreen({ state, onExit }) {
           chordSummary: summarizeProgression(progressionsById[n.chord_progression_id]),
         })),
         ...progressions.map((p) => progressionToFlowNode(p, handleNodeDeleted)),
+        outputToFlowNode(output),
       ]);
-      setEdges([...mainThreadEdges(links), ...assignmentEdges(notes)]);
+      const plugEdge = outputPlugEdge(output);
+      setEdges([...mainThreadEdges(links), ...assignmentEdges(notes), ...(plugEdge ? [plugEdge] : [])]);
       setLoading(false);
     })();
     return () => { cancelled = true; };
@@ -158,6 +197,7 @@ export default function CanvasScreen({ state, onExit }) {
   const onNodeDragStop = useCallback((_evt, node) => {
     if (node.type === 'textNote') saveNotePosition(node.id, node.position, node.width, node.height);
     else if (node.type === 'chordProgression') saveProgressionPosition(node.id, node.position, node.width, node.height);
+    else if (node.type === 'outputNode') saveOutputPosition(node.id, node.position, node.width, node.height);
   }, []);
 
   // One connect gesture, two meanings depending on what's being connected:
@@ -201,6 +241,24 @@ export default function CanvasScreen({ state, onExit }) {
         }, eds));
       }
 
+      // Only one note can be plugged into the output at a time — a fresh
+      // connection replaces whichever plug edge existed before, same pattern
+      // as re-assigning a chord progression to a note.
+      if (sourceNode.type === 'textNote' && targetNode.type === 'outputNode') {
+        setOutputPluggedNote(targetNode.id, sourceNode.id);
+        setEdges((eds) => [
+          ...eds.filter((e) => e.data?.kind !== 'output'),
+          {
+            id: `output-plug-${targetNode.id}`, source: sourceNode.id, target: targetNode.id,
+            sourceHandle: 'right', targetHandle: 'output-in',
+            type: 'default', style: { stroke: '#1D1C1A', strokeWidth: 1.5, opacity: 0.5 }, data: { kind: 'output' },
+          },
+        ]);
+        return nds.map((n) => n.id === targetNode.id
+          ? { ...n, data: { ...n.data, output: { ...n.data.output, plugged_note_id: sourceNode.id } } }
+          : n);
+      }
+
       return nds;
     });
   }, [song?.id]);
@@ -226,6 +284,11 @@ export default function CanvasScreen({ state, onExit }) {
         setNodes((nds) => nds.map((n) => n.id === edge.target
           ? { ...n, data: { ...n.data, note: { ...n.data.note, chord_progression_id: null }, chordSummary: null } }
           : n));
+      } else if (edge.data?.kind === 'output') {
+        setOutputPluggedNote(edge.target, null);
+        setNodes((nds) => nds.map((n) => n.id === edge.target
+          ? { ...n, data: { ...n.data, output: { ...n.data.output, plugged_note_id: null } } }
+          : n));
       }
     });
   }, []);
@@ -241,6 +304,23 @@ export default function CanvasScreen({ state, onExit }) {
     if (error) { setLoadError(error.message); return; }
     setNodes((nds) => [...nds, progressionToFlowNode(cp, handleNodeDeleted)]);
   }, [song?.id, handleNodeDeleted]);
+
+  // The output node doesn't own its own content — it renders whatever the
+  // rest of the graph currently looks like, so its inputs are recomputed
+  // fresh every render (cheap) instead of being written into node state
+  // every time any unrelated note/link changes.
+  const renderNodes = useMemo(() => {
+    const textNotes = nodes.filter((n) => n.type === 'textNote').map((n) => n.data.note);
+    const mainThreadLinks = edges
+      .filter((e) => e.data?.kind === 'main-thread')
+      .map((e) => ({ source_note_id: e.source, target_note_id: e.target }));
+    const progressionsById = Object.fromEntries(
+      nodes.filter((n) => n.type === 'chordProgression').map((n) => [n.id, n.data.progression])
+    );
+    return nodes.map((n) => (n.type === 'outputNode'
+      ? { ...n, data: { ...n.data, notes: textNotes, links: mainThreadLinks, progressionsById } }
+      : n));
+  }, [nodes, edges]);
 
   if (!song) return null;
 
@@ -263,7 +343,7 @@ export default function CanvasScreen({ state, onExit }) {
       ) : (
         <ReactFlowProvider>
           <ReactFlow
-            nodes={nodes}
+            nodes={renderNodes}
             edges={edges}
             nodeTypes={NODE_TYPES}
             onNodesChange={onNodesChange}

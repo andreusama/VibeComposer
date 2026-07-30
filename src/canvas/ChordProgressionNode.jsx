@@ -4,21 +4,46 @@ import { fretboardSVG } from '../components/fretboard.js';
 import { playChord, playProgression } from '../audio/player.js';
 import { saveProgressionContent, saveProgressionPosition, deleteChordProgression } from './canvasData.js';
 
-const EMPTY_CHORD = () => ({ chord: '', function: '', feel: '', ukulele: [0, 0, 0, 0] });
+const EMPTY_CHORD = () => ({ chord: '', function: '', feel: '', beats: 4, ukulele: [0, 0, 0, 0] });
 const STRING_LABELS = ['G', 'C', 'E', 'A'];
 const HANDLE_STYLE = { width: 10, height: 10, background: '#4552D6', border: '2px solid #fff' };
 
-export default function ChordProgressionNode({ id, data, selected }) {
+// Below this width the node renders as a compact, read-only summary (chip
+// chain of chord names); at or above it, the full per-chord editor renders.
+// Crossing the line is driven entirely by the existing NodeResizer drag
+// handle — there's no separate collapse/expand control, matching how a real
+// index card works: small on the shelf, opened out on the desk.
+const EXPANDED_MIN_WIDTH = 400;
+
+const WAVEFORM_HEIGHTS = [8, 13, 18, 11, 22, 15, 9, 19, 16, 8, 13, 21, 11, 18, 15, 9, 22, 13, 8, 16];
+
+// The composer already tags every chord with a roman-numeral function
+// (I, vi, IV...) — lowercase means minor, uppercase means major/dominant,
+// standard notation. No new data needed, just read the case.
+function chordQuality(fn) {
+  if (!fn) return '';
+  return /^[a-z]/.test(fn) ? 'minor' : 'major';
+}
+
+export default function ChordProgressionNode({ id, data, selected, width }) {
   const { progression: cp, onDeleted } = data;
   const [title, setTitle] = useState(cp.title);
   const [key, setKey] = useState(cp.key || '');
   const [chords, setChords] = useState(cp.progression?.length ? cp.progression : [EMPTY_CHORD()]);
   const saveTimer = useRef(null);
+  const dragIndexRef = useRef(null);
+
+  const isExpanded = (width ?? cp.canvas_width ?? 260) >= EXPANDED_MIN_WIDTH;
 
   const scheduleSave = useCallback((nextTitle, nextKey, nextChords) => {
     clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      saveProgressionContent(id, { title: nextTitle, key: nextKey, progression: nextChords });
+    saveTimer.current = setTimeout(async () => {
+      const { error } = await saveProgressionContent(id, { title: nextTitle, key: nextKey, progression: nextChords });
+      // This save has no error UI of its own (unlike the note panel) — without
+      // at least a console log, a rejected write (stale session, RLS edge
+      // case) fails completely silently and the next reload just looks like
+      // the typed edits never happened.
+      if (error) console.error('chord progression save failed:', error);
     }, 500);
   }, [id]);
 
@@ -29,10 +54,20 @@ export default function ChordProgressionNode({ id, data, selected }) {
   };
 
   const updateFret = (idx, stringIdx, value) => {
-    const fret = value === '' ? 0 : Number(value);
+    // -1 is the only valid "below zero" fret — it's the muted-string sentinel
+    // fretboardSVG understands. Anything lower than that has no meaning and
+    // was rendering a dot above the nut, outside the diagram entirely.
+    const fret = value === '' ? 0 : Math.max(-1, Number(value) || 0);
     const next = chords.map((c, i) =>
       i === idx ? { ...c, ukulele: c.ukulele.map((f, si) => (si === stringIdx ? fret : f)) } : c
     );
+    setChords(next);
+    scheduleSave(title, key, next);
+  };
+
+  const updateBeats = (idx, value) => {
+    const beats = Math.max(1, Number(value) || 1);
+    const next = chords.map((c, i) => (i === idx ? { ...c, beats } : c));
     setChords(next);
     scheduleSave(title, key, next);
   };
@@ -71,66 +106,147 @@ export default function ChordProgressionNode({ id, data, selected }) {
     if (ch.chord.trim()) playChord(ch.ukulele, 'medium');
   };
 
+  const handleDragStart = (idx) => (e) => {
+    dragIndexRef.current = idx;
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e) => e.preventDefault();
+
+  const handleDrop = (idx) => (e) => {
+    e.preventDefault();
+    const from = dragIndexRef.current;
+    dragIndexRef.current = null;
+    if (from === null || from === idx) return;
+    const next = [...chords];
+    const [moved] = next.splice(from, 1);
+    next.splice(idx, 0, moved);
+    setChords(next);
+    scheduleSave(title, key, next);
+  };
+
   return (
-    <div className={`canvas-cp${selected ? ' selected' : ''}`}>
-      <NodeResizer minWidth={240} minHeight={180} isVisible={selected} onResizeEnd={handleResizeEnd} />
+    <div className={`canvas-cp${selected ? ' selected' : ''} ${isExpanded ? 'cp-expanded' : 'cp-collapsed'}`}>
+      <NodeResizer minWidth={220} minHeight={140} isVisible={selected} onResizeEnd={handleResizeEnd} />
       {/* Single dedicated output — this is the only handle a chord-progression
           node has, and it only makes sense plugged into a text note's "chord"
           handle. No left/right main-thread-style handles here on purpose. */}
       <Handle type="source" position={Position.Right} id="assign" style={HANDLE_STYLE} title="drag to a note's chord plug" />
 
-      <div className="canvas-cp-head">
-        <input
-          className="canvas-cp-title nodrag"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          onBlur={commitMeta}
-        />
-        <input
-          className="canvas-cp-key nodrag"
-          value={key}
-          placeholder="key"
-          onChange={(e) => setKey(e.target.value)}
-          onBlur={commitMeta}
-        />
-        <button className="canvas-cp-delete nodrag" onClick={handleDelete} title="delete progression">✕</button>
-      </div>
+      {isExpanded ? (
+        <>
+          <div className="cp-head">
+            <div className="cp-head-left">
+              <input
+                className="cp-title nodrag"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                onBlur={commitMeta}
+              />
+              <input
+                className="cp-key-badge nodrag"
+                value={key}
+                placeholder="key"
+                onChange={(e) => setKey(e.target.value)}
+                onBlur={commitMeta}
+              />
+            </div>
+            <button className="cp-icon-btn nodrag" onClick={handleDelete} title="delete progression">✕</button>
+          </div>
 
-      <div className="canvas-cp-chords nodrag nowheel">
-        {chords.map((ch, i) => (
-          <div className="canvas-cp-chord-row" key={i}>
-            <input
-              className="canvas-cp-chord-name"
-              value={ch.chord}
-              placeholder="Am"
-              onChange={(e) => updateChordName(i, e.target.value)}
-              onBlur={commitMeta}
-            />
-            <div className="canvas-cp-frets">
-              {STRING_LABELS.map((label, si) => (
-                <input
-                  key={label}
-                  className="canvas-cp-fret"
-                  type="number"
-                  title={`${label} string (fret, -1 = muted)`}
-                  value={ch.ukulele[si]}
-                  onChange={(e) => updateFret(i, si, e.target.value)}
-                  onBlur={commitMeta}
+          <div className="cp-rows nodrag nowheel">
+            {chords.map((ch, i) => (
+              <div
+                className="cp-row"
+                key={i}
+                onDragOver={handleDragOver}
+                onDrop={handleDrop(i)}
+              >
+                {/* draggable lives on the handle alone — making the whole row a
+                    native drag source made the browser swallow ordinary clicks
+                    on the buttons/inputs inside it (a click that moves the
+                    mouse even a pixel or two reads as "drag start" instead). */}
+                <div
+                  className="cp-drag-handle"
+                  draggable
+                  onDragStart={handleDragStart(i)}
+                  title="drag to reorder"
+                >
+                  <span /><span /><span /><span /><span /><span />
+                </div>
+                <div className="cp-index">{String(i + 1).padStart(2, '0')}</div>
+                <div className="cp-chord-block">
+                  <input
+                    className="cp-chord-name"
+                    value={ch.chord}
+                    placeholder="Am"
+                    onChange={(e) => updateChordName(i, e.target.value)}
+                    onBlur={commitMeta}
+                  />
+                  {ch.function && <div className="cp-chord-sub">{ch.function} · {chordQuality(ch.function)}</div>}
+                </div>
+                <div className="cp-frets nodrag">
+                  {STRING_LABELS.map((label, si) => (
+                    <input
+                      key={label}
+                      className="cp-fret"
+                      type="number"
+                      min="-1"
+                      title={`${label} string (fret, -1 = muted)`}
+                      value={ch.ukulele[si]}
+                      onChange={(e) => updateFret(i, si, e.target.value)}
+                      onBlur={commitMeta}
+                    />
+                  ))}
+                </div>
+                <div
+                  className="cp-diagram"
+                  dangerouslySetInnerHTML={{ __html: fretboardSVG(ch.ukulele, '#4552D6') }}
                 />
+                <div className="cp-row-right">
+                  <input
+                    className="cp-beats-pill"
+                    type="number"
+                    min="1"
+                    title="beats"
+                    value={ch.beats ?? 4}
+                    onChange={(e) => updateBeats(i, e.target.value)}
+                    onBlur={commitMeta}
+                  />
+                  <button className="cp-play-chord" onClick={() => handlePlayOne(ch)} title="play chord">▶</button>
+                  <button className="cp-remove-chord" onClick={() => removeChord(i)} title="remove chord">✕</button>
+                </div>
+              </div>
+            ))}
+            <button className="cp-add-chord nodrag" onClick={addChord}>+ chord</button>
+          </div>
+
+          <div className="cp-transport">
+            <button className="cp-transport-play nodrag" onClick={handlePlayAll} title="play progression">▶</button>
+            <div className="cp-waveform">
+              {WAVEFORM_HEIGHTS.map((h, i) => (
+                <span key={i} className="cp-waveform-bar" style={{ height: `${h}px` }} />
               ))}
             </div>
-            <div
-              className="canvas-cp-fretboard-mini"
-              dangerouslySetInnerHTML={{ __html: fretboardSVG(ch.ukulele, '#4552D6') }}
-            />
-            <button className="canvas-cp-chord-play" onClick={() => handlePlayOne(ch)} title="play chord">▶</button>
-            <button className="canvas-cp-chord-remove" onClick={() => removeChord(i)} title="remove chord">✕</button>
           </div>
-        ))}
-        <button className="canvas-cp-add nodrag" onClick={addChord}>+ chord</button>
-      </div>
-
-      <button className="canvas-cp-play-all nodrag" onClick={handlePlayAll}>▶ play progression</button>
+        </>
+      ) : (
+        <>
+          <div className="cp-collapsed-head">
+            <span className="cp-collapsed-title">{title || 'untitled'}</span>
+            {key && <span className="cp-key-badge cp-key-badge-sm">{key}</span>}
+          </div>
+          <div className="cp-chip-row nodrag nowheel">
+            {chords.map((ch, i) => (
+              <span className="cp-chip" key={i}>{ch.chord || '–'}</span>
+            ))}
+          </div>
+          <div className="cp-collapsed-foot">
+            <span>{chords.length} chord{chords.length === 1 ? '' : 's'}</span>
+            <span className="cp-collapsed-dot" title="chord progression" />
+          </div>
+        </>
+      )}
     </div>
   );
 }

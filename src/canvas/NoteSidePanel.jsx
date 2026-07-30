@@ -125,108 +125,116 @@ export default function NoteSidePanel({ note, userId, allNoteTexts, onClose, onT
       ) : (
         <div className="note-panel-body">
 
-          <section className="note-panel-section">
-            <h4>Variantes</h4>
-            {variants.length === 0 && <p className="note-panel-empty">no alternates yet</p>}
-            {variants.map((v) => (
-              <div className="note-variant-row" key={v.id}>
-                <textarea
-                  className="note-variant-text"
-                  value={v.text}
-                  onChange={(e) => handleVariantTextChange(v.id, e.target.value)}
-                  onBlur={() => handleVariantBlur(v)}
-                />
-                <div className="note-variant-actions">
-                  <button onClick={() => handlePromote(v)} title="make this the active text">use ⇧</button>
-                  <button onClick={() => handleDeleteVariant(v.id)} title="delete variant">✕</button>
-                </div>
-              </div>
-            ))}
-            <div className="note-panel-add-row">
-              <input
-                value={newVariant}
-                placeholder="alternate wording…"
-                onChange={(e) => setNewVariant(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleAddVariant()}
-              />
-              <button onClick={handleAddVariant}>+ add</button>
-            </div>
-          </section>
-
-          <section className="note-panel-section">
-            <h4>Apuntes</h4>
-            {annotations.length === 0 && <p className="note-panel-empty">no notes yet</p>}
-            {annotations.map((a) => (
-              <div className={`note-annotation-row${a.resolved ? ' resolved' : ''}`} key={a.id}>
-                <span className={`note-annotation-dot${a.category ? ` ${a.category}` : ''}`} />
-                <div className="note-annotation-main">
-                  {a.category && <span className="note-annotation-category">{CATEGORY_LABELS[a.category]}</span>}
-                  <p className="note-annotation-body">{a.body}</p>
-                  <div className="note-annotation-actions">
-                    <button onClick={() => handleToggleResolved(a)}>{a.resolved ? 'reopen' : 'resolve'}</button>
-                    <button onClick={() => handleDeleteAnnotation(a.id)}>✕</button>
+          <div className="note-group">
+            <h4 className="note-group-label">Variantes</h4>
+            <div className="note-group-card">
+              {variants.length === 0 && <p className="note-panel-empty">no alternates yet</p>}
+              {variants.map((v) => (
+                <div className="note-variant-row" key={v.id}>
+                  <textarea
+                    className="note-variant-text"
+                    value={v.text}
+                    onChange={(e) => handleVariantTextChange(v.id, e.target.value)}
+                    onBlur={() => handleVariantBlur(v)}
+                  />
+                  <div className="note-variant-actions">
+                    <button onClick={() => handlePromote(v)} title="make this the active text">use ⇧</button>
+                    <button onClick={() => handleDeleteVariant(v.id)} title="delete variant">✕</button>
                   </div>
                 </div>
-              </div>
-            ))}
-            <div className="note-panel-add-col">
-              <textarea
-                className="note-annotation-input"
-                value={newNote}
-                placeholder="a doubt, an idea, a reference…"
-                onChange={(e) => setNewNote(e.target.value)}
-              />
+              ))}
               <div className="note-panel-add-row">
-                <select value={newNoteCategory} onChange={(e) => setNewNoteCategory(e.target.value)}>
-                  <option value="">no category</option>
-                  <option value="duda">duda</option>
-                  <option value="idea">idea</option>
-                  <option value="referencia">referencia</option>
-                </select>
-                <button onClick={handleAddAnnotation}>+ add</button>
+                <input
+                  value={newVariant}
+                  placeholder="alternate wording…"
+                  onChange={(e) => setNewVariant(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleAddVariant()}
+                />
+                <button onClick={handleAddVariant}>+ add</button>
               </div>
             </div>
-          </section>
+          </div>
 
-          <section className="note-panel-section">
-            <h4>Historial</h4>
-            {history.length === 0 && <p className="note-panel-empty">no previous versions</p>}
-            {history.map((v) => (
-              <div className="note-history-row" key={v.id}>
-                <p className="note-history-text">{v.snapshot?.[0]?.text}</p>
-                <div className="note-history-meta">
-                  <span>{new Date(v.created_at).toLocaleString()}</span>
-                  <div className="note-history-buttons">
-                    <button onClick={() => handleRestore(v)}>restore</button>
-                    <button className="note-history-delete" onClick={() => handleDeleteHistory(v.id)}>delete</button>
+          <div className="note-group">
+            <h4 className="note-group-label">Apuntes</h4>
+            <div className="note-group-card">
+              {annotations.length === 0 && <p className="note-panel-empty">no notes yet</p>}
+              {annotations.map((a) => (
+                <div className={`note-annotation-row${a.resolved ? ' resolved' : ''}`} key={a.id}>
+                  <span className={`note-annotation-dot${a.category ? ` ${a.category}` : ''}`} />
+                  <div className="note-annotation-main">
+                    {a.category && <span className="note-annotation-category">{CATEGORY_LABELS[a.category]}</span>}
+                    <p className="note-annotation-body">{a.body}</p>
+                    <div className="note-annotation-actions">
+                      <button onClick={() => handleToggleResolved(a)}>{a.resolved ? 'reopen' : 'resolve'}</button>
+                      <button onClick={() => handleDeleteAnnotation(a.id)}>✕</button>
+                    </div>
                   </div>
                 </div>
+              ))}
+              <div className="note-panel-add-col">
+                <textarea
+                  className="note-annotation-input"
+                  value={newNote}
+                  placeholder="a doubt, an idea, a reference…"
+                  onChange={(e) => setNewNote(e.target.value)}
+                />
+                <div className="note-panel-add-row">
+                  <select value={newNoteCategory} onChange={(e) => setNewNoteCategory(e.target.value)}>
+                    <option value="">no category</option>
+                    <option value="duda">duda</option>
+                    <option value="idea">idea</option>
+                    <option value="referencia">referencia</option>
+                  </select>
+                  <button onClick={handleAddAnnotation}>+ add</button>
+                </div>
               </div>
-            ))}
-          </section>
-
-          <section className="note-panel-section">
-            <h4>Herramientas</h4>
-            <div className="note-tool-row">
-              <span className="note-syllable-count">{syllables} syllables</span>
-              <select value={lang} onChange={(e) => setLang(e.target.value)}>
-                <option value="es">ES</option>
-                <option value="ca">CA</option>
-              </select>
             </div>
-            <button className="note-check-repeats-btn" onClick={handleCheckRepeats}>revisar repeticiones</button>
-            {repeatResults && (
-              repeatResults.length === 0 ? (
-                <p className="note-panel-empty">no repeats found across the lyric</p>
-              ) : (
-                <ul className="note-repeats-list">
-                  {repeatResults.map((r) => (
-                    <li key={r.word}><strong>{r.word}</strong> × {r.count}</li>
-                  ))}
-                </ul>
-              )
-            )}
-          </section>
+          </div>
+
+          <div className="note-group">
+            <h4 className="note-group-label">Historial</h4>
+            <div className="note-group-card">
+              {history.length === 0 && <p className="note-panel-empty">no previous versions</p>}
+              {history.map((v) => (
+                <div className="note-history-row" key={v.id}>
+                  <p className="note-history-text">{v.snapshot?.[0]?.text}</p>
+                  <div className="note-history-meta">
+                    <span>{new Date(v.created_at).toLocaleString()}</span>
+                    <div className="note-history-buttons">
+                      <button onClick={() => handleRestore(v)}>restore</button>
+                      <button className="note-history-delete" onClick={() => handleDeleteHistory(v.id)}>delete</button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="note-group">
+            <h4 className="note-group-label">Herramientas</h4>
+            <div className="note-group-card">
+              <div className="note-tool-row">
+                <span className="note-syllable-count">{syllables} syllables</span>
+                <select value={lang} onChange={(e) => setLang(e.target.value)}>
+                  <option value="es">ES</option>
+                  <option value="ca">CA</option>
+                </select>
+              </div>
+              <button className="note-check-repeats-btn" onClick={handleCheckRepeats}>revisar repeticiones</button>
+              {repeatResults && (
+                repeatResults.length === 0 ? (
+                  <p className="note-panel-empty">no repeats found across the lyric</p>
+                ) : (
+                  <ul className="note-repeats-list">
+                    {repeatResults.map((r) => (
+                      <li key={r.word}><strong>{r.word}</strong> × {r.count}</li>
+                    ))}
+                  </ul>
+                )
+              )}
+            </div>
+          </div>
 
         </div>
       )}

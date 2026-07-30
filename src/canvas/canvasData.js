@@ -119,6 +119,58 @@ export async function deleteNoteLink(id) {
   return supabase.from('note_links').delete().eq('id', id);
 }
 
+// ─── Output node ────────────────────────────────────────────────────────────
+// Exactly one per song, never created by the user and never deletable — it's
+// the sink a note plugs into to render the song's final result.
+
+export async function ensureOutputNode(songId) {
+  const { data: existing, error: fetchError } = await supabase
+    .from('song_outputs').select('*').eq('song_id', songId).maybeSingle();
+  if (fetchError) return { error: fetchError };
+  if (existing) return { output: existing };
+
+  return supabase.from('song_outputs')
+    .insert({ song_id: songId })
+    .select().single()
+    .then(({ data, error }) => (error ? { error } : { output: data }));
+}
+
+export async function saveOutputPosition(id, { x, y }, width, height) {
+  return supabase.from('song_outputs').update({
+    canvas_x: x, canvas_y: y, canvas_width: width, canvas_height: height,
+  }).eq('id', id);
+}
+
+export async function setOutputPluggedNote(id, noteId) {
+  return supabase.from('song_outputs').update({ plugged_note_id: noteId }).eq('id', id);
+}
+
+// Reconstructs the linear note order(s) implied by main-thread links, without
+// needing any new persisted "order" concept — position + source/target on
+// each link already fully encode it. Assumes the common case of one note
+// having at most one outgoing main-thread link (the UI only ever lets you
+// draw one); a note with none just becomes its own one-note chain.
+export function buildMainThreadChains(notes, links) {
+  const byId = new Map(notes.map((n) => [n.id, n]));
+  const next = new Map(links.map((l) => [l.source_note_id, l.target_note_id]));
+  const hasIncoming = new Set(links.map((l) => l.target_note_id));
+
+  const heads = notes.filter((n) => !hasIncoming.has(n.id));
+  return heads.map((head) => {
+    const chain = [head];
+    const seen = new Set([head.id]);
+    let current = head.id;
+    while (next.has(current)) {
+      const nextId = next.get(current);
+      if (seen.has(nextId) || !byId.has(nextId)) break;
+      chain.push(byId.get(nextId));
+      seen.add(nextId);
+      current = nextId;
+    }
+    return chain;
+  });
+}
+
 // ─── Note detail: variants, apuntes, history ───────────────────────────────────
 // All three reuse tables that already existed for the (now-retired) flat
 // block editor — nothing new here except annotations.category.

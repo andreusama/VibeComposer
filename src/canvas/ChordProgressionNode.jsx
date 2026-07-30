@@ -6,7 +6,7 @@ import { saveProgressionContent, saveProgressionPosition, deleteChordProgression
 
 const EMPTY_CHORD = () => ({ chord: '', function: '', feel: '', ukulele: [0, 0, 0, 0] });
 const STRING_LABELS = ['G', 'C', 'E', 'A'];
-const HANDLE_STYLE = { width: 10, height: 10, background: '#a4823a', border: '2px solid #fff' };
+const HANDLE_STYLE = { width: 10, height: 10, background: '#4552D6', border: '2px solid #fff' };
 
 export default function ChordProgressionNode({ id, data, selected }) {
   const { progression: cp, onDeleted } = data;
@@ -121,7 +121,7 @@ export default function ChordProgressionNode({ id, data, selected }) {
             </div>
             <div
               className="canvas-cp-fretboard-mini"
-              dangerouslySetInnerHTML={{ __html: fretboardSVG(ch.ukulele, '#333') }}
+              dangerouslySetInnerHTML={{ __html: fretboardSVG(ch.ukulele, '#4552D6') }}
             />
             <button className="canvas-cp-chord-play" onClick={() => handlePlayOne(ch)} title="play chord">▶</button>
             <button className="canvas-cp-chord-remove" onClick={() => removeChord(i)} title="remove chord">✕</button>

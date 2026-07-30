@@ -474,7 +474,7 @@ export function attach(state) {
         const W = canvas.width, H = canvas.height;
         const data = new Uint8Array(analyser.frequencyBinCount);
         analyser.getByteTimeDomainData(data);
-        ctx2.fillStyle = '#0a0a0c'; ctx2.fillRect(0, 0, W, H);
+        ctx2.fillStyle = '#1D1C1A'; ctx2.fillRect(0, 0, W, H);
         ctx2.strokeStyle = accent; ctx2.lineWidth = 1.5; ctx2.globalAlpha = 0.8;
         ctx2.beginPath();
         const sp = W / data.length;

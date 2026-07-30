@@ -6,7 +6,7 @@ import {
   addAnnotation, updateAnnotation, deleteAnnotation, restoreVersion, deleteHistoryVersion,
 } from './canvasData.js';
 
-const CATEGORY_LABELS = { duda: '❓ duda', idea: '💡 idea', referencia: '🔗 referencia' };
+const CATEGORY_LABELS = { duda: 'duda', idea: 'idea', referencia: 'referencia' };
 
 export default function NoteSidePanel({ note, userId, allNoteTexts, onClose, onTextUpdated }) {
   const lineId = note.lines?.[0]?.id;
@@ -158,11 +158,14 @@ export default function NoteSidePanel({ note, userId, allNoteTexts, onClose, onT
             {annotations.length === 0 && <p className="note-panel-empty">no notes yet</p>}
             {annotations.map((a) => (
               <div className={`note-annotation-row${a.resolved ? ' resolved' : ''}`} key={a.id}>
-                {a.category && <span className="note-annotation-category">{CATEGORY_LABELS[a.category]}</span>}
-                <p className="note-annotation-body">{a.body}</p>
-                <div className="note-annotation-actions">
-                  <button onClick={() => handleToggleResolved(a)}>{a.resolved ? 'reopen' : 'resolve'}</button>
-                  <button onClick={() => handleDeleteAnnotation(a.id)}>✕</button>
+                <span className={`note-annotation-dot${a.category ? ` ${a.category}` : ''}`} />
+                <div className="note-annotation-main">
+                  {a.category && <span className="note-annotation-category">{CATEGORY_LABELS[a.category]}</span>}
+                  <p className="note-annotation-body">{a.body}</p>
+                  <div className="note-annotation-actions">
+                    <button onClick={() => handleToggleResolved(a)}>{a.resolved ? 'reopen' : 'resolve'}</button>
+                    <button onClick={() => handleDeleteAnnotation(a.id)}>✕</button>
+                  </div>
                 </div>
               </div>
             ))}
@@ -176,9 +179,9 @@ export default function NoteSidePanel({ note, userId, allNoteTexts, onClose, onT
               <div className="note-panel-add-row">
                 <select value={newNoteCategory} onChange={(e) => setNewNoteCategory(e.target.value)}>
                   <option value="">no category</option>
-                  <option value="duda">❓ duda</option>
-                  <option value="idea">💡 idea</option>
-                  <option value="referencia">🔗 referencia</option>
+                  <option value="duda">duda</option>
+                  <option value="idea">idea</option>
+                  <option value="referencia">referencia</option>
                 </select>
                 <button onClick={handleAddAnnotation}>+ add</button>
               </div>

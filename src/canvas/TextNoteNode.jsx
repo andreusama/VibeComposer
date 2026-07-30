@@ -1,22 +1,24 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Handle, Position, NodeResizer } from '@xyflow/react';
-import { SECTION_TYPES, saveNoteType, saveNoteText, saveNotePosition, deleteNote } from './canvasData.js';
+import { SECTION_TYPES, STATUS_CYCLE, saveNoteType, saveNoteText, saveNoteStatus, saveNotePosition, deleteNote } from './canvasData.js';
 
 // Set explicitly rather than relying on the base stylesheet's 6px default,
 // which wasn't reliably applying — this guarantees a small, predictable dot
 // regardless of whatever was overriding it.
-const HANDLE_STYLE = { width: 10, height: 10, background: '#1a1a1a', border: '2px solid #fff' };
+const HANDLE_STYLE = { width: 10, height: 10, background: '#1D1C1A', border: '2px solid #fff' };
 // The chord-assignment plug is its own dedicated handle, visually distinct
-// (gold, bottom-center) from the left/right main-thread connectors — sharing
-// the same handles for two different meanings (note-to-note chaining vs.
-// chords-to-note assignment) was exactly what made connections feel mixed up.
-const CHORD_HANDLE_STYLE = { width: 12, height: 12, background: '#c9a86a', border: '2px solid #fff' };
+// (indigo, bottom-center) from the ink-colored left/right main-thread
+// connectors — sharing handles for two different meanings (note-to-note
+// chaining vs. chords-to-note assignment) was exactly what made connections
+// feel mixed up.
+const CHORD_HANDLE_STYLE = { width: 12, height: 12, background: '#4552D6', border: '2px solid #fff' };
 
 export default function TextNoteNode({ id, data, selected }) {
-  const { note, onDeleted, onOpenPanel, onTextChange } = data;
+  const { note, onDeleted, onOpenPanel, onTextChange, chordSummary } = data;
   const [type, setType] = useState(note.type);
   const [customLabel, setCustomLabel] = useState(note.custom_label || '');
   const [text, setText] = useState(note.lines?.[0]?.text || '');
+  const [status, setStatus] = useState(note.lines?.[0]?.status || 'provisional');
   const saveTimer = useRef(null);
   const lineId = note.lines?.[0]?.id;
 
@@ -48,6 +50,13 @@ export default function TextNoteNode({ id, data, selected }) {
     saveNoteType(id, type, customLabel);
   }, [id, type, customLabel]);
 
+  const handleCycleStatus = useCallback((e) => {
+    e.stopPropagation();
+    const next = STATUS_CYCLE[(STATUS_CYCLE.indexOf(status) + 1) % STATUS_CYCLE.length];
+    setStatus(next);
+    if (lineId) saveNoteStatus(lineId, next);
+  }, [status, lineId]);
+
   const handleDelete = useCallback(async (e) => {
     e.stopPropagation();
     if (!confirm('Delete this note?')) return;
@@ -61,7 +70,7 @@ export default function TextNoteNode({ id, data, selected }) {
 
   return (
     <div className={`canvas-note${selected ? ' selected' : ''}`}>
-      <NodeResizer minWidth={200} minHeight={120} isVisible={selected} onResizeEnd={handleResizeEnd} />
+      <NodeResizer minWidth={200} minHeight={140} isVisible={selected} onResizeEnd={handleResizeEnd} />
       <Handle type="target" position={Position.Left} id="left" style={HANDLE_STYLE} />
       <Handle type="source" position={Position.Right} id="right" style={HANDLE_STYLE} />
       <Handle type="target" position={Position.Bottom} id="chord" style={CHORD_HANDLE_STYLE} title="plug a chord progression in here" />
@@ -80,12 +89,19 @@ export default function TextNoteNode({ id, data, selected }) {
           />
         )}
         <button
+          className={`canvas-note-status-dot nodrag ${status}`}
+          onClick={handleCycleStatus}
+          title={`status: ${status} (click to change)`}
+        />
+        <button
           className="canvas-note-details nodrag"
           onClick={(e) => { e.stopPropagation(); onOpenPanel?.(id); }}
           title="variants, notes, history, tools"
         >☰</button>
         <button className="canvas-note-delete nodrag" onClick={handleDelete} title="delete note">✕</button>
       </div>
+
+      {chordSummary && <div className="canvas-note-chords">{chordSummary}</div>}
 
       <textarea
         className="canvas-note-text nodrag nowheel"
@@ -94,9 +110,10 @@ export default function TextNoteNode({ id, data, selected }) {
         placeholder="write…"
       />
 
-      {note.chord_progression_id && (
-        <div className="canvas-note-chip">🎵 chords assigned</div>
-      )}
+      <div className="canvas-note-foot">
+        <span>{note.variantCount || 0} variant{note.variantCount === 1 ? '' : 's'}</span>
+        <span>{note.annotationCount || 0} note{note.annotationCount === 1 ? '' : 's'}</span>
+      </div>
     </div>
   );
 }

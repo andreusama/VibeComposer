@@ -6,6 +6,7 @@
 import { supabase } from '../utils/supabaseClient.js';
 
 export const SECTION_TYPES = ['verse', 'chorus', 'pre-chorus', 'bridge', 'outro', 'custom'];
+export const STATUS_CYCLE = ['unresolved', 'provisional', 'closed'];
 
 export async function loadCanvasData(songId) {
   const [{ data: sections, error: sectionsError }, { data: progressions, error: progError }, { data: links, error: linksError }] =
@@ -19,7 +20,30 @@ export async function loadCanvasData(songId) {
     ]);
 
   const error = sectionsError || progError || linksError;
-  return { notes: sections || [], progressions: progressions || [], links: links || [], error };
+  if (error) return { notes: [], progressions: [], links: [], error };
+
+  // Counts only — the actual variants/annotations lists load lazily when the
+  // side panel opens for a specific note, but the node card itself wants to
+  // show "3 variants · 2 notes" without a per-note round trip.
+  const lineIds = (sections || []).map((s) => s.lines?.[0]?.id).filter(Boolean);
+  const variantCounts = {};
+  const annotationCounts = {};
+  if (lineIds.length) {
+    const [{ data: variants }, { data: annotations }] = await Promise.all([
+      supabase.from('line_variants').select('line_id').in('line_id', lineIds),
+      supabase.from('annotations').select('line_id').in('line_id', lineIds),
+    ]);
+    (variants || []).forEach((v) => { variantCounts[v.line_id] = (variantCounts[v.line_id] || 0) + 1; });
+    (annotations || []).forEach((a) => { annotationCounts[a.line_id] = (annotationCounts[a.line_id] || 0) + 1; });
+  }
+
+  const notes = (sections || []).map((s) => ({
+    ...s,
+    variantCount: variantCounts[s.lines?.[0]?.id] || 0,
+    annotationCount: annotationCounts[s.lines?.[0]?.id] || 0,
+  }));
+
+  return { notes, progressions: progressions || [], links: links || [], error: null };
 }
 
 export async function createNote(songId, { x, y }) {
@@ -52,6 +76,10 @@ export async function saveNoteType(noteId, type, customLabel) {
 
 export async function saveNoteText(lineId, text) {
   return supabase.from('lines').update({ text }).eq('id', lineId);
+}
+
+export async function saveNoteStatus(lineId, status) {
+  return supabase.from('lines').update({ status }).eq('id', lineId);
 }
 
 export async function assignProgressionToNote(noteId, progressionId) {

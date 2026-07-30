@@ -169,7 +169,7 @@ function renderEnergySection(energy, energyId, accent) {
     return `
     <div class="dimension" style="border-left-color:${accent}">
       <div class="dimension-label" style="color:${accent}">Energy</div>
-      <canvas id="waveform-canvas" style="width:100%;height:72px;display:block;border-radius:8px;background:#faf7f2;border:1px solid #ddd6c8"></canvas>
+      <canvas id="waveform-canvas" style="width:100%;height:72px;display:block;border-radius:8px;background:var(--paper-deep);border:1px solid var(--hairline)"></canvas>
       <input type="range" class="energy-slider" id="energy-slider" min="0" max="100" value="${energy}">
       <div class="energy-labels">${labels}</div>
     </div>

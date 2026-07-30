@@ -4,7 +4,6 @@ import {
   applyNodeChanges, applyEdgeChanges, ReactFlowProvider,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import './canvas.css';
 import TextNoteNode from './TextNoteNode.jsx';
 import ChordProgressionNode from './ChordProgressionNode.jsx';
 import NoteSidePanel from './NoteSidePanel.jsx';
@@ -59,7 +58,7 @@ function assignmentEdges(notes) {
       sourceHandle: 'assign',
       targetHandle: 'chord',
       type: 'straight',
-      style: { stroke: '#c9a86a', strokeDasharray: '4 3' },
+      style: { stroke: '#4552D6', strokeDasharray: '4 3' },
       data: { kind: 'assignment' },
     }));
 }
@@ -72,9 +71,15 @@ function mainThreadEdges(links) {
     sourceHandle: 'right',
     targetHandle: 'left',
     type: 'default',
-    style: { stroke: '#222', strokeWidth: 1.5 },
+    style: { stroke: '#1F6F63', strokeWidth: 1.5, opacity: 0.6 },
     data: { kind: 'main-thread', position: l.position },
   }));
+}
+
+function summarizeProgression(cp) {
+  if (!cp?.progression?.length) return null;
+  const chords = cp.progression.map((c) => c.chord).filter(Boolean);
+  return chords.length ? chords.join(' · ') : null;
 }
 
 export default function CanvasScreen({ state, onExit }) {
@@ -131,8 +136,12 @@ export default function CanvasScreen({ state, onExit }) {
       const { notes, progressions, links, error } = await loadCanvasData(song.id);
       if (cancelled) return;
       if (error) { setLoadError(error.message); setLoading(false); return; }
+      const progressionsById = Object.fromEntries(progressions.map((p) => [p.id, p]));
       setNodes([
-        ...notes.map((n) => noteToFlowNode(n, noteCallbacks)),
+        ...notes.map((n) => noteToFlowNode(n, {
+          ...noteCallbacks,
+          chordSummary: summarizeProgression(progressionsById[n.chord_progression_id]),
+        })),
         ...progressions.map((p) => progressionToFlowNode(p, handleNodeDeleted)),
       ]);
       setEdges([...mainThreadEdges(links), ...assignmentEdges(notes)]);
@@ -167,11 +176,18 @@ export default function CanvasScreen({ state, onExit }) {
           {
             id: `assign-${sourceNode.id}-${targetNode.id}`, source: sourceNode.id, target: targetNode.id,
             sourceHandle: 'assign', targetHandle: 'chord',
-            type: 'straight', style: { stroke: '#c9a86a', strokeDasharray: '4 3' }, data: { kind: 'assignment' },
+            type: 'straight', style: { stroke: '#4552D6', strokeDasharray: '4 3' }, data: { kind: 'assignment' },
           },
         ]);
         return nds.map((n) => n.id === targetNode.id
-          ? { ...n, data: { ...n.data, note: { ...n.data.note, chord_progression_id: sourceNode.id } } }
+          ? {
+            ...n,
+            data: {
+              ...n.data,
+              note: { ...n.data.note, chord_progression_id: sourceNode.id },
+              chordSummary: summarizeProgression(sourceNode.data.progression),
+            },
+          }
           : n);
       }
 
@@ -181,7 +197,7 @@ export default function CanvasScreen({ state, onExit }) {
         createMainThreadLink(linkId, song.id, sourceNode.id, targetNode.id, position);
         setEdges((eds) => addEdge({
           ...connection, id: linkId, type: 'default',
-          style: { stroke: '#222', strokeWidth: 1.5 }, data: { kind: 'main-thread', position },
+          style: { stroke: '#1F6F63', strokeWidth: 1.5, opacity: 0.6 }, data: { kind: 'main-thread', position },
         }, eds));
       }
 
@@ -208,7 +224,7 @@ export default function CanvasScreen({ state, onExit }) {
       } else if (edge.data?.kind === 'assignment') {
         assignProgressionToNote(edge.target, null);
         setNodes((nds) => nds.map((n) => n.id === edge.target
-          ? { ...n, data: { ...n.data, note: { ...n.data.note, chord_progression_id: null } } }
+          ? { ...n, data: { ...n.data, note: { ...n.data.note, chord_progression_id: null }, chordSummary: null } }
           : n));
       }
     });
@@ -260,7 +276,7 @@ export default function CanvasScreen({ state, onExit }) {
             connectionMode="loose"
             fitView
           >
-            <Background color="#eee" gap={22} />
+            <Background color="#D8D2C2" gap={22} />
             <Controls showInteractive={false} />
           </ReactFlow>
         </ReactFlowProvider>

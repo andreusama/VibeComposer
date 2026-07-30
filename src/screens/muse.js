@@ -10,7 +10,7 @@ export function render(state) {
     </div>
     <div class="muse-screen">
 
-      <a href="#" class="lyrics-standalone-link" id="btn-back-home">← projects</a>
+      <a href="#" class="muse-back-link" id="btn-back-home">← projects</a>
 
       <div class="muse-step-label">01 — the muse</div>
 

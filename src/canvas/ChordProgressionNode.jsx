@@ -8,6 +8,7 @@ import { beginSave, endSave } from './saveStatus.js';
 const EMPTY_CHORD = () => ({ chord: '', function: '', feel: '', beats: 4, ukulele: [0, 0, 0, 0] });
 const STRING_LABELS = ['G', 'C', 'E', 'A'];
 const HANDLE_STYLE = { width: 10, height: 10, background: '#4552D6', border: '2px solid #fff' };
+const TEMPO_HANDLE_STYLE = { width: 10, height: 10, background: '#B8842A', border: '2px solid #fff' };
 
 // Below this width the node renders as a compact, read-only summary (chip
 // chain of chord names); at or above it, the full per-chord editor renders.
@@ -27,7 +28,7 @@ function chordQuality(fn) {
 }
 
 export default function ChordProgressionNode({ id, data, selected, width }) {
-  const { progression: cp, onDeleted, onArrange } = data;
+  const { progression: cp, onDeleted, onArrange, bpm } = data;
   const [title, setTitle] = useState(cp.title);
   const [key, setKey] = useState(cp.key || '');
   const [chords, setChords] = useState(cp.progression?.length ? cp.progression : [EMPTY_CHORD()]);
@@ -36,6 +37,7 @@ export default function ChordProgressionNode({ id, data, selected, width }) {
   const [shiftHeld, setShiftHeld] = useState(false);
 
   const isExpanded = (width ?? cp.canvas_width ?? 260) >= EXPANDED_MIN_WIDTH;
+  const hasChords = chords.some((c) => c.chord?.trim());
 
   // React Flow's NodeResizer only takes a static keepAspectRatio prop, no
   // built-in "hold a modifier key to lock" behavior — this fills that gap
@@ -128,7 +130,10 @@ export default function ChordProgressionNode({ id, data, selected, width }) {
 
   const handlePlayAll = () => {
     const playable = chords.filter((c) => c.chord.trim());
-    if (playable.length) playProgression(playable, 'medium');
+    // bpm is undefined unless a tempo node is actually plugged in — playProgression
+    // falls back to its own fixed pacing in that case, so an unplugged progression
+    // sounds exactly as it always has.
+    if (playable.length) playProgression(playable, 'medium', bpm);
   };
 
   const handlePlayOne = (ch) => {
@@ -157,10 +162,12 @@ export default function ChordProgressionNode({ id, data, selected, width }) {
   return (
     <div className={`canvas-cp${selected ? ' selected' : ''} ${isExpanded ? 'cp-expanded' : 'cp-collapsed'}`}>
       <NodeResizer minWidth={220} minHeight={140} isVisible={selected} keepAspectRatio={shiftHeld} onResizeEnd={handleResizeEnd} />
-      {/* Single dedicated output — this is the only handle a chord-progression
-          node has, and it only makes sense plugged into a text note's "chord"
-          handle. No left/right main-thread-style handles here on purpose. */}
+      {/* The assign output only makes sense plugged into a text note's "chord"
+          handle — no left/right main-thread-style handles here on purpose.
+          The tempo input is the one other thing a chord progression accepts:
+          a bpm number from a tempo node, read by handlePlayAll above. */}
       <Handle type="source" position={Position.Right} id="assign" style={HANDLE_STYLE} title="drag to a note's chord plug" />
+      <Handle type="target" position={Position.Top} id="tempo-in" style={TEMPO_HANDLE_STYLE} title="drag a tempo node in here" />
 
       {isExpanded ? (
         <>
@@ -179,6 +186,7 @@ export default function ChordProgressionNode({ id, data, selected, width }) {
                 onChange={(e) => setKey(e.target.value)}
                 onBlur={commitMeta}
               />
+              {bpm && <span className="cp-tempo-badge" title="tempo, from the plugged-in tempo node">{bpm} bpm</span>}
             </div>
             <button className="cp-icon-btn nodrag" onClick={handleArrangeClick} title="arrange into a full song structure">♫</button>
             <button className="cp-icon-btn nodrag" onClick={handleDelete} title="delete progression">✕</button>
@@ -265,12 +273,19 @@ export default function ChordProgressionNode({ id, data, selected, width }) {
           <div className="cp-collapsed-head">
             <span className="cp-collapsed-title">{title || 'untitled'}</span>
             {key && <span className="cp-key-badge cp-key-badge-sm">{key}</span>}
+            {bpm && <span className="cp-tempo-badge cp-tempo-badge-sm">{bpm}</span>}
           </div>
           <div className="cp-chip-row nodrag nowheel">
             {chords.map((ch, i) => (
               <span className="cp-chip" key={i}>{ch.chord || '–'}</span>
             ))}
           </div>
+          {!hasChords && (
+            // There's no chord-entry UI down here at all — that only exists
+            // in the expanded editor — so an empty progression (still just
+            // dashes above) needs to say so explicitly, or it looks stuck.
+            <span className="cp-collapsed-hint">resize ↘ to expand and write chords</span>
+          )}
           <div className="cp-collapsed-foot">
             <span>{chords.length} chord{chords.length === 1 ? '' : 's'}</span>
             <span className="cp-collapsed-dot" title="chord progression" />

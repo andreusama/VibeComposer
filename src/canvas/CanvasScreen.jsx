@@ -8,6 +8,7 @@ import TextNoteNode from './TextNoteNode.jsx';
 import ChordProgressionNode from './ChordProgressionNode.jsx';
 import OutputNode from './OutputNode.jsx';
 import VibeComposeNode from './VibeComposeNode.jsx';
+import TempoNode from './TempoNode.jsx';
 import NoteSidePanel from './NoteSidePanel.jsx';
 import { setState } from '../state/store.js';
 import { supabase } from '../utils/supabaseClient.js';
@@ -15,16 +16,38 @@ import { beginSave, endSave, subscribeSaveStatus } from './saveStatus.js';
 import {
   loadCanvasData, createNote, createChordProgression, createVibeProgression,
   saveNotePosition, saveProgressionPosition,
-  createMainThreadLink, deleteNoteLink, assignProgressionToNote,
+  createMainThreadLink, deleteNoteLink, assignProgressionToNote, setProgressionTempo,
   deleteNote, deleteChordProgression,
   loadOutputNodes, createOutputNode, deleteOutputNode, saveOutputPosition, setOutputPluggedNote,
-  loadOutputSelections, setOutputSelection,
+  loadOutputSelections, setOutputSelection, saveSongTitle,
+  loadTempoNodes, createTempoNode, saveTempoBpm, saveTempoPosition, deleteTempoNode,
 } from './canvasData.js';
 
 const NODE_TYPES = {
   textNote: TextNoteNode, chordProgression: ChordProgressionNode,
-  outputNode: OutputNode, vibeCompose: VibeComposeNode,
+  outputNode: OutputNode, vibeCompose: VibeComposeNode, tempoNode: TempoNode,
 };
+
+// The pills a right-click on empty canvas offers, grouped by what they're
+// for — writing the song's words vs. shaping what it sounds like.
+const NODE_PILL_GROUPS = [
+  {
+    label: 'Text',
+    pills: [
+      { type: 'note', label: 'Text note', icon: '✎' },
+      { type: 'output', label: 'Final Song', icon: '▤' },
+    ],
+  },
+  {
+    label: 'Music',
+    pills: [
+      { type: 'chord', label: 'Chord progression', icon: '♫' },
+      { type: 'vibe', label: 'Vibe Progression', icon: '✦' },
+      { type: 'tempo', label: 'Tempo', icon: '◍' },
+    ],
+  },
+];
+const NODE_PILL_COUNT = NODE_PILL_GROUPS.reduce((sum, g) => sum + g.pills.length, 0);
 
 // React Flow needs a concrete numeric width/height for every node up front —
 // leaving height undefined (canvas_height has no DB default, unlike
@@ -35,6 +58,8 @@ const DEFAULT_NOTE_HEIGHT = 160;
 const DEFAULT_PROGRESSION_HEIGHT = 220;
 const DEFAULT_OUTPUT_WIDTH = 320;
 const DEFAULT_OUTPUT_HEIGHT = 240;
+const DEFAULT_TEMPO_WIDTH = 160;
+const DEFAULT_TEMPO_HEIGHT = 120;
 
 // Matches Figma's default grid — fine enough to feel unobtrusive, coarse
 // enough that "almost aligned" nodes stop happening.
@@ -76,6 +101,19 @@ function outputToFlowNode(output, callbacks) {
   };
 }
 
+// Real song data (a bpm, and which progression it feeds) unlike the vibe
+// tool, so it has a DB row and loads/saves position like every other node.
+function tempoToFlowNode(tempo, callbacks) {
+  return {
+    id: tempo.id,
+    type: 'tempoNode',
+    position: { x: tempo.canvas_x || 0, y: tempo.canvas_y || 0 },
+    width: tempo.canvas_width || DEFAULT_TEMPO_WIDTH,
+    height: tempo.canvas_height || DEFAULT_TEMPO_HEIGHT,
+    data: { bpm: tempo.bpm, ...callbacks },
+  };
+}
+
 function outputPlugEdge(output) {
   if (!output.plugged_note_id) return null;
   return {
@@ -104,6 +142,24 @@ function assignmentEdges(notes) {
       type: 'straight',
       style: { stroke: '#4552D6', strokeDasharray: '4 3' },
       data: { kind: 'assignment' },
+    }));
+}
+
+// A chord progression has exactly one tempo input ('tempo-in'); a tempo
+// node has exactly one output ('tempo-out') — same one-to-one shape as the
+// chord/text-note assignment above, just a different pair of node types.
+function tempoAssignmentEdges(progressions) {
+  return progressions
+    .filter((p) => p.tempo_node_id)
+    .map((p) => ({
+      id: `tempo-plug-${p.tempo_node_id}-${p.id}`,
+      source: p.tempo_node_id,
+      target: p.id,
+      sourceHandle: 'tempo-out',
+      targetHandle: 'tempo-in',
+      type: 'straight',
+      style: { stroke: '#B8842A', strokeDasharray: '2 3' },
+      data: { kind: 'tempo' },
     }));
 }
 
@@ -140,6 +196,55 @@ function ZoomControl() {
   );
 }
 
+// The anchored "right-click to add a node" menu — a small cluster of pills
+// anchored at the click point, replacing the old fixed toolbar buttons.
+// Needs useReactFlow (screenToFlowPosition) to turn the screen-space click
+// into a canvas position, so it lives inside the provider like ZoomControl.
+const MENU_WIDTH = 208;
+const MENU_ROW_HEIGHT = 42;
+const MENU_GROUP_HEADER_HEIGHT = 26;
+
+function CanvasContextMenu({ menu, onClose, onAdd }) {
+  const { screenToFlowPosition } = useReactFlow();
+
+  useEffect(() => {
+    if (!menu) return undefined;
+    const onKeyDown = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [menu, onClose]);
+
+  if (!menu) return null;
+
+  const menuHeight = NODE_PILL_COUNT * MENU_ROW_HEIGHT + NODE_PILL_GROUPS.length * MENU_GROUP_HEADER_HEIGHT + 16;
+  const left = Math.min(menu.x, window.innerWidth - MENU_WIDTH - 12);
+  const top = Math.min(menu.y, window.innerHeight - menuHeight - 12);
+
+  const handlePick = (type) => {
+    onAdd(type, screenToFlowPosition({ x: menu.x, y: menu.y }));
+    onClose();
+  };
+
+  return (
+    <>
+      <div className="canvas-menu-backdrop" onClick={onClose} onContextMenu={(e) => { e.preventDefault(); onClose(); }} />
+      <div className="canvas-context-menu" style={{ left, top }}>
+        {NODE_PILL_GROUPS.map((group) => (
+          <div className="canvas-context-group" key={group.label}>
+            <span className="canvas-context-group-label">{group.label}</span>
+            {group.pills.map((p) => (
+              <button key={p.type} className="canvas-context-pill" onClick={() => handlePick(p.type)}>
+                <span className="canvas-context-pill-icon">{p.icon}</span>
+                {p.label}
+              </button>
+            ))}
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
 // Reflects saves happening deep inside note/progression nodes (see
 // saveStatus.js) — a plain subscription rather than prop-drilling, since
 // the writes it's tracking happen several component layers away.
@@ -171,11 +276,47 @@ export default function CanvasScreen({ state, onExit }) {
   // browser isn't hover/hit-testing a whole board of irrelevant nodes on
   // every pointermove of the drag.
   const [isDragging, setIsDragging] = useState(false);
+  // Screen-space {x, y} of a pane right-click, or null when the "add a node"
+  // menu is closed. Kept in screen coords (not flow coords) since it's just
+  // where to anchor the popup — CanvasContextMenu converts it at pick time.
+  const [contextMenu, setContextMenu] = useState(null);
+  // The toolbar title used to just read song.title straight from props —
+  // there was no input anywhere, so there was genuinely no way to rename a
+  // project. Local state + a debounced save, same pattern as every other
+  // editable title in this file (output mix, chord progression).
+  const [songTitle, setSongTitle] = useState(song?.title || '');
+  const songTitleTimer = useRef(null);
   const edgesRef = useRef([]);
   edgesRef.current = edges;
 
+  useEffect(() => {
+    setSongTitle(song?.title || '');
+  }, [song?.id]);
+
+  const handleSongTitleChange = useCallback((e) => {
+    const val = e.target.value;
+    setSongTitle(val);
+    if (songTitleTimer.current) endSave();
+    clearTimeout(songTitleTimer.current);
+    beginSave();
+    songTitleTimer.current = setTimeout(async () => {
+      if (song?.id) await saveSongTitle(song.id, val);
+      endSave();
+    }, 500);
+  }, [song?.id]);
+
   const handleNodeDeleted = useCallback((id) => {
-    setNodes((nds) => nds.filter((n) => n.id !== id));
+    // A node's own ✕ button (this) bypasses React Flow's delete gesture
+    // entirely, so it doesn't get the automatic connected-edge cleanup that
+    // path has — a tempo node deleted this way needs its bpm explicitly
+    // cleared off whatever chord progression it was feeding, same thing
+    // onEdgesDelete's 'tempo' branch does for the keyboard-delete path.
+    const removedTempoTargets = edgesRef.current
+      .filter((e) => e.data?.kind === 'tempo' && e.source === id)
+      .map((e) => e.target);
+    setNodes((nds) => nds
+      .filter((n) => n.id !== id)
+      .map((n) => (removedTempoTargets.includes(n.id) ? { ...n, data: { ...n.data, bpm: undefined } } : n)));
     setEdges((eds) => eds.filter((e) => e.source !== id && e.target !== id));
     setSelectedNoteId((cur) => (cur === id ? null : cur));
   }, []);
@@ -254,31 +395,58 @@ export default function CanvasScreen({ state, onExit }) {
 
   const outputCallbacks = { onDeleted: handleNodeDeleted, onSelectBranch: handleSelectBranch };
 
+  // Tempo's bpm needs to reach every chord progression currently plugged
+  // into it too, not just its own node — otherwise turning the dial only
+  // updates the tempo node's own display and playback silently keeps using
+  // the value from when the connection was first made. Persisted
+  // immediately (not debounced) since TempoNode only calls this on blur,
+  // same as a chord progression's title/key fields.
+  const handleTempoBpmChange = useCallback((tempoId, bpm) => {
+    setNodes((nds) => nds.map((n) => {
+      if (n.id === tempoId) return { ...n, data: { ...n.data, bpm } };
+      const fedByThisTempo = edgesRef.current.some((e) =>
+        e.data?.kind === 'tempo' && e.source === tempoId && e.target === n.id
+      );
+      return fedByThisTempo ? { ...n, data: { ...n.data, bpm } } : n;
+    }));
+    beginSave();
+    saveTempoBpm(tempoId, bpm).finally(endSave);
+  }, []);
+
+  const tempoCallbacks = { onDeleted: handleNodeDeleted, onBpmChange: handleTempoBpmChange };
+
   useEffect(() => {
     if (!song) { onExit(); return; }
     let cancelled = false;
     (async () => {
-      const [{ notes, progressions, links, error }, { outputs, error: outputError }] = await Promise.all([
+      const [{ notes, progressions, links, error }, { outputs, error: outputError }, { data: tempos, error: tempoError }] = await Promise.all([
         loadCanvasData(song.id),
         loadOutputNodes(song.id),
+        loadTempoNodes(song.id),
       ]);
       if (cancelled) return;
       if (error) { setLoadError(error.message); setLoading(false); return; }
       if (outputError) { setLoadError(outputError.message); setLoading(false); return; }
+      if (tempoError) { setLoadError(tempoError.message); setLoading(false); return; }
       const { selections: loadedSelections, error: selectionsError } = await loadOutputSelections(outputs.map((o) => o.id));
       if (cancelled) return;
       if (selectionsError) { setLoadError(selectionsError.message); setLoading(false); return; }
       const progressionsById = Object.fromEntries(progressions.map((p) => [p.id, p]));
+      const tempoById = Object.fromEntries(tempos.map((t) => [t.id, t]));
       setNodes([
         ...notes.map((n) => noteToFlowNode(n, {
           ...noteCallbacks,
           chordSummary: summarizeProgression(progressionsById[n.chord_progression_id]),
         })),
-        ...progressions.map((p) => progressionToFlowNode(p, progressionCallbacks)),
+        ...progressions.map((p) => progressionToFlowNode(p, {
+          ...progressionCallbacks,
+          bpm: tempoById[p.tempo_node_id]?.bpm,
+        })),
         ...outputs.map((o) => outputToFlowNode(o, outputCallbacks)),
+        ...tempos.map((t) => tempoToFlowNode(t, tempoCallbacks)),
       ]);
       const plugEdges = outputs.map(outputPlugEdge).filter(Boolean);
-      setEdges([...mainThreadEdges(links), ...assignmentEdges(notes), ...plugEdges]);
+      setEdges([...mainThreadEdges(links), ...assignmentEdges(notes), ...tempoAssignmentEdges(progressions), ...plugEdges]);
       setSelections(loadedSelections);
       setLoading(false);
     })();
@@ -309,6 +477,7 @@ export default function CanvasScreen({ state, onExit }) {
     const save = node.type === 'textNote' ? saveNotePosition(node.id, position, node.width, node.height)
       : node.type === 'chordProgression' ? saveProgressionPosition(node.id, position, node.width, node.height)
       : node.type === 'outputNode' ? saveOutputPosition(node.id, position, node.width, node.height)
+      : node.type === 'tempoNode' ? saveTempoPosition(node.id, position, node.width, node.height)
       : null;
     if (save) { beginSave(); save.finally(endSave); }
   }, []);
@@ -341,6 +510,24 @@ export default function CanvasScreen({ state, onExit }) {
               chordSummary: summarizeProgression(sourceNode.data.progression),
             },
           }
+          : n);
+      }
+
+      // A tempo node's only job is to hand its bpm to a chord progression's
+      // playback — one tempo per progression, so a fresh plug replaces
+      // whichever one was there, same pattern as the chord/text-note assign.
+      if (sourceNode.type === 'tempoNode' && targetNode.type === 'chordProgression') {
+        setProgressionTempo(targetNode.id, sourceNode.id);
+        setEdges((eds) => [
+          ...eds.filter((e) => !(e.data?.kind === 'tempo' && e.target === targetNode.id)),
+          {
+            id: `tempo-plug-${sourceNode.id}-${targetNode.id}`, source: sourceNode.id, target: targetNode.id,
+            sourceHandle: 'tempo-out', targetHandle: 'tempo-in',
+            type: 'straight', style: { stroke: '#B8842A', strokeDasharray: '2 3' }, data: { kind: 'tempo' },
+          },
+        ]);
+        return nds.map((n) => n.id === targetNode.id
+          ? { ...n, data: { ...n.data, bpm: sourceNode.data.bpm } }
           : n);
       }
 
@@ -397,6 +584,7 @@ export default function CanvasScreen({ state, onExit }) {
       if (node.type === 'textNote') deleteNote(node.id);
       else if (node.type === 'chordProgression') deleteChordProgression(node.id);
       else if (node.type === 'outputNode') deleteOutputNode(node.id);
+      else if (node.type === 'tempoNode') deleteTempoNode(node.id);
     });
   }, []);
 
@@ -414,24 +602,32 @@ export default function CanvasScreen({ state, onExit }) {
         setNodes((nds) => nds.map((n) => n.id === edge.target
           ? { ...n, data: { ...n.data, output: { ...n.data.output, plugged_note_id: null } } }
           : n));
+      } else if (edge.data?.kind === 'tempo') {
+        setProgressionTempo(edge.target, null);
+        setNodes((nds) => nds.map((n) => n.id === edge.target
+          ? { ...n, data: { ...n.data, bpm: undefined } }
+          : n));
       }
     });
   }, []);
 
-  const handleAddNote = useCallback(async () => {
-    const { note, error } = await createNote(song.id, { x: 120, y: 120 });
+  // Every handleAdd* below now takes the flow position from wherever the
+  // right-click menu was opened (see CanvasContextMenu / handleContextAdd),
+  // falling back to a fixed spot only if called without one.
+  const handleAddNote = useCallback(async (position = { x: 120, y: 120 }) => {
+    const { note, error } = await createNote(song.id, position);
     if (error) { setLoadError(error.message); return; }
     setNodes((nds) => [...nds, noteToFlowNode(note, noteCallbacks)]);
   }, [song?.id, handleNodeDeleted]);
 
-  const handleAddProgression = useCallback(async () => {
-    const { data: cp, error } = await createChordProgression(song.id, { x: 460, y: 120 });
+  const handleAddProgression = useCallback(async (position = { x: 460, y: 120 }) => {
+    const { data: cp, error } = await createChordProgression(song.id, position);
     if (error) { setLoadError(error.message); return; }
     setNodes((nds) => [...nds, progressionToFlowNode(cp, progressionCallbacks)]);
   }, [song?.id, handleNodeDeleted]);
 
-  const handleAddOutput = useCallback(async () => {
-    const { data: output, error } = await createOutputNode(song.id, { x: 800, y: 120 });
+  const handleAddOutput = useCallback(async (position = { x: 800, y: 120 }) => {
+    const { data: output, error } = await createOutputNode(song.id, position);
     if (error) { setLoadError(error.message); return; }
     setNodes((nds) => [...nds, outputToFlowNode(output, outputCallbacks)]);
   }, [song?.id, handleNodeDeleted]);
@@ -439,24 +635,43 @@ export default function CanvasScreen({ state, onExit }) {
   // The vibe-compose node is a tool, not content — it never gets a DB row of
   // its own (no position/size to persist), so adding and removing it is
   // local-only React state, same as any other ephemeral UI element.
-  const handleAddVibeNode = useCallback(() => {
+  const handleAddVibeNode = useCallback((position = { x: 120, y: 120 }) => {
     const nodeId = crypto.randomUUID();
     setNodes((nds) => [...nds, {
       id: nodeId,
       type: 'vibeCompose',
-      position: { x: 120, y: 120 },
+      position,
       width: 420,
       height: 560,
       data: {
         onClose: (id) => setNodes((cur) => cur.filter((n) => n.id !== id)),
         onGenerated: async (composed, meta) => {
-          const { data: cp, error } = await createVibeProgression(song.id, { x: 560, y: 120 }, composed, meta);
+          const { data: cp, error } = await createVibeProgression(song.id, { x: position.x + 440, y: position.y }, composed, meta);
           if (error) { setLoadError(error.message); return; }
           setNodes((cur) => [...cur, progressionToFlowNode(cp, progressionCallbacks)]);
         },
       },
     }]);
   }, [song?.id]);
+
+  const handleAddTempo = useCallback(async (position = { x: 120, y: 340 }) => {
+    const { data: tempo, error } = await createTempoNode(song.id, position);
+    if (error) { setLoadError(error.message); return; }
+    setNodes((nds) => [...nds, tempoToFlowNode(tempo, tempoCallbacks)]);
+  }, [song?.id, handleTempoBpmChange, handleNodeDeleted]);
+
+  const handleContextAdd = useCallback((type, position) => {
+    if (type === 'note') handleAddNote(position);
+    else if (type === 'chord') handleAddProgression(position);
+    else if (type === 'output') handleAddOutput(position);
+    else if (type === 'vibe') handleAddVibeNode(position);
+    else if (type === 'tempo') handleAddTempo(position);
+  }, [handleAddNote, handleAddProgression, handleAddOutput, handleAddVibeNode, handleAddTempo]);
+
+  const onPaneContextMenu = useCallback((e) => {
+    e.preventDefault();
+    setContextMenu({ x: e.clientX, y: e.clientY });
+  }, []);
 
   // The output node doesn't own its own content — it renders whatever the
   // rest of the graph currently looks like, so its inputs are recomputed
@@ -504,23 +719,25 @@ export default function CanvasScreen({ state, onExit }) {
       <ReactFlowProvider>
         <div className="canvas-toolbar">
           <button className="canvas-btn canvas-btn-ghost" onClick={onExit}>‹ projects</button>
-          <span className="canvas-title">{song.title}</span>
+          <input
+            className="canvas-title-input"
+            value={songTitle}
+            placeholder="untitled song"
+            onChange={handleSongTitleChange}
+          />
           <span className="canvas-toolbar-divider" />
           <SaveStatus />
           <span className="canvas-toolbar-divider" />
-          <span className="canvas-hint">click a connection, press Delete to remove it</span>
+          <span className="canvas-hint">right-click the canvas to add a node · click a connection, Delete to remove it</span>
 
           <div className="canvas-toolbar-right">
             <ZoomControl />
             <span className="canvas-toolbar-divider" />
-            <button className="canvas-btn" onClick={handleAddNote}>+ note</button>
-            <button className="canvas-btn canvas-btn-chord" onClick={handleAddProgression}>♫ chord progression</button>
-            <button className="canvas-btn" onClick={handleAddOutput}>+ final mix</button>
-            <button className="canvas-btn canvas-btn-vibes" onClick={handleAddVibeNode}>+ vibes</button>
-            <span className="canvas-toolbar-divider" />
             <button className="canvas-avatar" onClick={handleSignOut} title="sign out">{avatarLetter}</button>
           </div>
         </div>
+
+        <CanvasContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} onAdd={handleContextAdd} />
 
         {loadError && <div className="canvas-error">{loadError}</div>}
 
@@ -539,6 +756,7 @@ export default function CanvasScreen({ state, onExit }) {
             onConnect={onConnect}
             onNodesDelete={onNodesDelete}
             onEdgesDelete={onEdgesDelete}
+            onPaneContextMenu={onPaneContextMenu}
             deleteKeyCode={['Backspace', 'Delete']}
             connectionMode="loose"
             fitView

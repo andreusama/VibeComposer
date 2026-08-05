@@ -417,3 +417,47 @@ create policy output_selections_owner on output_selections
       where so.id = output_selections.output_id and s.user_id = auth.uid()
     )
   );
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Tempo node — a bpm a chord progression can plug into for real, beat-
+-- accurate playback pacing (see playProgression in src/audio/player.js).
+-- Started out session-only, like the vibe-compose tool; unlike that tool it
+-- carries actual song data (a real bpm, and which progression it feeds),
+-- so it needs the same canvas_x/y/width/height + DB row every other node has.
+-- ─────────────────────────────────────────────────────────────────────────────
+create table if not exists tempo_nodes (
+  id            uuid primary key default gen_random_uuid(),
+  song_id       uuid not null references songs(id) on delete cascade,
+  bpm           integer not null default 120,
+  canvas_x      double precision not null default 0,
+  canvas_y      double precision not null default 0,
+  canvas_width  double precision not null default 160,
+  canvas_height double precision not null default 120,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
+);
+
+drop trigger if exists trg_tempo_nodes_updated_at on tempo_nodes;
+create trigger trg_tempo_nodes_updated_at
+  before update on tempo_nodes
+  for each row execute function set_updated_at();
+
+create index if not exists idx_tempo_nodes_song on tempo_nodes(song_id);
+
+alter table tempo_nodes enable row level security;
+
+drop policy if exists tempo_nodes_owner on tempo_nodes;
+create policy tempo_nodes_owner on tempo_nodes
+  for all using (
+    exists (select 1 from songs s where s.id = tempo_nodes.song_id and s.user_id = auth.uid())
+  ) with check (
+    exists (select 1 from songs s where s.id = tempo_nodes.song_id and s.user_id = auth.uid())
+  );
+
+-- Which tempo node a chord progression is plugged into, if any — same
+-- optional-assignment shape as sections.chord_progression_id above.
+alter table chord_progressions drop constraint if exists chord_progressions_tempo_node_id_fkey;
+alter table chord_progressions add column if not exists tempo_node_id uuid;
+alter table chord_progressions
+  add constraint chord_progressions_tempo_node_id_fkey
+  foreign key (tempo_node_id) references tempo_nodes(id) on delete set null;

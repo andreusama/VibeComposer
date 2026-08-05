@@ -8,6 +8,10 @@ import { supabase } from '../utils/supabaseClient.js';
 export const SECTION_TYPES = ['verse', 'chorus', 'pre-chorus', 'bridge', 'outro', 'custom'];
 export const STATUS_CYCLE = ['unresolved', 'provisional', 'closed'];
 
+export function saveSongTitle(id, title) {
+  return supabase.from('songs').update({ title }).eq('id', id);
+}
+
 export async function loadCanvasData(songId) {
   const [{ data: sections, error: sectionsError }, { data: progressions, error: progError }, { data: links, error: linksError }] =
     await Promise.all([
@@ -86,6 +90,10 @@ export async function assignProgressionToNote(noteId, progressionId) {
   return supabase.from('sections').update({ chord_progression_id: progressionId }).eq('id', noteId);
 }
 
+export async function setProgressionTempo(progressionId, tempoNodeId) {
+  return supabase.from('chord_progressions').update({ tempo_node_id: tempoNodeId }).eq('id', progressionId);
+}
+
 export async function createChordProgression(songId, { x, y }) {
   return supabase.from('chord_progressions')
     .insert({ song_id: songId, canvas_x: x, canvas_y: y, source: 'manual' })
@@ -132,6 +140,35 @@ export async function createMainThreadLink(id, songId, sourceNoteId, targetNoteI
 
 export async function deleteNoteLink(id) {
   return supabase.from('note_links').delete().eq('id', id);
+}
+
+// ─── Tempo nodes ────────────────────────────────────────────────────────────
+// A bpm a chord progression can plug into for real, beat-accurate playback
+// pacing. Real song data (unlike the vibe-compose tool), so it gets its own
+// DB row + canvas_x/y/width/height like every other content node.
+
+export async function loadTempoNodes(songId) {
+  return supabase.from('tempo_nodes').select('*').eq('song_id', songId);
+}
+
+export async function createTempoNode(songId, { x, y }) {
+  return supabase.from('tempo_nodes')
+    .insert({ song_id: songId, canvas_x: x, canvas_y: y })
+    .select().single();
+}
+
+export async function saveTempoBpm(id, bpm) {
+  return supabase.from('tempo_nodes').update({ bpm }).eq('id', id);
+}
+
+export async function saveTempoPosition(id, { x, y }, width, height) {
+  return supabase.from('tempo_nodes').update({
+    canvas_x: x, canvas_y: y, canvas_width: width, canvas_height: height,
+  }).eq('id', id);
+}
+
+export async function deleteTempoNode(id) {
+  return supabase.from('tempo_nodes').delete().eq('id', id);
 }
 
 // ─── Output nodes ───────────────────────────────────────────────────────────

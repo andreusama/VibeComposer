@@ -47,7 +47,7 @@ export default function OutputNode({ id, data, selected }) {
 
   const handleDelete = useCallback(async (e) => {
     e.stopPropagation();
-    if (!confirm('Delete this mix?')) return;
+    if (!confirm('Delete this song?')) return;
     await deleteOutputNode(id);
     onDeleted?.(id);
   }, [id, onDeleted]);
@@ -59,15 +59,15 @@ export default function OutputNode({ id, data, selected }) {
 
       <div className="output-head">
         <div className="output-head-left">
-          <span className="output-eyebrow">Final mix</span>
+          <span className="output-eyebrow">Final Song</span>
           <input
             className="output-title nodrag"
             value={title}
-            placeholder="untitled mix"
+            placeholder="untitled song"
             onChange={handleTitleChange}
           />
         </div>
-        <button className="output-delete nodrag" onClick={handleDelete} title="delete this mix">✕</button>
+        <button className="output-delete nodrag" onClick={handleDelete} title="delete this song">✕</button>
       </div>
 
       {/* No nodrag here on purpose — the rendered lines are read-only text,

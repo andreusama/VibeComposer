@@ -1100,6 +1100,188 @@ body::before {
     transform: scale(1.4);
 }
 
+/* ─── Right-click "add a node" menu ──────────────────────────────────────────── */
+
+/* Catches the outside click that closes the menu — sits between the canvas
+   and the pills, transparent, covering the viewport so nothing underneath
+   gets an accidental click through it. */
+.canvas-menu-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+}
+
+.canvas-context-menu {
+    position: fixed;
+    z-index: 41;
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--space-1) * var(--canvas-scale));
+    padding: calc(var(--space-2) * var(--canvas-scale));
+    width: 208px;
+    background: #fff;
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    box-shadow: var(--sh-3);
+}
+
+.canvas-context-group {
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--space-1) * var(--canvas-scale));
+}
+.canvas-context-group + .canvas-context-group {
+    margin-top: calc(var(--space-1) * var(--canvas-scale));
+    padding-top: calc(var(--space-2) * var(--canvas-scale));
+    border-top: 1px solid var(--hairline);
+}
+
+.canvas-context-group-label {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: calc(var(--fs-micro) * var(--canvas-scale));
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--graphite-soft);
+    padding: 0 calc(var(--space-3) * var(--canvas-scale));
+}
+
+.canvas-context-pill {
+    display: flex;
+    align-items: center;
+    gap: calc(var(--space-2) * var(--canvas-scale));
+    padding: calc(var(--space-2) * var(--canvas-scale)) calc(var(--space-3) * var(--canvas-scale));
+    border: 1px solid transparent;
+    border-radius: 999px;
+    background: none;
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: calc(var(--fs-secondary) * var(--canvas-scale));
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s;
+}
+
+.canvas-context-pill:hover {
+    background: var(--paper-deep);
+    border-color: var(--hairline);
+}
+
+.canvas-context-pill-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    background: var(--thread-soft);
+    color: var(--thread);
+    font-size: calc(var(--fs-label) * var(--canvas-scale));
+}
+
+/* ─── Tempo node ──────────────────────────────────────────────────────────────── */
+
+/* container-type:size turns the card's own box into a query context — cqh/
+   cqw units below are relative to THIS box, not the viewport, so growing
+   the node with the resize handle grows the number/dot/label with it
+   instead of leaving them stranded small in a bigger frame. */
+.canvas-tempo {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: calc(var(--space-1) * var(--canvas-scale));
+    background: #fff;
+    border: 1px solid var(--amber);
+    border-radius: var(--r-md);
+    box-shadow: var(--sh-2);
+    position: relative;
+    container-type: size;
+}
+
+.canvas-tempo.selected { box-shadow: var(--sh-3); }
+
+.tempo-delete {
+    position: absolute;
+    top: calc(var(--space-1-5) * var(--canvas-scale));
+    right: calc(var(--space-1-5) * var(--canvas-scale));
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: none;
+    color: var(--graphite-soft);
+    cursor: pointer;
+    border-radius: var(--r-sm);
+    font-size: calc(var(--fs-micro) * var(--canvas-scale));
+}
+.tempo-delete:hover { background: var(--paper-deep); color: var(--ink); }
+
+.tempo-eyebrow {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: clamp(9px, 7cqh, 20px);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--amber);
+}
+
+.tempo-face {
+    display: flex;
+    align-items: baseline;
+    gap: clamp(4px, 3cqw, 16px);
+}
+
+/* Timed entirely off --bpm via animation-duration — no rAF loop keeping
+   score of elapsed time, the browser's own animation clock does that and
+   never drifts. Restarts (a small hiccup, not a redraw storm) if the bpm
+   itself changes mid-beat, which is rare and cheap enough to ignore. */
+@keyframes tempo-bump {
+    0%   { transform: scale(1); opacity: 0.75; }
+    12%  { transform: scale(1.4); opacity: 1; }
+    100% { transform: scale(1); opacity: 0.75; }
+}
+.tempo-dot {
+    width: clamp(10px, 16cqh, 72px);
+    height: clamp(10px, 16cqh, 72px);
+    border-radius: 50%;
+    background: var(--amber);
+    align-self: center;
+    flex-shrink: 0;
+    animation: tempo-bump calc(60s / var(--bpm, 120)) linear infinite;
+}
+
+.tempo-bpm {
+    /* ch is relative to THIS element's own font-size, so as the clamp()
+       below grows the text, the box asked for 4 digits' worth of width
+       grows right along with it — no separate width rule to keep in sync. */
+    width: 4ch;
+    border: none;
+    outline: none;
+    background: none;
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: clamp(22px, 28cqh, 120px);
+    color: var(--ink);
+    text-align: right;
+    -moz-appearance: textfield;
+}
+.tempo-bpm::-webkit-outer-spin-button,
+.tempo-bpm::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+.tempo-unit {
+    font-family: var(--font-mono);
+    font-size: clamp(8px, 6cqh, 22px);
+    color: var(--graphite-soft);
+    text-transform: uppercase;
+}
+
 /* ─── Canvas toolbar ──────────────────────────────────────────────────────────── */
 
 .canvas-toolbar {
@@ -1117,12 +1299,25 @@ body::before {
     border-bottom: 1px solid var(--hairline);
 }
 
-.canvas-title {
+.canvas-title-input {
     font-family: var(--font-serif);
     font-weight: 600;
     font-size: calc(var(--fs-lyric-lead) * var(--canvas-scale));
     color: var(--ink);
+    border: 1px solid transparent;
+    border-radius: var(--r-sm);
+    background: none;
+    padding: calc(var(--space-0-5) * var(--canvas-scale)) calc(var(--space-1-5) * var(--canvas-scale));
+    width: calc(220px * var(--canvas-scale));
+    transition: border-color 0.15s, background 0.15s;
 }
+.canvas-title-input:hover { border-color: var(--hairline); }
+.canvas-title-input:focus {
+    outline: none;
+    border-color: var(--thread);
+    background: #fff;
+}
+.canvas-title-input::placeholder { color: var(--graphite-soft); }
 
 .canvas-toolbar-divider {
     width: 1px;
@@ -1453,6 +1648,23 @@ body::before {
     padding: calc(var(--space-0-5) * var(--canvas-scale)) calc(var(--space-2) * var(--canvas-scale));
 }
 
+.cp-tempo-badge {
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: calc(var(--fs-label) * var(--canvas-scale));
+    color: var(--amber);
+    background: var(--amber-soft);
+    border: 1px solid var(--amber);
+    border-radius: 20px;
+    padding: calc(var(--space-1) * var(--canvas-scale)) calc(var(--space-2-5) * var(--canvas-scale));
+}
+
+.cp-tempo-badge-sm {
+    font-size: calc(var(--fs-micro) * var(--canvas-scale));
+    padding: calc(var(--space-0-5) * var(--canvas-scale)) calc(var(--space-2) * var(--canvas-scale));
+}
+
 /* ── Collapsed state — visual summary only, no editing ──────────────────────── */
 .cp-collapsed-head {
     display: flex;
@@ -1498,6 +1710,17 @@ body::before {
     font-size: calc(var(--fs-label) * var(--canvas-scale));
     font-weight: 400;
     padding: 0 calc(var(--space-1) * var(--canvas-scale));
+}
+
+.cp-collapsed-hint {
+    display: block;
+    font-family: var(--font-sans);
+    font-style: italic;
+    font-size: calc(var(--fs-label) * var(--canvas-scale));
+    color: var(--graphite-soft);
+    white-space: nowrap;
+    padding: 0 calc(var(--space-3-5) * var(--canvas-scale)) calc(var(--space-2) * var(--canvas-scale));
+    margin-top: calc(-1 * var(--space-2) * var(--canvas-scale));
 }
 
 .cp-collapsed-foot {

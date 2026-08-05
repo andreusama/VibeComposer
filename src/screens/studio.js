@@ -39,10 +39,17 @@ const ENERGY_BPM = { quiet: 68, mellow: 80, medium: 95, vibrant: 115, intense: 1
 // ─── Render ────────────────────────────────────────────────────────────────────
 
 export function render(state) {
-    const { progression } = state;
-    const energyId = energyIdFromValue(state.energy);
+    // Only reachable via a chord-progression node's "arrange" action, which
+    // always sets this — but guard anyway so a stray/refreshed navigation
+    // here doesn't crash on a null progression.
+    if (!state.studioSource) {
+        return '<div class="header"><h1>vibe composer</h1></div>';
+    }
+
+    const progression = state.studioSource;
+    const energyId = energyIdFromValue(progression.energy);
     const bpm      = ENERGY_BPM[energyId] || 95;
-    const accent   = paletteFromRgb(state.rgb.r, state.rgb.g, state.rgb.b)[0];
+    const accent   = paletteFromRgb(progression.rgb.r, progression.rgb.g, progression.rgb.b)[0];
 
     const chordBoxes = progression.progression.map((ch, i) => `
         <div class="studio-chord-box" id="studio-chord${i}">
@@ -110,7 +117,7 @@ export function render(state) {
             </div>
 
             <div class="studio-nav">
-                <button class="ghost-btn" id="btn-back-result">← back to progression</button>
+                <button class="ghost-btn" id="btn-back-canvas">← back to canvas</button>
             </div>
 
         </div>
@@ -120,12 +127,14 @@ export function render(state) {
 // ─── Attach ────────────────────────────────────────────────────────────────────
 
 export function attach(state) {
-    const accent   = paletteFromRgb(state.rgb.r, state.rgb.g, state.rgb.b)[0];
-    const energyId = energyIdFromValue(state.energy);
+    if (!state.studioSource) { setState({ screen: 'canvas' }); return; }
+    const progression = state.studioSource;
+    const accent   = paletteFromRgb(progression.rgb.r, progression.rgb.g, progression.rgb.b)[0];
+    const energyId = energyIdFromValue(progression.energy);
     const bpm      = ENERGY_BPM[energyId] || 95;
     document.documentElement.style.setProperty('--accent', accent);
 
-    const CHORDS   = state.progression.progression.map(ch => getChordFreqs(ch.chord));
+    const CHORDS   = progression.progression.map(ch => getChordFreqs(ch.chord));
     const STEPS    = 16;
     const stepDur  = 60 / bpm / 4;
 
@@ -474,7 +483,7 @@ export function attach(state) {
         const W = canvas.width, H = canvas.height;
         const data = new Uint8Array(analyser.frequencyBinCount);
         analyser.getByteTimeDomainData(data);
-        ctx2.fillStyle = '#0a0a0c'; ctx2.fillRect(0, 0, W, H);
+        ctx2.fillStyle = '#1D1C1A'; ctx2.fillRect(0, 0, W, H);
         ctx2.strokeStyle = accent; ctx2.lineWidth = 1.5; ctx2.globalAlpha = 0.8;
         ctx2.beginPath();
         const sp = W / data.length;
@@ -520,7 +529,7 @@ export function attach(state) {
         songMode       = true;
         songSectionIdx = 0;
         songStepCount  = 0;
-        songStructure  = buildSongStructure(state.progression.progression, state.progression.key);
+        songStructure  = buildSongStructure(progression.progression, progression.key);
         document.getElementById('mode-loop').style.display = 'none';
         document.getElementById('mode-song').style.display = '';
         document.getElementById('tab-song').classList.add('active');
@@ -552,8 +561,8 @@ export function attach(state) {
         }
     });
 
-    document.getElementById('btn-back-result').addEventListener('click', () => {
+    document.getElementById('btn-back-canvas').addEventListener('click', () => {
         clearTimeout(schedulerID);
-        setState({ screen: 'result' });
+        setState({ screen: 'canvas', studioSource: null });
     });
 }

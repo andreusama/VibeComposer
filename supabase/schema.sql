@@ -248,3 +248,234 @@ create policy ideas_owner on ideas_notebook
 -- easyMode, vibeLabel, photoUrl, progression. Written every time "compose" runs
 -- inside a project; read back when a project's chords part is reopened.
 alter table songs add column if not exists vibe_snapshot jsonb;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Canvas mode — Figma-style infinite canvas, notes as nodes.
+-- A "note" IS a `sections` row (same lines/variants/annotations underneath),
+-- just placed on a canvas instead of stacked in a list.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- ─── chord_progressions ─────────────────────────────────────────────────────────
+-- Independent node type. A project can hold several at once (try a few before
+-- deciding); each can be assigned as "definitive" to one text note.
+create table if not exists chord_progressions (
+  id            uuid primary key default gen_random_uuid(),
+  song_id       uuid not null references songs(id) on delete cascade,
+  title         text not null default 'untitled progression',
+  canvas_x      double precision not null default 0,
+  canvas_y      double precision not null default 0,
+  canvas_width  double precision not null default 260,
+  canvas_height double precision,
+  key           text,
+  -- same shape as the composer's output: [{chord, function, feel, ukulele}, ...]
+  progression   jsonb not null default '[]'::jsonb,
+  -- 'manual' = built by hand in this pass; 'vibe' reserved for the step-by-step
+  -- assisted generation flow (phrase → place → photo → settings), next iteration.
+  source        text not null default 'manual' check (source in ('manual', 'vibe')),
+  vibe_meta     jsonb,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
+);
+
+drop trigger if exists trg_chord_progressions_updated_at on chord_progressions;
+create trigger trg_chord_progressions_updated_at
+  before update on chord_progressions
+  for each row execute function set_updated_at();
+
+create index if not exists idx_chord_progressions_song on chord_progressions(song_id);
+
+-- ─── sections: canvas placement + assigned progression ─────────────────────────
+alter table sections add column if not exists canvas_x double precision not null default 0;
+alter table sections add column if not exists canvas_y double precision not null default 0;
+alter table sections add column if not exists canvas_width double precision not null default 280;
+alter table sections add column if not exists canvas_height double precision;
+
+alter table sections drop constraint if exists sections_chord_progression_id_fkey;
+alter table sections add column if not exists chord_progression_id uuid;
+alter table sections
+  add constraint sections_chord_progression_id_fkey
+  foreign key (chord_progression_id) references chord_progressions(id) on delete set null;
+
+-- ─── note_links ─────────────────────────────────────────────────────────────────
+-- Generic, extensible connection between two notes. Only 'main-thread' exists
+-- today (marks which notes make up the clean-view lyric, and their order) —
+-- widen the check constraint to add new types later without touching existing rows.
+create table if not exists note_links (
+  id              uuid primary key default gen_random_uuid(),
+  song_id         uuid not null references songs(id) on delete cascade,
+  source_note_id  uuid not null references sections(id) on delete cascade,
+  target_note_id  uuid not null references sections(id) on delete cascade,
+  type            text not null default 'main-thread' check (type in ('main-thread')),
+  position        integer not null default 0,
+  created_at      timestamptz not null default now()
+);
+
+create index if not exists idx_note_links_song on note_links(song_id, type, position);
+
+-- ─── RLS for the new tables ─────────────────────────────────────────────────────
+alter table chord_progressions enable row level security;
+alter table note_links         enable row level security;
+
+drop policy if exists chord_progressions_owner on chord_progressions;
+create policy chord_progressions_owner on chord_progressions
+  for all using (
+    exists (select 1 from songs s where s.id = chord_progressions.song_id and s.user_id = auth.uid())
+  ) with check (
+    exists (select 1 from songs s where s.id = chord_progressions.song_id and s.user_id = auth.uid())
+  );
+
+drop policy if exists note_links_owner on note_links;
+create policy note_links_owner on note_links
+  for all using (
+    exists (select 1 from songs s where s.id = note_links.song_id and s.user_id = auth.uid())
+  ) with check (
+    exists (select 1 from songs s where s.id = note_links.song_id and s.user_id = auth.uid())
+  );
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Phase 1 — lyric composing side panel.
+-- Variants (line_variants) and history (section_versions) already exist and
+-- are reused as-is. Only new thing needed: optional categorization on apuntes.
+-- ─────────────────────────────────────────────────────────────────────────────
+alter table annotations add column if not exists category text;
+alter table annotations drop constraint if exists annotations_category_check;
+alter table annotations
+  add constraint annotations_category_check
+  check (category is null or category in ('duda', 'idea', 'referencia'));
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Output node — a song can have several (variants/mixes of the same song:
+-- "radio edit", "acoustic", etc.), each user-created and user-deletable.
+-- Doesn't own any content itself: it's a sink that a text note plugs into,
+-- at which point it renders the full main-thread chain (lyrics in
+-- clean-view order, plus each note's assigned chords) as that mix's result.
+-- plugged_note_id is only "is something connected" state — the rendered
+-- chain is always derived live from note_links, not stored here.
+-- ─────────────────────────────────────────────────────────────────────────────
+create table if not exists song_outputs (
+  id              uuid primary key default gen_random_uuid(),
+  song_id         uuid not null references songs(id) on delete cascade,
+  title           text not null default 'Final mix',
+  canvas_x        double precision not null default 0,
+  canvas_y        double precision not null default 0,
+  canvas_width    double precision not null default 320,
+  canvas_height   double precision not null default 240,
+  plugged_note_id uuid references sections(id) on delete set null,
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now()
+);
+
+-- Was "one output per song" (song_id unique) — now a song can hold several
+-- mix variants, so an existing database needs the old uniqueness dropped.
+alter table song_outputs drop constraint if exists song_outputs_song_id_key;
+alter table song_outputs add column if not exists title text not null default 'Final mix';
+
+drop trigger if exists trg_song_outputs_updated_at on song_outputs;
+create trigger trg_song_outputs_updated_at
+  before update on song_outputs
+  for each row execute function set_updated_at();
+
+alter table song_outputs enable row level security;
+
+drop policy if exists song_outputs_owner on song_outputs;
+create policy song_outputs_owner on song_outputs
+  for all using (
+    exists (select 1 from songs s where s.id = song_outputs.song_id and s.user_id = auth.uid())
+  ) with check (
+    exists (select 1 from songs s where s.id = song_outputs.song_id and s.user_id = auth.uid())
+  );
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Output selections — a final mix is one linear playthrough, so when the note
+-- graph forks (a note has more than one outgoing main-thread link), each mix
+-- needs its own record of which branch it takes at that fork. One row per
+-- (mix, forking note); no row means "use the default" (lowest-position link,
+-- i.e. whichever branch was drawn first) — a fork is never left ambiguous.
+-- ─────────────────────────────────────────────────────────────────────────────
+create table if not exists output_selections (
+  output_id      uuid not null references song_outputs(id) on delete cascade,
+  source_note_id uuid not null references sections(id) on delete cascade,
+  note_link_id   uuid not null references note_links(id) on delete cascade,
+  created_at     timestamptz not null default now(),
+  primary key (output_id, source_note_id)
+);
+
+alter table output_selections enable row level security;
+
+drop policy if exists output_selections_owner on output_selections;
+create policy output_selections_owner on output_selections
+  for all using (
+    exists (
+      select 1 from song_outputs so
+      join songs s on s.id = so.song_id
+      where so.id = output_selections.output_id and s.user_id = auth.uid()
+    )
+  ) with check (
+    exists (
+      select 1 from song_outputs so
+      join songs s on s.id = so.song_id
+      where so.id = output_selections.output_id and s.user_id = auth.uid()
+    )
+  );
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Tempo node — a bpm a chord progression can plug into for real, beat-
+-- accurate playback pacing (see playProgression in src/audio/player.js).
+-- Started out session-only, like the vibe-compose tool; unlike that tool it
+-- carries actual song data (a real bpm, and which progression it feeds),
+-- so it needs the same canvas_x/y/width/height + DB row every other node has.
+-- ─────────────────────────────────────────────────────────────────────────────
+create table if not exists tempo_nodes (
+  id            uuid primary key default gen_random_uuid(),
+  song_id       uuid not null references songs(id) on delete cascade,
+  bpm           integer not null default 120,
+  canvas_x      double precision not null default 0,
+  canvas_y      double precision not null default 0,
+  canvas_width  double precision not null default 160,
+  canvas_height double precision not null default 120,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
+);
+
+drop trigger if exists trg_tempo_nodes_updated_at on tempo_nodes;
+create trigger trg_tempo_nodes_updated_at
+  before update on tempo_nodes
+  for each row execute function set_updated_at();
+
+create index if not exists idx_tempo_nodes_song on tempo_nodes(song_id);
+
+alter table tempo_nodes enable row level security;
+
+drop policy if exists tempo_nodes_owner on tempo_nodes;
+create policy tempo_nodes_owner on tempo_nodes
+  for all using (
+    exists (select 1 from songs s where s.id = tempo_nodes.song_id and s.user_id = auth.uid())
+  ) with check (
+    exists (select 1 from songs s where s.id = tempo_nodes.song_id and s.user_id = auth.uid())
+  );
+
+-- Which tempo node a chord progression is plugged into, if any — same
+-- optional-assignment shape as sections.chord_progression_id above.
+alter table chord_progressions drop constraint if exists chord_progressions_tempo_node_id_fkey;
+alter table chord_progressions add column if not exists tempo_node_id uuid;
+alter table chord_progressions
+  add constraint chord_progressions_tempo_node_id_fkey
+  foreign key (tempo_node_id) references tempo_nodes(id) on delete set null;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Rhyme scheme — which language/dialect the rhyme module reads a song's
+-- lines as (see src/utils/rhyme.js). A song-level setting, not a session
+-- toggle, so the rhyme reading stays the same for whoever opens it next.
+-- Castilian only has one variant for now; Catalan splits oriental/occidental
+-- because that's the actual phonetic fork that changes which lines rhyme.
+-- ─────────────────────────────────────────────────────────────────────────────
+alter table songs add column if not exists lyric_language text not null default 'es';
+alter table songs add column if not exists lyric_dialect text not null default 'central';
+
+alter table songs drop constraint if exists songs_lyric_language_dialect_check;
+alter table songs
+  add constraint songs_lyric_language_dialect_check
+  check (
+    (lyric_language = 'es' and lyric_dialect = 'central') or
+    (lyric_language = 'ca' and lyric_dialect in ('oriental', 'occidental'))
+  );

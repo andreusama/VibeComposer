@@ -5,7 +5,11 @@
 // This is an approximation, not a full grammar — good enough for a live
 // per-line counter, not meant to replace a linguist.
 
-const LANG_RULES = {
+// Exported so rhyme.js can scan the same vowel runs / hiatus rules to find
+// each word's stressed syllable, instead of re-deriving its own — a
+// hiatus break for syllable-counting purposes is the same event as a
+// syllable boundary for stress-placement purposes.
+export const LANG_RULES = {
   es: {
     strong: new Set(['a', 'e', 'o', 'á', 'é', 'ó']),
     // í/ú are weak but an explicit accent on them always forces a hiatus.
@@ -22,20 +26,20 @@ const LANG_RULES = {
   },
 };
 
-function stripToLetters(word) {
+export function stripToLetters(word) {
   return word.toLowerCase().replace(/[^a-zàèéíïòóúüñç']/gi, '');
 }
 
 // 'y' is a vowel (sounds like "i") only at the end of a word, after another
 // vowel (hoy, rey, muy, ley) — elsewhere it's a consonant (ya, yo, ayuda).
-function normalizeY(word) {
+export function normalizeY(word) {
   if (word.endsWith('y') && word.length > 1 && /[aeiouàèéíïòóúü]/.test(word[word.length - 2])) {
     return word.slice(0, -1) + 'i';
   }
   return word.replace(/y/g, '');
 }
 
-function silenceGuQu(word) {
+export function silenceGuQu(word) {
   // "qu"/"gu" + e/i → the u doesn't form its own syllable (que, qui, gue, gui).
   // A diéresis (güe/güi) means the u IS pronounced, so those are left alone.
   return word.replace(/(qu|gu)([ei])/g, (_, c, v) => c[0] + v);

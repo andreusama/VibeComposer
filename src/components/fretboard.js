@@ -13,7 +13,13 @@ const STRINGS    = ['G', 'C', 'E', 'A'];
  *   0 = open, -1 = muted, 1+ = fret number
  * @returns {string} Raw SVG markup
  */
-export function fretboardSVG(frets, accent = '#d4845a') {
+export function fretboardSVG(rawFrets, accent = '#d4845a') {
+  // -1 is the only meaningful value below zero (muted string). Anything
+  // lower has no meaning and used to place a dot above the nut, outside the
+  // diagram entirely — clamp defensively here too, not just at the input,
+  // so any already-stored bad value (typed before this existed) still
+  // renders sanely instead of drawing off the fretboard.
+  const frets = rawFrets.map((f) => Math.max(-1, f));
   const nonZero   = frets.filter((f) => f > 0);
   const maxFret   = nonZero.length ? Math.max(...nonZero) : 0;
   const startFret = maxFret > NUM_FRETS ? maxFret - NUM_FRETS + 1 : 1;
@@ -52,12 +58,22 @@ export function fretboardSVG(frets, accent = '#d4845a') {
     `<text x="${PAD + STRING_W * i}" y="${totalH - 4}" text-anchor="middle" fill="#8b7a6a" font-size="10" font-family="monospace">${s}</text>`
   ).join('');
 
+  // When the chord is fretted high enough that frets 1-4 wouldn't fit
+  // everything, the diagram window slides up the neck (startFret > 1) — a
+  // labeled chip pinned to the left, not a sliver of gray text, so it reads
+  // immediately as "this diagram starts at fret N" rather than looking like
+  // a diagram that's merely missing its low frets.
   const fretIndicator = !isAtNut
-    ? `<text x="${PAD - 14}" y="${NUT_Y + nutH + FRET_H * 0.55}" text-anchor="middle" fill="#6b635a" font-size="9" font-family="monospace">${startFret}fr</text>`
+    ? `<g>
+        <rect x="${PAD - 36}" y="${NUT_Y + nutH + FRET_H * 0.5 - 10}" width="28" height="20" rx="5" fill="#EEF0FC" stroke="#C7CCF2" stroke-width="1"/>
+        <text x="${PAD - 22}" y="${NUT_Y + nutH + FRET_H * 0.5 + 4}" text-anchor="middle" fill="#4552D6" font-size="11" font-weight="bold" font-family="monospace">${startFret}fr</text>
+      </g>`
     : '';
 
+  const leftMargin = isAtNut ? 0 : 20;
+
   return `
-    <svg width="${W}" height="${totalH}" viewBox="0 0 ${W} ${totalH}" style="display:block">
+    <svg width="${W + leftMargin}" height="${totalH}" viewBox="${-leftMargin} 0 ${W + leftMargin} ${totalH}" style="display:block">
       <rect x="${PAD}" y="${NUT_Y}" width="${W - PAD * 2}" height="${nutH}" fill="${isAtNut ? '#c8b89a' : '#444'}" rx="1"/>
       ${fretLines}
       ${stringLines}

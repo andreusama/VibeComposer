@@ -81,16 +81,21 @@ export async function playChord(frets, energyId = 'medium') {
  * Play the full 4-chord progression in sequence.
  * @param {object[]} progression  Array of chord objects with .ukulele frets
  * @param {string}   energyId
+ * @param {number}   [bpm]  From a tempo node plugged into the progression's
+ *   chord node. Without one, chords advance on the fixed pacing this always
+ *   used; with one, each chord holds for its own .beats count at that real
+ *   tempo, so a 2-beat chord and a 4-beat chord no longer take equally long.
  */
-export async function playProgression(progression, energyId = 'medium') {
+export async function playProgression(progression, energyId = 'medium', bpm) {
   await Tone.start();
   init(energyId);
 
-  const p        = ENERGY_PROFILES[energyId] || ENERGY_PROFILES.medium;
-  const chordGap = 1.2; // seconds between chords
+  const p = ENERGY_PROFILES[energyId] || ENERGY_PROFILES.medium;
+  const secondsPerBeat = bpm ? 60 / bpm : null;
 
-  progression.forEach((chord, i) => {
-    const now   = Tone.now() + i * chordGap;
+  let elapsed = 0;
+  progression.forEach((chord) => {
+    const now   = Tone.now() + elapsed;
     const freqs = chord.ukulele
       .map((fret, si) => fretToFreq(OPEN_STRINGS[si], fret))
       .filter(Boolean);
@@ -98,5 +103,7 @@ export async function playProgression(progression, energyId = 'medium') {
     freqs.forEach((freq, si) => {
       synth.triggerAttackRelease(freq, '4n', now + (si * p.strumMs / 1000));
     });
+
+    elapsed += secondsPerBeat ? secondsPerBeat * (chord.beats || 4) : 1.2;
   });
 }

@@ -2,6 +2,9 @@ import { useState, useCallback, useRef } from 'react';
 import { Handle, Position, NodeResizer } from '@xyflow/react';
 import { resolveMainThreadPath, saveOutputTitle, deleteOutputNode } from './canvasData.js';
 import { beginSave, endSave } from './saveStatus.js';
+import { splitIntoLines } from '../utils/textLines.js';
+import { classifyStanzaRhymes } from '../utils/rhyme.js';
+import { countLineSyllables } from '../utils/syllables.js';
 
 const HANDLE_STYLE = { width: 10, height: 10, background: '#1D1C1A', border: '2px solid #fff' };
 
@@ -24,7 +27,10 @@ function candidateLabel(byId, candidate, field) {
 }
 
 export default function OutputNode({ id, data, selected }) {
-  const { output, notes = [], links = [], progressionsById = {}, selections = {}, onDeleted, onSelectBranch } = data;
+  const {
+    output, notes = [], links = [], progressionsById = {}, selections = {}, onDeleted, onSelectBranch,
+    lyricLanguage, lyricDialect,
+  } = data;
   const [title, setTitle] = useState(output.title || '');
   const saveTimer = useRef(null);
 
@@ -83,6 +89,13 @@ export default function OutputNode({ id, data, selected }) {
             const line = note.lines?.[0];
             const chordSummary = summarizeProgression(progressionsById[note.chord_progression_id]);
             const chosenLinkId = selections[note.id];
+            // Same per-note stanza scope the note itself uses (rhyme letters
+            // restart at A per note, not across the whole song) — reusing
+            // the identical computation the note's own gutter already runs,
+            // just read-only here instead of scroll-synced to a textarea.
+            const textLines = splitIntoLines(line?.text || '');
+            const rhymeLines = classifyStanzaRhymes(textLines, lyricLanguage || 'es', lyricDialect || 'central');
+            const syllableCounts = textLines.map((l) => (l ? countLineSyllables(l, lyricLanguage || 'es') : null));
             return (
               <div className="output-line" key={note.id}>
                 {mergedFrom && (
@@ -107,7 +120,24 @@ export default function OutputNode({ id, data, selected }) {
                   <span className="output-line-type">{note.type}{note.custom_label ? ` · ${note.custom_label}` : ''}</span>
                   {chordSummary && <span className="output-line-chords">{chordSummary}</span>}
                 </div>
-                <p className="output-line-text">{line?.text || '—'}</p>
+                <div className="output-line-text">
+                  {textLines.length === 0 ? (
+                    <p className="output-text-line-row"><span className="output-text-line">—</span></p>
+                  ) : (
+                    textLines.map((lineText, i) => (
+                      <p className="output-text-line-row" key={i}>
+                        <span className="output-text-line">{lineText || '—'}</span>
+                        <span className="syllable-badge output-inline-badge">{syllableCounts[i] ?? ''}</span>
+                        <span
+                          className={`rhyme-badge output-inline-badge${rhymeLines[i].letter ? ` ${rhymeLines[i].type}` : ' empty'}`}
+                          title={rhymeLines[i].internalRhymeWords.size ? 'also rhymes internally within this line' : undefined}
+                        >
+                          {rhymeLines[i].letter ?? '·'}
+                        </span>
+                      </p>
+                    ))
+                  )}
+                </div>
 
                 {fork && (
                   <div className="output-fork nodrag">

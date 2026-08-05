@@ -19,9 +19,10 @@ import {
   createMainThreadLink, deleteNoteLink, assignProgressionToNote, setProgressionTempo,
   deleteNote, deleteChordProgression,
   loadOutputNodes, createOutputNode, deleteOutputNode, saveOutputPosition, setOutputPluggedNote,
-  loadOutputSelections, setOutputSelection, saveSongTitle,
+  loadOutputSelections, setOutputSelection, saveSongTitle, saveSongLyricSettings,
   loadTempoNodes, createTempoNode, saveTempoBpm, saveTempoPosition, deleteTempoNode,
 } from './canvasData.js';
+import { DIALECTS } from '../utils/rhyme.js';
 
 const NODE_TYPES = {
   textNote: TextNoteNode, chordProgression: ChordProgressionNode,
@@ -304,6 +305,33 @@ export default function CanvasScreen({ state, onExit }) {
       endSave();
     }, 500);
   }, [song?.id]);
+
+  // Drives what rhyme.js reads every note's lines as (see renderNodes,
+  // which injects these into every textNote's data reactively — a note
+  // captures this only at creation time otherwise, and would go stale the
+  // moment the selector changes, same class of bug as the note-type-vs-
+  // final-mix staleness fixed earlier).
+  const [lyricLanguage, setLyricLanguage] = useState(song?.lyric_language || 'es');
+  const [lyricDialect, setLyricDialect] = useState(song?.lyric_dialect || 'central');
+
+  useEffect(() => {
+    setLyricLanguage(song?.lyric_language || 'es');
+    setLyricDialect(song?.lyric_dialect || 'central');
+  }, [song?.id]);
+
+  const handleLyricLanguageChange = useCallback((e) => {
+    const language = e.target.value;
+    const dialect = DIALECTS[language][0];
+    setLyricLanguage(language);
+    setLyricDialect(dialect);
+    if (song?.id) { beginSave(); saveSongLyricSettings(song.id, language, dialect).finally(endSave); }
+  }, [song?.id]);
+
+  const handleLyricDialectChange = useCallback((e) => {
+    const dialect = e.target.value;
+    setLyricDialect(dialect);
+    if (song?.id) { beginSave(); saveSongLyricSettings(song.id, lyricLanguage, dialect).finally(endSave); }
+  }, [song?.id, lyricLanguage]);
 
   const handleNodeDeleted = useCallback((id) => {
     // A node's own ✕ button (this) bypasses React Flow's delete gesture
@@ -688,21 +716,29 @@ export default function CanvasScreen({ state, onExit }) {
     const progressionsById = Object.fromEntries(
       nodes.filter((n) => n.type === 'chordProgression').map((n) => [n.id, n.data.progression])
     );
-    return nodes.map((n) => (n.type === 'outputNode'
-      ? {
-        ...n,
-        data: {
-          ...n.data,
-          notes: textNotes,
-          links: mainThreadLinks,
-          progressionsById,
-          selections: Object.fromEntries(
-            selections.filter((s) => s.output_id === n.id).map((s) => [s.source_note_id, s.note_link_id])
-          ),
-        },
+    return nodes.map((n) => {
+      if (n.type === 'outputNode') {
+        return {
+          ...n,
+          data: {
+            ...n.data,
+            notes: textNotes,
+            links: mainThreadLinks,
+            progressionsById,
+            selections: Object.fromEntries(
+              selections.filter((s) => s.output_id === n.id).map((s) => [s.source_note_id, s.note_link_id])
+            ),
+            lyricLanguage,
+            lyricDialect,
+          },
+        };
       }
-      : n));
-  }, [nodes, edges, selections]);
+      if (n.type === 'textNote') {
+        return { ...n, data: { ...n.data, lyricLanguage, lyricDialect } };
+      }
+      return n;
+    });
+  }, [nodes, edges, selections, lyricLanguage, lyricDialect]);
 
   const handleSignOut = useCallback(async () => {
     if (!confirm('Sign out?')) return;
@@ -725,6 +761,21 @@ export default function CanvasScreen({ state, onExit }) {
             placeholder="untitled song"
             onChange={handleSongTitleChange}
           />
+          <span className="canvas-toolbar-divider" />
+
+          <div className="canvas-rhyme-select" title="language the rhyme scheme reads this song's lines as">
+            <select value={lyricLanguage} onChange={handleLyricLanguageChange}>
+              <option value="es">Castellano</option>
+              <option value="ca">Català</option>
+            </select>
+            {lyricLanguage === 'ca' && (
+              <select value={lyricDialect} onChange={handleLyricDialectChange}>
+                <option value="oriental">oriental</option>
+                <option value="occidental">occidental</option>
+              </select>
+            )}
+          </div>
+
           <span className="canvas-toolbar-divider" />
           <SaveStatus />
           <span className="canvas-toolbar-divider" />

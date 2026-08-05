@@ -1,7 +1,10 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Handle, Position, NodeResizer } from '@xyflow/react';
 import { SECTION_TYPES, STATUS_CYCLE, saveNoteType, saveNoteText, saveNoteStatus, saveNotePosition, deleteNote } from './canvasData.js';
 import { beginSave, endSave } from './saveStatus.js';
+import { splitIntoLines } from '../utils/textLines.js';
+import { classifyStanzaRhymes } from '../utils/rhyme.js';
+import { countLineSyllables } from '../utils/syllables.js';
 
 // Set explicitly rather than relying on the base stylesheet's 6px default,
 // which wasn't reliably applying — this guarantees a small, predictable dot
@@ -15,13 +18,40 @@ const HANDLE_STYLE = { width: 10, height: 10, background: '#1D1C1A', border: '2p
 const CHORD_HANDLE_STYLE = { width: 12, height: 12, background: '#4552D6', border: '2px solid #fff' };
 
 export default function TextNoteNode({ id, data, selected }) {
-  const { note, onDeleted, onOpenPanel, onTextChange, onTypeChange, chordSummary } = data;
+  const { note, onDeleted, onOpenPanel, onTextChange, onTypeChange, chordSummary, lyricLanguage, lyricDialect } = data;
   const [type, setType] = useState(note.type);
   const [customLabel, setCustomLabel] = useState(note.custom_label || '');
   const [text, setText] = useState(note.lines?.[0]?.text || '');
   const [status, setStatus] = useState(note.lines?.[0]?.status || 'provisional');
   const saveTimer = useRef(null);
   const lineId = note.lines?.[0]?.id;
+  const textareaRef = useRef(null);
+  const syllableStripRef = useRef(null);
+  const rhymeStripRef = useRef(null);
+
+  // Recomputed straight from the current text/language/dialect on every
+  // render — cheap (one note's worth of lines), no need to debounce a pure
+  // client-side read the way the actual Supabase save is debounced below.
+  const rhymeLines = useMemo(
+    () => classifyStanzaRhymes(splitIntoLines(text), lyricLanguage || 'es', lyricDialect || 'central'),
+    [text, lyricLanguage, lyricDialect]
+  );
+
+  const syllableCounts = useMemo(
+    () => splitIntoLines(text).map((line) => (line ? countLineSyllables(line, lyricLanguage || 'es') : null)),
+    [text, lyricLanguage]
+  );
+
+  // Both gutters are separate scrollable columns next to the textarea (it
+  // can't host inline React content), so their scroll position has to be
+  // mirrored by hand to stay lined up with the text once a note has more
+  // lines than fit in view — the classic line-number-gutter trick.
+  const handleTextareaScroll = useCallback(() => {
+    if (!textareaRef.current) return;
+    const { scrollTop } = textareaRef.current;
+    if (syllableStripRef.current) syllableStripRef.current.scrollTop = scrollTop;
+    if (rhymeStripRef.current) rhymeStripRef.current.scrollTop = scrollTop;
+  }, []);
 
   // Resync from the canonical copy only when something OUTSIDE this note
   // changed its text (promoting a variant, restoring a history entry) —
@@ -114,12 +144,36 @@ export default function TextNoteNode({ id, data, selected }) {
 
       {chordSummary && <div className="canvas-note-chords">{chordSummary}</div>}
 
-      <textarea
-        className="canvas-note-text nodrag nowheel"
-        value={text}
-        onChange={handleTextChange}
-        placeholder="write…"
-      />
+      <div className="canvas-note-text-row">
+        <textarea
+          ref={textareaRef}
+          className="canvas-note-text nodrag nowheel"
+          value={text}
+          onChange={handleTextChange}
+          onScroll={handleTextareaScroll}
+          placeholder="write…"
+        />
+        <div className="canvas-note-syllable-strip nodrag" ref={syllableStripRef}>
+          {syllableCounts.map((count, i) => (
+            <div className="syllable-badge" key={i}>{count ?? ''}</div>
+          ))}
+        </div>
+        {/* Uppercase = consonant rhyme, lowercase = assonant, a dot = no
+            match yet — one row per physical line, kept in lockstep with the
+            textarea above via handleTextareaScroll. */}
+        <div className="canvas-note-rhyme-strip nodrag" ref={rhymeStripRef}>
+          {rhymeLines.map((r, i) => (
+            <div
+              className={`rhyme-badge${r.letter ? ` ${r.type}` : ' empty'}`}
+              key={i}
+              title={r.internalRhymeWords.size ? 'also rhymes internally within this line' : undefined}
+            >
+              {r.letter ?? '·'}
+              {r.internalRhymeWords.size > 0 && <span className="rhyme-badge-internal-dot" />}
+            </div>
+          ))}
+        </div>
+      </div>
 
       <div className="canvas-note-foot">
         <span>{note.variantCount || 0} variant{note.variantCount === 1 ? '' : 's'}</span>

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { countLineSyllables } from '../utils/syllables.js';
+import { splitIntoLines } from '../utils/textLines.js';
 import { findRepeatedWords } from '../utils/repeatedWords.js';
 import {
   loadNoteDetail, addVariant, updateVariantText, deleteVariant, promoteVariant,
@@ -109,7 +110,12 @@ export default function NoteSidePanel({ note, userId, allNoteTexts, onClose, onT
     setRepeatResults(findRepeatedWords(allNoteTexts));
   }, [allNoteTexts]);
 
-  const syllables = countLineSyllables(currentText, lang);
+  // One count per physical line — counting the whole note as a single blob
+  // silently merged separate lines' words together (sinalefa doesn't apply
+  // across a line break), so a multi-line note reported the wrong number.
+  const syllableLines = splitIntoLines(currentText)
+    .map((line) => ({ line, count: countLineSyllables(line, lang) }))
+    .filter(({ line }) => line);
 
   return (
     <div className="note-panel">
@@ -215,12 +221,24 @@ export default function NoteSidePanel({ note, userId, allNoteTexts, onClose, onT
             <h4 className="note-group-label">Herramientas</h4>
             <div className="note-group-card">
               <div className="note-tool-row">
-                <span className="note-syllable-count">{syllables} syllables</span>
+                <span className="note-group-sublabel">syllables per line</span>
                 <select value={lang} onChange={(e) => setLang(e.target.value)}>
                   <option value="es">ES</option>
                   <option value="ca">CA</option>
                 </select>
               </div>
+              {syllableLines.length === 0 ? (
+                <p className="note-panel-empty">write a line to count</p>
+              ) : (
+                <ul className="note-syllable-list">
+                  {syllableLines.map(({ line, count }, i) => (
+                    <li className="note-syllable-row" key={i}>
+                      <span className="note-syllable-line">{line}</span>
+                      <span className="note-syllable-count">{count}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
               <button className="note-check-repeats-btn" onClick={handleCheckRepeats}>revisar repeticiones</button>
               {repeatResults && (
                 repeatResults.length === 0 ? (

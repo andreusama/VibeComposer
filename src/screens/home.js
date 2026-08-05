@@ -142,7 +142,7 @@ export async function attach(state, justEntered) {
 async function loadSongs() {
   const { data, error } = await supabase
     .from('songs')
-    .select('id, title, updated_at')
+    .select('id, title, updated_at, lyric_language, lyric_dialect')
     .order('updated_at', { ascending: false });
 
   if (error) { setState({ projectError: error.message }); return; }

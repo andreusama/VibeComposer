@@ -461,3 +461,21 @@ alter table chord_progressions add column if not exists tempo_node_id uuid;
 alter table chord_progressions
   add constraint chord_progressions_tempo_node_id_fkey
   foreign key (tempo_node_id) references tempo_nodes(id) on delete set null;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Rhyme scheme — which language/dialect the rhyme module reads a song's
+-- lines as (see src/utils/rhyme.js). A song-level setting, not a session
+-- toggle, so the rhyme reading stays the same for whoever opens it next.
+-- Castilian only has one variant for now; Catalan splits oriental/occidental
+-- because that's the actual phonetic fork that changes which lines rhyme.
+-- ─────────────────────────────────────────────────────────────────────────────
+alter table songs add column if not exists lyric_language text not null default 'es';
+alter table songs add column if not exists lyric_dialect text not null default 'central';
+
+alter table songs drop constraint if exists songs_lyric_language_dialect_check;
+alter table songs
+  add constraint songs_lyric_language_dialect_check
+  check (
+    (lyric_language = 'es' and lyric_dialect = 'central') or
+    (lyric_language = 'ca' and lyric_dialect in ('oriental', 'occidental'))
+  );

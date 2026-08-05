@@ -1372,6 +1372,25 @@ body::before {
     padding: calc(var(--space-1) * var(--canvas-scale)) calc(var(--space-1-5) * var(--canvas-scale));
 }
 
+.canvas-rhyme-select {
+    display: flex;
+    align-items: center;
+    gap: calc(var(--space-1) * var(--canvas-scale));
+}
+
+.canvas-rhyme-select select {
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: calc(var(--fs-secondary) * var(--canvas-scale));
+    color: var(--ink);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-sm);
+    background: #fff;
+    padding: calc(7px * var(--canvas-scale)) calc(10px * var(--canvas-scale));
+    cursor: pointer;
+}
+.canvas-rhyme-select select:hover { border-color: var(--graphite); }
+
 .canvas-zoom-btn {
     width: 20px;
     height: 20px;
@@ -1577,8 +1596,17 @@ body::before {
     padding: 0 calc(16px * var(--canvas-scale));
 }
 
+/* Row container: the textarea and its rhyme-badge gutter side by side,
+   both scrolling together (see handleTextareaScroll in TextNoteNode). */
+.canvas-note-text-row {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+}
+
 .canvas-note-text {
     flex: 1;
+    min-width: 0;
     resize: none;
     border: none;
     outline: none;
@@ -1589,6 +1617,53 @@ body::before {
     width: 100%;
     padding: calc(6px * var(--canvas-scale)) calc(16px * var(--canvas-scale)) calc(16px * var(--canvas-scale));
     background: transparent;
+    /* No soft-wrap: one physical line has to equal one visual row, or the
+       rhyme badge gutter next to it can't line up with the right line. */
+    white-space: pre;
+    overflow-x: auto;
+}
+
+.canvas-note-syllable-strip,
+.canvas-note-rhyme-strip {
+    flex-shrink: 0;
+    width: calc(26px * var(--canvas-scale));
+    padding-top: calc(6px * var(--canvas-scale));
+    overflow-y: hidden;
+    overflow-x: hidden;
+    border-left: 1px solid var(--hairline);
+}
+
+.syllable-badge {
+    height: calc(var(--fs-body) * var(--canvas-scale) * 1.6);
+    line-height: calc(var(--fs-body) * var(--canvas-scale) * 1.6);
+    text-align: center;
+    font-family: var(--font-mono);
+    font-size: calc(var(--fs-label) * var(--canvas-scale));
+    color: var(--graphite);
+}
+
+.rhyme-badge {
+    position: relative;
+    height: calc(var(--fs-body) * var(--canvas-scale) * 1.6);
+    line-height: calc(var(--fs-body) * var(--canvas-scale) * 1.6);
+    text-align: center;
+    font-family: var(--font-mono);
+    font-weight: 700;
+    font-size: calc(var(--fs-label) * var(--canvas-scale));
+}
+
+.rhyme-badge.consonant { color: var(--thread); }
+.rhyme-badge.assonant { color: var(--amber); }
+.rhyme-badge.empty { color: var(--hairline); }
+
+.rhyme-badge-internal-dot {
+    position: absolute;
+    top: calc(2px * var(--canvas-scale));
+    right: calc(2px * var(--canvas-scale));
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--rose);
 }
 
 .canvas-note-foot {
@@ -2119,11 +2194,37 @@ body::before {
 }
 
 .output-line-text {
+    display: flex;
+    flex-direction: column;
+}
+
+.output-text-line-row {
+    display: flex;
+    align-items: baseline;
+    gap: calc(var(--space-1-5) * var(--canvas-scale));
+}
+
+.output-text-line {
+    flex: 1;
+    min-width: 0;
     font-family: var(--font-serif);
     font-size: calc(var(--fs-body) * var(--canvas-scale));
     line-height: 1.5;
     color: var(--ink);
 }
+
+/* Same badges the note's own gutter uses (see .syllable-badge/.rhyme-badge)
+   — reset to a standalone inline size here since there's no scrolling
+   textarea to line-height-match against, just one row per physical line. */
+.output-inline-badge {
+    flex-shrink: 0;
+    height: auto;
+    line-height: 1;
+    padding: calc(2px * var(--canvas-scale)) calc(5px * var(--canvas-scale));
+}
+.output-inline-badge.rhyme-badge { border-radius: var(--r-sm); }
+.output-inline-badge.rhyme-badge.consonant { background: var(--thread-soft); }
+.output-inline-badge.rhyme-badge.assonant { background: var(--amber-soft); }
 
 /* A fork inside a final mix — the note itself renders as one normal line,
    this is just the "which way does THIS mix go" picker underneath it. */
@@ -2927,7 +3028,40 @@ body::before {
     flex-wrap: wrap;
 }
 
+.note-group-sublabel {
+    font-family: var(--font-sans);
+    font-size: calc(var(--fs-micro) * var(--canvas-scale));
+    color: var(--graphite-soft);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.note-syllable-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    margin-bottom: var(--space-2-5);
+}
+
+.note-syllable-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+}
+
+.note-syllable-line {
+    flex: 1;
+    min-width: 0;
+    font-size: calc(var(--fs-utility) * var(--canvas-scale));
+    color: var(--ink);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .note-syllable-count {
+    flex-shrink: 0;
     font-family: var(--font-mono);
     font-size: calc(var(--fs-utility) * var(--canvas-scale));
     color: var(--chord);

@@ -12,6 +12,13 @@ export function saveSongTitle(id, title) {
   return supabase.from('songs').update({ title }).eq('id', id);
 }
 
+// language and dialect always move together — the DB constraint only
+// allows (es, central) or (ca, oriental|occidental), so switching language
+// without also picking a valid dialect for it would fail the write.
+export function saveSongLyricSettings(id, language, dialect) {
+  return supabase.from('songs').update({ lyric_language: language, lyric_dialect: dialect }).eq('id', id);
+}
+
 export async function loadCanvasData(songId) {
   const [{ data: sections, error: sectionsError }, { data: progressions, error: progError }, { data: links, error: linksError }] =
     await Promise.all([

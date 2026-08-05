@@ -1032,6 +1032,74 @@ body::before {
 
 .react-flow__viewport { z-index: 1; }
 
+/* ─── Drag / resize feel ─────────────────────────────────────────────────────── */
+/* React Flow already does the hard part natively: translate3d-based node
+   positioning, rAF-batched updates during a drag, its own pointer-capture,
+   and a movement threshold before a drag registers (so clicks on buttons/
+   inputs, all marked .nodrag, stay clicks). Everything below is the polish
+   layer on top of that, not a replacement for it. */
+
+/* React Flow puts a `dragging` class on the node wrapper for as long as the
+   pointer is down and moving. Riding that (instead of re-rendering from
+   React state on every frame) keeps the lift effect free — it's pure CSS
+   reacting to a class the drag engine was already toggling anyway. */
+.react-flow__node.dragging { cursor: grabbing; }
+
+.canvas-note, .canvas-cp, .canvas-output, .vibe-node {
+    transition: box-shadow 140ms ease, transform 140ms ease;
+}
+
+.react-flow__node.dragging .canvas-note,
+.react-flow__node.dragging .canvas-cp,
+.react-flow__node.dragging .canvas-output,
+.react-flow__node.dragging .vibe-node {
+    transform: scale(1.02);
+    box-shadow: var(--sh-3), 0 22px 44px rgba(29, 28, 26, 0.22);
+}
+
+/* Applied for ~150ms by CanvasScreen right after a drop, once the position
+   has been snapped to the 8px grid — animates the "settle into place" from
+   the raw drop point to the snapped one, then gets cleared so it never
+   lingers and delays the *next* drag's first frame. */
+.react-flow__node.node-landing {
+    transition: transform 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* While any node is being dragged, every other node stops taking pointer
+   events — the browser no longer has to hit-test/hover-resolve a canvas
+   full of irrelevant nodes on each pointermove, which is exactly the kind
+   of thing that makes a drag feel gummy on a busy board. */
+.react-flow.canvas-flow-dragging .react-flow__node:not(.dragging) {
+    pointer-events: none;
+}
+
+/* The default resize dot is 5x5px — easy to see, hard to actually grab.
+   The hit target grows to 16px while the visible dot stays small, the same
+   trick Figma/Miro use: aim is generous, the mark it leaves is not. */
+.react-flow__resize-control.handle {
+    width: 16px;
+    height: 16px;
+    background: transparent;
+    border: none;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.react-flow__resize-control.handle::after {
+    content: '';
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--thread);
+    border: 2px solid #fff;
+    box-shadow: var(--sh-1);
+    transition: transform 120ms ease;
+}
+.react-flow__resize-control.handle:hover::after {
+    transform: scale(1.4);
+}
+
 /* ─── Canvas toolbar ──────────────────────────────────────────────────────────── */
 
 .canvas-toolbar {

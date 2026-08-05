@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { Handle, Position, NodeResizer } from '@xyflow/react';
 import { fretboardSVG } from '../components/fretboard.js';
 import { playChord, playProgression } from '../audio/player.js';
@@ -33,8 +33,28 @@ export default function ChordProgressionNode({ id, data, selected, width }) {
   const [chords, setChords] = useState(cp.progression?.length ? cp.progression : [EMPTY_CHORD()]);
   const saveTimer = useRef(null);
   const dragIndexRef = useRef(null);
+  const [shiftHeld, setShiftHeld] = useState(false);
 
   const isExpanded = (width ?? cp.canvas_width ?? 260) >= EXPANDED_MIN_WIDTH;
+
+  // React Flow's NodeResizer only takes a static keepAspectRatio prop, no
+  // built-in "hold a modifier key to lock" behavior — this fills that gap
+  // for the fretboard diagrams, where a squashed/stretched resize actually
+  // distorts the content instead of just reflowing it. Only listens while
+  // the resize handles are actually on screen (selected), so idle nodes
+  // aren't each carrying their own window listener for no reason.
+  useEffect(() => {
+    if (!selected) return undefined;
+    const onKeyDown = (e) => { if (e.key === 'Shift') setShiftHeld(true); };
+    const onKeyUp = (e) => { if (e.key === 'Shift') setShiftHeld(false); };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      setShiftHeld(false);
+    };
+  }, [selected]);
 
   const scheduleSave = useCallback((nextTitle, nextKey, nextChords) => {
     if (saveTimer.current) endSave();
@@ -136,7 +156,7 @@ export default function ChordProgressionNode({ id, data, selected, width }) {
 
   return (
     <div className={`canvas-cp${selected ? ' selected' : ''} ${isExpanded ? 'cp-expanded' : 'cp-collapsed'}`}>
-      <NodeResizer minWidth={220} minHeight={140} isVisible={selected} onResizeEnd={handleResizeEnd} />
+      <NodeResizer minWidth={220} minHeight={140} isVisible={selected} keepAspectRatio={shiftHeld} onResizeEnd={handleResizeEnd} />
       {/* Single dedicated output — this is the only handle a chord-progression
           node has, and it only makes sense plugged into a text note's "chord"
           handle. No left/right main-thread-style handles here on purpose. */}

@@ -36,6 +36,11 @@ const DEFAULT_PROGRESSION_HEIGHT = 220;
 const DEFAULT_OUTPUT_WIDTH = 320;
 const DEFAULT_OUTPUT_HEIGHT = 240;
 
+// Matches Figma's default grid — fine enough to feel unobtrusive, coarse
+// enough that "almost aligned" nodes stop happening.
+const POSITION_SNAP = 8;
+const snapToGrid = (v) => Math.round(v / POSITION_SNAP) * POSITION_SNAP;
+
 function noteToFlowNode(note, callbacks) {
   return {
     id: note.id,
@@ -161,6 +166,11 @@ export default function CanvasScreen({ state, onExit }) {
   // each output's own data, since a single connect/delete action elsewhere
   // never needs to touch this.
   const [selections, setSelections] = useState([]);
+  // Drives .canvas-flow-dragging (see style.css) — while true, every node
+  // except the one being dragged stops taking pointer events, so the
+  // browser isn't hover/hit-testing a whole board of irrelevant nodes on
+  // every pointermove of the drag.
+  const [isDragging, setIsDragging] = useState(false);
   const edgesRef = useRef([]);
   edgesRef.current = edges;
 
@@ -280,10 +290,25 @@ export default function CanvasScreen({ state, onExit }) {
   const onNodesChange = useCallback((changes) => setNodes((nds) => applyNodeChanges(changes, nds)), []);
   const onEdgesChange = useCallback((changes) => setEdges((eds) => applyEdgeChanges(changes, eds)), []);
 
+  const onNodeDragStart = useCallback(() => setIsDragging(true), []);
+
   const onNodeDragStop = useCallback((_evt, node) => {
-    const save = node.type === 'textNote' ? saveNotePosition(node.id, node.position, node.width, node.height)
-      : node.type === 'chordProgression' ? saveProgressionPosition(node.id, node.position, node.width, node.height)
-      : node.type === 'outputNode' ? saveOutputPosition(node.id, node.position, node.width, node.height)
+    setIsDragging(false);
+
+    // Snap to the 8px grid on drop rather than live during the drag — doing
+    // it live would mean the node jumps between grid points instead of
+    // tracking the cursor, which reads as laggy, not precise. `node-landing`
+    // is a one-shot class (see style.css) that animates this correction,
+    // then clears itself so the *next* drag isn't dragging a transition too.
+    const position = { x: snapToGrid(node.position.x), y: snapToGrid(node.position.y) };
+    setNodes((nds) => nds.map((n) => (n.id === node.id ? { ...n, position, className: 'node-landing' } : n)));
+    window.setTimeout(() => {
+      setNodes((nds) => nds.map((n) => (n.id === node.id ? { ...n, className: undefined } : n)));
+    }, 160);
+
+    const save = node.type === 'textNote' ? saveNotePosition(node.id, position, node.width, node.height)
+      : node.type === 'chordProgression' ? saveProgressionPosition(node.id, position, node.width, node.height)
+      : node.type === 'outputNode' ? saveOutputPosition(node.id, position, node.width, node.height)
       : null;
     if (save) { beginSave(); save.finally(endSave); }
   }, []);
@@ -503,11 +528,13 @@ export default function CanvasScreen({ state, onExit }) {
           <div className="canvas-loading">loading…</div>
         ) : (
           <ReactFlow
+            className={isDragging ? 'canvas-flow-dragging' : undefined}
             nodes={renderNodes}
             edges={edges}
             nodeTypes={NODE_TYPES}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
+            onNodeDragStart={onNodeDragStart}
             onNodeDragStop={onNodeDragStop}
             onConnect={onConnect}
             onNodesDelete={onNodesDelete}

@@ -70,7 +70,12 @@ export default function OutputNode({ id, data, selected }) {
         <button className="output-delete nodrag" onClick={handleDelete} title="delete this mix">✕</button>
       </div>
 
-      <div className="output-body nodrag nowheel">
+      {/* No nodrag here on purpose — the rendered lines are read-only text,
+          not an editor, so clicking into them should behave like clicking
+          any other blank part of the card: it drags the node. The fork/
+          merge pickers and title input keep their own nodrag so those
+          clicks still work as clicks, not drag starts. */}
+      <div className="output-body nowheel">
         {!path.length ? (
           <p className="output-empty">plug a note in to render the song here</p>
         ) : (

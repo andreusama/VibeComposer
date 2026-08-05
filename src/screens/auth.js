@@ -7,24 +7,22 @@ export function render(state) {
   return `
     <div class="header">
       <h1>vibe composer</h1>
-      <span class="tagline">lyrics editor</span>
+      <span class="tagline">sign in</span>
     </div>
-    <div class="muse-screen">
+    <div class="body">
+      <div class="auth-card">
+        <div class="auth-card-title">sign in to write</div>
+        <div class="auth-card-sub">we'll email you a link — no password to remember.</div>
 
-      <div class="muse-prompt">sign in to write</div>
-      <div class="muse-sub">we'll email you a link — no password to remember.</div>
+        ${state.projectError ? `<div class="error-banner">${state.projectError}</div>` : ''}
 
-      ${state.projectError ? `<div class="error-banner">${state.projectError}</div>` : ''}
-
-      <div id="auth-form">
-        <input type="email" id="auth-email" class="place-input" placeholder="you@example.com" />
-        <div class="muse-footer">
-          <button class="continue-btn enabled" id="auth-send">send magic link →</button>
+        <div id="auth-form" class="auth-form">
+          <input type="email" id="auth-email" class="auth-input" placeholder="you@example.com" />
+          <button class="continue-btn enabled auth-submit" id="auth-send">send magic link →</button>
         </div>
+
+        <div id="auth-sent" class="confirm-label hidden"></div>
       </div>
-
-      <div id="auth-sent" class="confirm-label hidden"></div>
-
     </div>
   `;
 }

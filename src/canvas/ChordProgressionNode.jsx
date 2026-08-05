@@ -3,6 +3,7 @@ import { Handle, Position, NodeResizer } from '@xyflow/react';
 import { fretboardSVG } from '../components/fretboard.js';
 import { playChord, playProgression } from '../audio/player.js';
 import { saveProgressionContent, saveProgressionPosition, deleteChordProgression } from './canvasData.js';
+import { beginSave, endSave } from './saveStatus.js';
 
 const EMPTY_CHORD = () => ({ chord: '', function: '', feel: '', beats: 4, ukulele: [0, 0, 0, 0] });
 const STRING_LABELS = ['G', 'C', 'E', 'A'];
@@ -36,7 +37,9 @@ export default function ChordProgressionNode({ id, data, selected, width }) {
   const isExpanded = (width ?? cp.canvas_width ?? 260) >= EXPANDED_MIN_WIDTH;
 
   const scheduleSave = useCallback((nextTitle, nextKey, nextChords) => {
+    if (saveTimer.current) endSave();
     clearTimeout(saveTimer.current);
+    beginSave();
     saveTimer.current = setTimeout(async () => {
       const { error } = await saveProgressionContent(id, { title: nextTitle, key: nextKey, progression: nextChords });
       // This save has no error UI of its own (unlike the note panel) — without
@@ -44,6 +47,7 @@ export default function ChordProgressionNode({ id, data, selected, width }) {
       // case) fails completely silently and the next reload just looks like
       // the typed edits never happened.
       if (error) console.error('chord progression save failed:', error);
+      endSave();
     }, 500);
   }, [id]);
 

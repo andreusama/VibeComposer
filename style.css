@@ -180,6 +180,62 @@ body::before {
     text-transform: uppercase;
 }
 
+.header-action {
+    margin-left: auto;
+    align-self: center;
+}
+
+/* ─── Auth ───────────────────────────────────────────────────────────────────── */
+.auth-card {
+    max-width: 400px;
+    margin: var(--space-8) auto 0;
+    background: #fff;
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-lg);
+    box-shadow: var(--sh-1);
+    padding: var(--space-6);
+}
+
+.auth-card-title {
+    font-family: var(--font-display);
+    font-size: var(--fs-h2);
+    font-weight: 600;
+    color: var(--ink);
+    margin-bottom: var(--space-1-5);
+}
+
+.auth-card-sub {
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    color: var(--graphite);
+    line-height: 1.5;
+    margin-bottom: var(--space-5);
+}
+
+.auth-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.auth-input {
+    width: 100%;
+    padding: var(--space-3) var(--space-3-5);
+    font-family: var(--font-sans);
+    font-size: var(--fs-body);
+    color: var(--ink);
+    background: var(--paper);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-sm);
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.auth-input:focus { border-color: var(--accent); background: #fff; }
+.auth-input::placeholder { color: var(--graphite-soft); }
+
+.auth-submit { width: 100%; text-align: center; }
+
 /* ─── Body ───────────────────────────────────────────────────────────────────── */
 .body {
     padding: var(--space-8);
@@ -748,70 +804,198 @@ body::before {
 .hidden { display: none !important; }
 
 /* ─── Home (projects dashboard) ──────────────────────────────────────────────── */
-.lyrics-home-top {
+.projects-toolbar {
     display: flex;
-    justify-content: space-between;
-    margin-bottom: 24px;
-}
-
-.lyrics-song-list {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.lyrics-song-row {
-    display: flex;
-    justify-content: space-between;
     align-items: center;
-    gap: 16px;
-    width: 100%;
-    padding: 16px 20px;
-    border-radius: var(--r-sm);
-    border: 1px solid var(--hairline);
-    background: var(--surface);
-    box-shadow: var(--sh-1);
-    transition: all 0.2s;
+    justify-content: space-between;
+    gap: var(--space-4);
+    margin-bottom: var(--space-6);
     flex-wrap: wrap;
 }
 
-.lyrics-song-row:hover {
-    border-color: var(--graphite);
-    box-shadow: var(--sh-2);
+.projects-count {
+    font-family: var(--font-mono);
+    font-size: var(--fs-label);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--graphite);
 }
 
-.lyrics-song-info {
+.projects-search {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    border: 1px solid var(--hairline);
+    border-radius: 20px;
+    background: #fff;
+    padding: var(--space-2) var(--space-3-5);
+    min-width: 220px;
+}
+
+.projects-search-icon { color: var(--graphite-soft); font-size: var(--fs-secondary); }
+
+.projects-search input {
+    border: none;
+    outline: none;
+    background: none;
+    flex: 1;
+    font-family: var(--font-mono);
+    font-size: var(--fs-secondary);
+    color: var(--ink);
+}
+
+.projects-search input::placeholder { color: var(--graphite-soft); }
+
+.projects-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: var(--space-5);
+}
+
+.project-new-card {
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    min-width: 160px;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    min-height: 260px;
+    border: 1.5px dashed var(--hairline);
+    border-radius: var(--r-lg);
+    background: none;
+    color: var(--graphite);
+    cursor: pointer;
+    transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+    font-family: var(--font-sans);
 }
 
-.lyrics-song-title {
+.project-new-card:hover {
+    border-color: var(--chord);
+    color: var(--chord);
+    background: var(--chord-soft);
+}
+
+.project-new-icon {
+    font-size: var(--fs-display);
+    line-height: 1;
+}
+
+.project-new-card span:last-child {
+    font-size: var(--fs-secondary);
+    font-weight: 600;
+}
+
+.project-card {
+    display: flex;
+    flex-direction: column;
+    border-radius: var(--r-lg);
+    border: 1px solid var(--hairline);
+    background: #fff;
+    box-shadow: var(--sh-1);
+    overflow: hidden;
+    transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.project-card:hover { box-shadow: var(--sh-2); border-color: var(--graphite); }
+
+.project-preview {
+    position: relative;
+    height: 130px;
+    background: var(--paper-deep);
+    background-image: radial-gradient(circle, rgba(29, 28, 26, 0.08) 1px, transparent 1px);
+    background-size: 16px 16px;
+    overflow: hidden;
+}
+
+.project-preview-svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.project-preview-svg line { stroke: var(--thread); stroke-width: 1; opacity: 0.6; }
+
+.project-preview-node {
+    position: absolute;
+    width: 28px;
+    height: 16px;
+    transform: translate(-50%, -50%);
+    background: #fff;
+    border: 1px solid var(--hairline);
+    border-radius: 4px;
+    box-shadow: var(--sh-1);
+}
+
+.project-preview-dots {
+    position: absolute;
+    left: 50%;
+    bottom: var(--space-2);
+    transform: translateX(-50%);
+    display: flex;
+    gap: var(--space-1-5);
+}
+
+.project-preview-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #fff;
+    border: 1.5px solid var(--graphite-soft);
+}
+
+.project-preview-dot.unresolved { border-color: var(--amber); background: var(--amber-soft); }
+.project-preview-dot.provisional { border-color: var(--graphite-soft); background: #fff; }
+.project-preview-dot.closed { border-color: var(--thread); background: var(--thread-soft); }
+
+.project-card-body {
+    padding: var(--space-4) var(--space-4) var(--space-3);
+}
+
+.project-card-title {
     font-family: var(--font-display);
     font-size: var(--fs-h2);
     font-weight: 600;
     color: var(--ink);
+    margin-bottom: var(--space-1-5);
 }
 
-.lyrics-song-chip {
+.project-card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+}
+
+.project-meta-lines,
+.project-meta-chords {
     font-family: var(--font-mono);
     font-size: var(--fs-eyebrow);
-    color: var(--chord);
-    letter-spacing: 0.3px;
 }
 
-.lyrics-song-actions {
+.project-meta-lines { color: var(--thread); }
+.project-meta-chords { color: var(--chord); }
+
+.project-card-foot {
     display: flex;
-    gap: 8px;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-3) var(--space-4);
+    border-top: 1px solid var(--hairline);
 }
 
-.lyrics-song-date {
+.project-card-date {
     font-family: var(--font-mono);
     font-size: var(--fs-eyebrow);
     color: var(--faint);
     white-space: nowrap;
 }
+
+.project-card-open {
+    background: none;
+    border: none;
+    font-family: var(--font-sans);
+    font-weight: 700;
+    font-size: var(--fs-secondary);
+    color: var(--ink);
+    cursor: pointer;
+    padding: var(--space-1);
+    transition: color 0.12s ease;
+}
+
+.project-card-open:hover { color: var(--chord); }
 
 /* ─── Canvas screen ───────────────────────────────────────────────────────────── */
 /* Everything below was formerly src/canvas/canvas.css, merged in so the whole
@@ -872,6 +1056,34 @@ body::before {
     color: var(--ink);
 }
 
+.canvas-toolbar-divider {
+    width: 1px;
+    align-self: stretch;
+    background: var(--hairline);
+    flex-shrink: 0;
+}
+
+.canvas-save-status {
+    display: flex;
+    align-items: center;
+    gap: calc(var(--space-1-5) * var(--canvas-scale));
+    font-family: var(--font-mono);
+    font-size: calc(var(--fs-eyebrow) * var(--canvas-scale));
+    color: var(--graphite);
+    white-space: nowrap;
+}
+
+.canvas-save-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--thread);
+    flex-shrink: 0;
+    transition: background-color 0.15s ease;
+}
+
+.canvas-save-dot.saving { background: var(--amber); }
+
 .canvas-hint {
     font-family: var(--font-mono);
     font-size: calc(var(--fs-eyebrow) * var(--canvas-scale));
@@ -882,8 +1094,46 @@ body::before {
 .canvas-toolbar-right {
     margin-left: auto;
     display: flex;
+    align-items: center;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: calc(var(--space-2) * var(--canvas-scale));
+}
+
+.canvas-zoom {
+    display: flex;
+    align-items: center;
+    gap: calc(var(--space-1) * var(--canvas-scale));
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-sm);
+    background: #fff;
+    padding: calc(var(--space-1) * var(--canvas-scale)) calc(var(--space-1-5) * var(--canvas-scale));
+}
+
+.canvas-zoom-btn {
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: none;
+    color: var(--graphite);
+    cursor: pointer;
+    font-size: calc(var(--fs-utility) * var(--canvas-scale));
+    line-height: 1;
+    border-radius: 4px;
+    transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.canvas-zoom-btn:hover { background: var(--paper-deep); color: var(--ink); }
+
+.canvas-zoom-pct {
+    font-family: var(--font-mono);
+    font-size: calc(var(--fs-eyebrow) * var(--canvas-scale));
+    color: var(--ink);
+    min-width: 3em;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
 }
 
 .canvas-btn {
@@ -893,6 +1143,7 @@ body::before {
     background: #fff;
     color: var(--ink);
     font-family: var(--font-sans);
+    font-weight: 600;
     font-size: calc(var(--fs-secondary) * var(--canvas-scale));
     cursor: pointer;
     transition: all 0.15s;
@@ -903,6 +1154,53 @@ body::before {
     border-color: var(--graphite);
     background: var(--paper);
 }
+
+.canvas-btn-ghost {
+    border-color: transparent;
+    background: none;
+    font-weight: 400;
+    color: var(--graphite);
+}
+
+.canvas-btn-ghost:hover {
+    border-color: transparent;
+    background: none;
+    color: var(--ink);
+}
+
+.canvas-btn-chord { color: var(--chord); }
+.canvas-btn-chord:hover { border-color: var(--chord); }
+
+.canvas-btn-vibes {
+    background: var(--ink);
+    border-color: var(--ink);
+    color: #fff;
+}
+
+.canvas-btn-vibes:hover {
+    background: var(--graphite);
+    border-color: var(--graphite);
+}
+
+.canvas-avatar {
+    width: 28px;
+    height: 28px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    border: 1px solid var(--chord-line);
+    background: var(--chord-soft);
+    color: var(--chord);
+    font-family: var(--font-sans);
+    font-weight: 700;
+    font-size: calc(var(--fs-eyebrow) * var(--canvas-scale));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: border-color 0.12s ease;
+}
+
+.canvas-avatar:hover { border-color: var(--chord); }
 
 .canvas-error {
     position: absolute;
@@ -929,18 +1227,6 @@ body::before {
 }
 
 /* React Flow chrome, restyled minimal */
-.react-flow__controls {
-    box-shadow: none;
-    border: 1px solid var(--hairline);
-    border-radius: var(--r-sm);
-    overflow: hidden;
-}
-
-.react-flow__controls-button {
-    background: #fff;
-    border-bottom: 1px solid var(--hairline);
-}
-
 .react-flow__attribution { display: none; }
 
 /* ─── Text note node ──────────────────────────────────────────────────────────── */
@@ -1438,9 +1724,21 @@ body::before {
 .canvas-output.selected { box-shadow: var(--sh-3); }
 
 .output-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: calc(var(--space-2) * var(--canvas-scale));
     padding: calc(var(--space-2-5) * var(--canvas-scale)) calc(var(--space-3-5) * var(--canvas-scale));
     border-bottom: 1px solid var(--hairline);
     background: var(--paper-deep);
+}
+
+.output-head-left {
+    display: flex;
+    align-items: center;
+    gap: calc(var(--space-2) * var(--canvas-scale));
+    min-width: 0;
+    flex: 1;
 }
 
 .output-eyebrow {
@@ -1450,7 +1748,40 @@ body::before {
     letter-spacing: 0.1em;
     text-transform: uppercase;
     color: var(--ink);
+    flex-shrink: 0;
 }
+
+.output-title {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    outline: none;
+    background: none;
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: calc(var(--fs-secondary) * var(--canvas-scale));
+    color: var(--ink);
+}
+
+.output-title::placeholder { color: var(--graphite-soft); }
+
+.output-delete {
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: none;
+    color: var(--graphite);
+    cursor: pointer;
+    border-radius: var(--r-sm);
+    font-size: calc(var(--fs-label) * var(--canvas-scale));
+    transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.output-delete:hover { background: var(--rose-soft); color: var(--rose); }
 
 .output-body {
     flex: 1;
@@ -1501,6 +1832,49 @@ body::before {
     font-size: calc(var(--fs-body) * var(--canvas-scale));
     line-height: 1.5;
     color: var(--ink);
+}
+
+/* A fork inside a final mix — the note itself renders as one normal line,
+   this is just the "which way does THIS mix go" picker underneath it. */
+.output-fork {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: calc(var(--space-1-5) * var(--canvas-scale));
+    margin-top: calc(var(--space-2) * var(--canvas-scale));
+    padding: calc(var(--space-2) * var(--canvas-scale));
+    background: var(--amber-soft);
+    border: 1px dashed var(--amber);
+    border-radius: var(--r-sm);
+}
+
+.output-fork-label {
+    font-family: var(--font-mono);
+    font-size: calc(var(--fs-micro) * var(--canvas-scale));
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--amber);
+    flex-shrink: 0;
+}
+
+.output-fork-btn {
+    font-family: var(--font-sans);
+    font-size: calc(var(--fs-eyebrow) * var(--canvas-scale));
+    padding: calc(var(--space-1) * var(--canvas-scale)) calc(var(--space-2) * var(--canvas-scale));
+    border-radius: 20px;
+    border: 1px solid var(--hairline);
+    background: #fff;
+    color: var(--graphite);
+    cursor: pointer;
+    transition: all 0.12s ease;
+}
+
+.output-fork-btn:hover { border-color: var(--amber); color: var(--ink); }
+
+.output-fork-btn.chosen {
+    background: var(--amber);
+    border-color: var(--amber);
+    color: #fff;
 }
 
 /* ─── Vibe-compose node — a 5-step wizard living on the canvas itself, tool

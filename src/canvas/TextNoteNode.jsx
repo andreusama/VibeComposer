@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Handle, Position, NodeResizer } from '@xyflow/react';
 import { SECTION_TYPES, STATUS_CYCLE, saveNoteType, saveNoteText, saveNoteStatus, saveNotePosition, deleteNote } from './canvasData.js';
+import { beginSave, endSave } from './saveStatus.js';
 
 // Set explicitly rather than relying on the base stylesheet's 6px default,
 // which wasn't reliably applying — this guarantees a small, predictable dot
@@ -36,8 +37,15 @@ export default function TextNoteNode({ id, data, selected }) {
     const val = e.target.value;
     setText(val);
     onTextChange?.(id, val);
+    // Every reschedule closes out the save it's replacing so the toolbar's
+    // pending count doesn't grow forever while someone keeps typing.
+    if (saveTimer.current) endSave();
     clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => { if (lineId) saveNoteText(lineId, val); }, 500);
+    beginSave();
+    saveTimer.current = setTimeout(async () => {
+      if (lineId) await saveNoteText(lineId, val);
+      endSave();
+    }, 500);
   }, [lineId, id, onTextChange]);
 
   const handleTypeChange = useCallback((e) => {

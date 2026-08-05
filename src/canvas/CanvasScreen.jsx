@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
-  ReactFlow, Background, Controls, addEdge,
+  ReactFlow, Background, addEdge, useReactFlow, useViewport,
   applyNodeChanges, applyEdgeChanges, ReactFlowProvider,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
@@ -10,12 +10,15 @@ import OutputNode from './OutputNode.jsx';
 import VibeComposeNode from './VibeComposeNode.jsx';
 import NoteSidePanel from './NoteSidePanel.jsx';
 import { setState } from '../state/store.js';
+import { supabase } from '../utils/supabaseClient.js';
+import { beginSave, endSave, subscribeSaveStatus } from './saveStatus.js';
 import {
   loadCanvasData, createNote, createChordProgression, createVibeProgression,
   saveNotePosition, saveProgressionPosition,
   createMainThreadLink, deleteNoteLink, assignProgressionToNote,
   deleteNote, deleteChordProgression,
-  ensureOutputNode, saveOutputPosition, setOutputPluggedNote,
+  loadOutputNodes, createOutputNode, deleteOutputNode, saveOutputPosition, setOutputPluggedNote,
+  loadOutputSelections, setOutputSelection,
 } from './canvasData.js';
 
 const NODE_TYPES = {
@@ -55,18 +58,16 @@ function progressionToFlowNode(cp, callbacks) {
   };
 }
 
-// Created once per song, never by the user — no onDeleted callback exists
-// for it, and deletable:false keeps React Flow from ever handing it to
-// onNodesDelete via the selection + Backspace/Delete gesture either.
-function outputToFlowNode(output) {
+// A song starts with one (see loadOutputNodes), but from there they're
+// created/deleted like any other node — songs can hold several mix variants.
+function outputToFlowNode(output, callbacks) {
   return {
     id: output.id,
     type: 'outputNode',
     position: { x: output.canvas_x || 0, y: output.canvas_y || 0 },
     width: output.canvas_width || DEFAULT_OUTPUT_WIDTH,
     height: output.canvas_height || DEFAULT_OUTPUT_HEIGHT,
-    deletable: false,
-    data: { output },
+    data: { output, ...callbacks },
   };
 }
 
@@ -120,6 +121,34 @@ function summarizeProgression(cp) {
   return chords.length ? chords.join(' · ') : null;
 }
 
+// Needs to live inside <ReactFlowProvider> to call useReactFlow/useViewport
+// — reads the live zoom level reactively instead of polling it.
+function ZoomControl() {
+  const { zoomIn, zoomOut } = useReactFlow();
+  const { zoom } = useViewport();
+  return (
+    <div className="canvas-zoom">
+      <button className="canvas-zoom-btn" onClick={() => zoomOut()} title="zoom out">−</button>
+      <span className="canvas-zoom-pct">{Math.round(zoom * 100)}%</span>
+      <button className="canvas-zoom-btn" onClick={() => zoomIn()} title="zoom in">+</button>
+    </div>
+  );
+}
+
+// Reflects saves happening deep inside note/progression nodes (see
+// saveStatus.js) — a plain subscription rather than prop-drilling, since
+// the writes it's tracking happen several component layers away.
+function SaveStatus() {
+  const [pending, setPending] = useState(0);
+  useEffect(() => subscribeSaveStatus(setPending), []);
+  return (
+    <span className="canvas-save-status">
+      <span className={`canvas-save-dot${pending > 0 ? ' saving' : ''}`} />
+      {pending > 0 ? 'saving…' : 'saved'}
+    </span>
+  );
+}
+
 export default function CanvasScreen({ state, onExit }) {
   const song = state.activeSong;
   const [nodes, setNodes] = useState([]);
@@ -127,6 +156,11 @@ export default function CanvasScreen({ state, onExit }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [selectedNoteId, setSelectedNoteId] = useState(null);
+  // Per-mix fork choices: [{ output_id, source_note_id, note_link_id }, ...].
+  // Kept flat and filtered per-node in renderNodes rather than nested inside
+  // each output's own data, since a single connect/delete action elsewhere
+  // never needs to touch this.
+  const [selections, setSelections] = useState([]);
   const edgesRef = useRef([]);
   edgesRef.current = edges;
 
@@ -184,17 +218,34 @@ export default function CanvasScreen({ state, onExit }) {
 
   const progressionCallbacks = { onDeleted: handleNodeDeleted, onArrange: handleArrange };
 
+  // A final mix is one linear playthrough — this is how it records which
+  // branch it takes at a specific fork (see resolveMainThreadPath). Local
+  // state is an upsert-by-hand since there's no DB round trip to wait on
+  // before the mix should already reflect the new choice.
+  const handleSelectBranch = useCallback((outputId, sourceNoteId, noteLinkId) => {
+    setOutputSelection(outputId, sourceNoteId, noteLinkId);
+    setSelections((sels) => [
+      ...sels.filter((s) => !(s.output_id === outputId && s.source_note_id === sourceNoteId)),
+      { output_id: outputId, source_note_id: sourceNoteId, note_link_id: noteLinkId },
+    ]);
+  }, []);
+
+  const outputCallbacks = { onDeleted: handleNodeDeleted, onSelectBranch: handleSelectBranch };
+
   useEffect(() => {
     if (!song) { onExit(); return; }
     let cancelled = false;
     (async () => {
-      const [{ notes, progressions, links, error }, { output, error: outputError }] = await Promise.all([
+      const [{ notes, progressions, links, error }, { outputs, error: outputError }] = await Promise.all([
         loadCanvasData(song.id),
-        ensureOutputNode(song.id),
+        loadOutputNodes(song.id),
       ]);
       if (cancelled) return;
       if (error) { setLoadError(error.message); setLoading(false); return; }
       if (outputError) { setLoadError(outputError.message); setLoading(false); return; }
+      const { selections: loadedSelections, error: selectionsError } = await loadOutputSelections(outputs.map((o) => o.id));
+      if (cancelled) return;
+      if (selectionsError) { setLoadError(selectionsError.message); setLoading(false); return; }
       const progressionsById = Object.fromEntries(progressions.map((p) => [p.id, p]));
       setNodes([
         ...notes.map((n) => noteToFlowNode(n, {
@@ -202,10 +253,11 @@ export default function CanvasScreen({ state, onExit }) {
           chordSummary: summarizeProgression(progressionsById[n.chord_progression_id]),
         })),
         ...progressions.map((p) => progressionToFlowNode(p, progressionCallbacks)),
-        outputToFlowNode(output),
+        ...outputs.map((o) => outputToFlowNode(o, outputCallbacks)),
       ]);
-      const plugEdge = outputPlugEdge(output);
-      setEdges([...mainThreadEdges(links), ...assignmentEdges(notes), ...(plugEdge ? [plugEdge] : [])]);
+      const plugEdges = outputs.map(outputPlugEdge).filter(Boolean);
+      setEdges([...mainThreadEdges(links), ...assignmentEdges(notes), ...plugEdges]);
+      setSelections(loadedSelections);
       setLoading(false);
     })();
     return () => { cancelled = true; };
@@ -217,9 +269,11 @@ export default function CanvasScreen({ state, onExit }) {
   const onEdgesChange = useCallback((changes) => setEdges((eds) => applyEdgeChanges(changes, eds)), []);
 
   const onNodeDragStop = useCallback((_evt, node) => {
-    if (node.type === 'textNote') saveNotePosition(node.id, node.position, node.width, node.height);
-    else if (node.type === 'chordProgression') saveProgressionPosition(node.id, node.position, node.width, node.height);
-    else if (node.type === 'outputNode') saveOutputPosition(node.id, node.position, node.width, node.height);
+    const save = node.type === 'textNote' ? saveNotePosition(node.id, node.position, node.width, node.height)
+      : node.type === 'chordProgression' ? saveProgressionPosition(node.id, node.position, node.width, node.height)
+      : node.type === 'outputNode' ? saveOutputPosition(node.id, node.position, node.width, node.height)
+      : null;
+    if (save) { beginSave(); save.finally(endSave); }
   }, []);
 
   // One connect gesture, two meanings depending on what's being connected:
@@ -254,22 +308,33 @@ export default function CanvasScreen({ state, onExit }) {
       }
 
       if (sourceNode.type === 'textNote' && targetNode.type === 'textNote') {
-        const linkId = crypto.randomUUID();
-        const position = edgesRef.current.filter((e) => e.data?.kind === 'main-thread').length;
-        createMainThreadLink(linkId, song.id, sourceNode.id, targetNode.id, position);
-        setEdges((eds) => addEdge({
-          ...connection, id: linkId, type: 'default',
-          style: { stroke: '#1F6F63', strokeWidth: 1.5, opacity: 0.6 }, data: { kind: 'main-thread', position },
-        }, eds));
+        // Two links between the same pair isn't a real fork/merge, just the
+        // same connection twice — guard here so it can't happen from a
+        // stray double-drag, rather than relying on every downstream reader
+        // (the final-mix chain walk) to shrug it off.
+        const alreadyLinked = edgesRef.current.some((e) =>
+          e.data?.kind === 'main-thread' && e.source === sourceNode.id && e.target === targetNode.id
+        );
+        if (!alreadyLinked) {
+          const linkId = crypto.randomUUID();
+          const position = edgesRef.current.filter((e) => e.data?.kind === 'main-thread').length;
+          createMainThreadLink(linkId, song.id, sourceNode.id, targetNode.id, position);
+          setEdges((eds) => addEdge({
+            ...connection, id: linkId, type: 'default',
+            style: { stroke: '#1F6F63', strokeWidth: 1.5, opacity: 0.6 }, data: { kind: 'main-thread', position },
+          }, eds));
+        }
       }
 
-      // Only one note can be plugged into the output at a time — a fresh
-      // connection replaces whichever plug edge existed before, same pattern
-      // as re-assigning a chord progression to a note.
+      // Only one note can be plugged into a given final-mix node at a time —
+      // a fresh connection replaces whichever plug edge existed on THIS
+      // output node, same pattern as re-assigning a chord progression to a
+      // note. Other final-mix nodes (there can be several now) keep theirs —
+      // scope the replacement to this target only, not every output edge.
       if (sourceNode.type === 'textNote' && targetNode.type === 'outputNode') {
         setOutputPluggedNote(targetNode.id, sourceNode.id);
         setEdges((eds) => [
-          ...eds.filter((e) => e.data?.kind !== 'output'),
+          ...eds.filter((e) => !(e.data?.kind === 'output' && e.target === targetNode.id)),
           {
             id: `output-plug-${targetNode.id}`, source: sourceNode.id, target: targetNode.id,
             sourceHandle: 'right', targetHandle: 'output-in',
@@ -294,6 +359,7 @@ export default function CanvasScreen({ state, onExit }) {
     deleted.forEach((node) => {
       if (node.type === 'textNote') deleteNote(node.id);
       else if (node.type === 'chordProgression') deleteChordProgression(node.id);
+      else if (node.type === 'outputNode') deleteOutputNode(node.id);
     });
   }, []);
 
@@ -327,6 +393,12 @@ export default function CanvasScreen({ state, onExit }) {
     setNodes((nds) => [...nds, progressionToFlowNode(cp, progressionCallbacks)]);
   }, [song?.id, handleNodeDeleted]);
 
+  const handleAddOutput = useCallback(async () => {
+    const { data: output, error } = await createOutputNode(song.id, { x: 800, y: 120 });
+    if (error) { setLoadError(error.message); return; }
+    setNodes((nds) => [...nds, outputToFlowNode(output, outputCallbacks)]);
+  }, [song?.id, handleNodeDeleted]);
+
   // The vibe-compose node is a tool, not content — it never gets a DB row of
   // its own (no position/size to persist), so adding and removing it is
   // local-only React state, same as any other ephemeral UI element.
@@ -355,38 +427,69 @@ export default function CanvasScreen({ state, onExit }) {
   // every time any unrelated note/link changes.
   const renderNodes = useMemo(() => {
     const textNotes = nodes.filter((n) => n.type === 'textNote').map((n) => n.data.note);
+    // id + position are load-bearing here — resolveMainThreadPath needs id to
+    // match a stored selection and position to pick a stable default when
+    // there isn't one (see canvasData.js).
     const mainThreadLinks = edges
       .filter((e) => e.data?.kind === 'main-thread')
-      .map((e) => ({ source_note_id: e.source, target_note_id: e.target }));
+      .map((e) => ({ id: e.id, source_note_id: e.source, target_note_id: e.target, position: e.data.position }));
     const progressionsById = Object.fromEntries(
       nodes.filter((n) => n.type === 'chordProgression').map((n) => [n.id, n.data.progression])
     );
     return nodes.map((n) => (n.type === 'outputNode'
-      ? { ...n, data: { ...n.data, notes: textNotes, links: mainThreadLinks, progressionsById } }
+      ? {
+        ...n,
+        data: {
+          ...n.data,
+          notes: textNotes,
+          links: mainThreadLinks,
+          progressionsById,
+          selections: Object.fromEntries(
+            selections.filter((s) => s.output_id === n.id).map((s) => [s.source_note_id, s.note_link_id])
+          ),
+        },
+      }
       : n));
-  }, [nodes, edges]);
+  }, [nodes, edges, selections]);
+
+  const handleSignOut = useCallback(async () => {
+    if (!confirm('Sign out?')) return;
+    await supabase.auth.signOut();
+    setState({ session: null, activeSong: null, screen: 'home' });
+  }, []);
 
   if (!song) return null;
 
+  const avatarLetter = (state.session?.user?.email || '?')[0].toUpperCase();
+
   return (
     <div className="canvas-root">
-      <div className="canvas-toolbar">
-        <button className="canvas-btn" onClick={onExit}>← projects</button>
-        <span className="canvas-title">{song.title}</span>
-        <span className="canvas-hint">click a connection, press Delete to remove it</span>
-        <div className="canvas-toolbar-right">
-          <button className="canvas-btn" onClick={handleAddNote}>+ note</button>
-          <button className="canvas-btn" onClick={handleAddProgression}>+ chord progression</button>
-          <button className="canvas-btn" onClick={handleAddVibeNode}>✦ compose by vibe</button>
+      <ReactFlowProvider>
+        <div className="canvas-toolbar">
+          <button className="canvas-btn canvas-btn-ghost" onClick={onExit}>‹ projects</button>
+          <span className="canvas-title">{song.title}</span>
+          <span className="canvas-toolbar-divider" />
+          <SaveStatus />
+          <span className="canvas-toolbar-divider" />
+          <span className="canvas-hint">click a connection, press Delete to remove it</span>
+
+          <div className="canvas-toolbar-right">
+            <ZoomControl />
+            <span className="canvas-toolbar-divider" />
+            <button className="canvas-btn" onClick={handleAddNote}>+ note</button>
+            <button className="canvas-btn canvas-btn-chord" onClick={handleAddProgression}>♫ chord progression</button>
+            <button className="canvas-btn" onClick={handleAddOutput}>+ final mix</button>
+            <button className="canvas-btn canvas-btn-vibes" onClick={handleAddVibeNode}>+ vibes</button>
+            <span className="canvas-toolbar-divider" />
+            <button className="canvas-avatar" onClick={handleSignOut} title="sign out">{avatarLetter}</button>
+          </div>
         </div>
-      </div>
 
-      {loadError && <div className="canvas-error">{loadError}</div>}
+        {loadError && <div className="canvas-error">{loadError}</div>}
 
-      {loading ? (
-        <div className="canvas-loading">loading…</div>
-      ) : (
-        <ReactFlowProvider>
+        {loading ? (
+          <div className="canvas-loading">loading…</div>
+        ) : (
           <ReactFlow
             nodes={renderNodes}
             edges={edges}
@@ -402,10 +505,9 @@ export default function CanvasScreen({ state, onExit }) {
             fitView
           >
             <Background color="#D8D2C2" gap={22} />
-            <Controls showInteractive={false} />
           </ReactFlow>
-        </ReactFlowProvider>
-      )}
+        )}
+      </ReactFlowProvider>
 
       {selectedNoteId && (() => {
         const selectedNode = nodes.find((n) => n.id === selectedNoteId);

@@ -344,16 +344,18 @@ alter table annotations
   check (category is null or category in ('duda', 'idea', 'referencia'));
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- Output node — one per song, created automatically (never by hand, never
--- deletable). Doesn't own any content itself: it's a sink that a text note
--- plugs into, at which point it renders the full main-thread chain (lyrics
--- in clean-view order, plus each note's assigned chords) as the song's
--- final result. plugged_note_id is only "is something connected" state —
--- the rendered chain is always derived live from note_links, not stored here.
+-- Output node — a song can have several (variants/mixes of the same song:
+-- "radio edit", "acoustic", etc.), each user-created and user-deletable.
+-- Doesn't own any content itself: it's a sink that a text note plugs into,
+-- at which point it renders the full main-thread chain (lyrics in
+-- clean-view order, plus each note's assigned chords) as that mix's result.
+-- plugged_note_id is only "is something connected" state — the rendered
+-- chain is always derived live from note_links, not stored here.
 -- ─────────────────────────────────────────────────────────────────────────────
 create table if not exists song_outputs (
   id              uuid primary key default gen_random_uuid(),
-  song_id         uuid not null unique references songs(id) on delete cascade,
+  song_id         uuid not null references songs(id) on delete cascade,
+  title           text not null default 'Final mix',
   canvas_x        double precision not null default 0,
   canvas_y        double precision not null default 0,
   canvas_width    double precision not null default 320,
@@ -362,6 +364,11 @@ create table if not exists song_outputs (
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now()
 );
+
+-- Was "one output per song" (song_id unique) — now a song can hold several
+-- mix variants, so an existing database needs the old uniqueness dropped.
+alter table song_outputs drop constraint if exists song_outputs_song_id_key;
+alter table song_outputs add column if not exists title text not null default 'Final mix';
 
 drop trigger if exists trg_song_outputs_updated_at on song_outputs;
 create trigger trg_song_outputs_updated_at
@@ -376,4 +383,37 @@ create policy song_outputs_owner on song_outputs
     exists (select 1 from songs s where s.id = song_outputs.song_id and s.user_id = auth.uid())
   ) with check (
     exists (select 1 from songs s where s.id = song_outputs.song_id and s.user_id = auth.uid())
+  );
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Output selections — a final mix is one linear playthrough, so when the note
+-- graph forks (a note has more than one outgoing main-thread link), each mix
+-- needs its own record of which branch it takes at that fork. One row per
+-- (mix, forking note); no row means "use the default" (lowest-position link,
+-- i.e. whichever branch was drawn first) — a fork is never left ambiguous.
+-- ─────────────────────────────────────────────────────────────────────────────
+create table if not exists output_selections (
+  output_id      uuid not null references song_outputs(id) on delete cascade,
+  source_note_id uuid not null references sections(id) on delete cascade,
+  note_link_id   uuid not null references note_links(id) on delete cascade,
+  created_at     timestamptz not null default now(),
+  primary key (output_id, source_note_id)
+);
+
+alter table output_selections enable row level security;
+
+drop policy if exists output_selections_owner on output_selections;
+create policy output_selections_owner on output_selections
+  for all using (
+    exists (
+      select 1 from song_outputs so
+      join songs s on s.id = so.song_id
+      where so.id = output_selections.output_id and s.user_id = auth.uid()
+    )
+  ) with check (
+    exists (
+      select 1 from song_outputs so
+      join songs s on s.id = so.song_id
+      where so.id = output_selections.output_id and s.user_id = auth.uid()
+    )
   );

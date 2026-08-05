@@ -6,7 +6,9 @@ Vibe Composer dev server.
   adding the API key server-side so it never touches the browser.
 
 Usage:
-    ANTHROPIC_API_KEY=sk-ant-... python3 server.py
+    Put ANTHROPIC_API_KEY=sk-ant-... in a .env file next to this script
+    (git-ignored, read once at startup), or export it in your shell —
+    either way: python3 server.py
 """
 
 import http.server
@@ -15,7 +17,25 @@ import urllib.error
 import os
 import sys
 
-PORT    = 3000
+PORT = 3000
+
+
+def load_dotenv(path):
+    """Minimal .env loader — KEY=VALUE per line, no external dependency.
+    Only fills in vars not already set in the real environment, so an
+    explicit `export` always wins over the file."""
+    if not os.path.exists(path):
+        return
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            os.environ.setdefault(key.strip(), value.strip())
+
+
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 
 
@@ -81,7 +101,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
 if __name__ == "__main__":
     if not API_KEY:
-        print("ERROR: set your API key first:")
+        print("ERROR: set your API key first — either:")
+        print("  echo 'ANTHROPIC_API_KEY=sk-ant-...' > .env")
         print("  export ANTHROPIC_API_KEY=sk-ant-...")
         sys.exit(1)
 

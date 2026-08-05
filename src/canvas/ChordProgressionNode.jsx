@@ -26,7 +26,7 @@ function chordQuality(fn) {
 }
 
 export default function ChordProgressionNode({ id, data, selected, width }) {
-  const { progression: cp, onDeleted } = data;
+  const { progression: cp, onDeleted, onArrange } = data;
   const [title, setTitle] = useState(cp.title);
   const [key, setKey] = useState(cp.key || '');
   const [chords, setChords] = useState(cp.progression?.length ? cp.progression : [EMPTY_CHORD()]);
@@ -93,6 +93,11 @@ export default function ChordProgressionNode({ id, data, selected, width }) {
     onDeleted?.(id);
   };
 
+  const handleArrangeClick = (e) => {
+    e.stopPropagation();
+    onArrange?.({ title, key, progression: chords, vibeMeta: cp.vibe_meta });
+  };
+
   const handleResizeEnd = (_evt, params) => {
     saveProgressionPosition(id, { x: params.x, y: params.y }, params.width, params.height);
   };
@@ -151,6 +156,7 @@ export default function ChordProgressionNode({ id, data, selected, width }) {
                 onBlur={commitMeta}
               />
             </div>
+            <button className="cp-icon-btn nodrag" onClick={handleArrangeClick} title="arrange into a full song structure">♫</button>
             <button className="cp-icon-btn nodrag" onClick={handleDelete} title="delete progression">✕</button>
           </div>
 

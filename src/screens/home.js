@@ -1,4 +1,4 @@
-import { setState, enterProjectChords } from '../state/store.js';
+import { setState } from '../state/store.js';
 import { supabase } from '../utils/supabaseClient.js';
 
 // ─── Render ────────────────────────────────────────────────────────────────────
@@ -29,10 +29,6 @@ export function render(state) {
 }
 
 function renderProjectRow(song) {
-  const chordsChip = song.vibe_snapshot?.progression
-    ? `🎵 ${song.vibe_snapshot.progression.key} · ${song.vibe_snapshot.progression.title}`
-    : '🎵 no chords yet';
-
   const lineCount = song.lineCount || 0;
   const lyricsChip = lineCount > 0
     ? `📝 ${lineCount} line${lineCount === 1 ? '' : 's'}`
@@ -42,12 +38,10 @@ function renderProjectRow(song) {
     <div class="lyrics-song-row" data-id="${song.id}">
       <div class="lyrics-song-info">
         <span class="lyrics-song-title">${song.title || 'untitled'}</span>
-        <span class="lyrics-song-chip">${chordsChip}</span>
         <span class="lyrics-song-chip">${lyricsChip}</span>
       </div>
       <div class="lyrics-song-actions">
-        <button class="ghost-btn" data-action="chords" data-id="${song.id}">🎵 chords</button>
-        <button class="ghost-btn" data-action="lyrics" data-id="${song.id}">📝 lyrics</button>
+        <button class="ghost-btn" data-action="open" data-id="${song.id}">open canvas</button>
       </div>
       <span class="lyrics-song-date">${new Date(song.updated_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
     </div>
@@ -64,14 +58,7 @@ export async function attach(state, justEntered) {
 
   document.getElementById('btn-new-project').addEventListener('click', () => createProject(state));
 
-  document.querySelectorAll('[data-action="chords"]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const song = (state.songs || []).find((s) => s.id === btn.dataset.id);
-      if (song) enterProjectChords(song);
-    });
-  });
-
-  document.querySelectorAll('[data-action="lyrics"]').forEach((btn) => {
+  document.querySelectorAll('[data-action="open"]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const song = (state.songs || []).find((s) => s.id === btn.dataset.id);
       if (song) setState({ activeSong: song, screen: 'canvas' });
@@ -88,7 +75,7 @@ export async function attach(state, justEntered) {
 async function loadSongs() {
   const { data, error } = await supabase
     .from('songs')
-    .select('id, title, updated_at, vibe_snapshot')
+    .select('id, title, updated_at')
     .order('updated_at', { ascending: false });
 
   if (error) { setState({ projectError: error.message }); return; }

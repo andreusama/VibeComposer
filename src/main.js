@@ -2,37 +2,22 @@ import { createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { subscribe, getState, setState } from './state/store.js';
 import CanvasScreen from './canvas/CanvasScreen.jsx';
-import * as MuseScreen        from './screens/muse.js';
-import * as PlaceScreen       from './screens/place.js';
-import * as PhotoScreen       from './screens/photo.js';
 import * as LoadingScreen     from './screens/loading.js';
-import * as BuilderScreen     from './screens/builder.js';
-import * as ResultScreen      from './screens/result.js';
-import * as ChordScreen       from './screens/chord.js';
 import * as StudioScreen      from './screens/studio.js';
 import * as AuthScreen        from './screens/auth.js';
 import * as HomeScreen        from './screens/home.js';
-import * as LyricsEditorScreen from './screens/lyricsEditor.js';
 
 const SCREENS = {
-  muse:           MuseScreen,
-  place:          PlaceScreen,
-  photo:          PhotoScreen,
   loading:        LoadingScreen,
-  builder:        BuilderScreen,
-  result:         ResultScreen,
-  chord:          ChordScreen,
   studio:         StudioScreen,
   auth:           AuthScreen,
   home:           HomeScreen,
-  'lyrics-editor': LyricsEditorScreen,
 };
 
-// Screens reachable without a session: the auth screen itself, and — when the
-// current state came from a shared URL (state.publicView) — the read-only
-// viewing screens, so a shared link stays viewable without an account.
-const PUBLIC_SCREENS       = new Set(['auth']);
-const PUBLIC_VIEW_SCREENS  = new Set(['result', 'chord', 'studio']);
+// The only screen reachable without a session — everything else (including
+// studio, now only reachable from a signed-in canvas via a progression's
+// "arrange" action) requires being logged in.
+const PUBLIC_SCREENS = new Set(['auth']);
 
 const app = document.getElementById('app');
 
@@ -61,10 +46,7 @@ function render(state) {
     return;
   }
 
-  const isPublic = PUBLIC_SCREENS.has(state.screen)
-    || (state.publicView && PUBLIC_VIEW_SCREENS.has(state.screen));
-
-  const screenKey = (state.session || isPublic) ? state.screen : 'auth';
+  const screenKey = (state.session || PUBLIC_SCREENS.has(state.screen)) ? state.screen : 'auth';
 
   const justEntered = screenKey !== lastEffectiveScreen;
   lastEffectiveScreen = screenKey;

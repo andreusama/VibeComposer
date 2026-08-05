@@ -92,6 +92,21 @@ export async function createChordProgression(songId, { x, y }) {
     .select().single();
 }
 
+// Composed via the "vibe" canvas node (phrase/place/photo/genre/colour →
+// Claude) rather than typed by hand — vibe_meta keeps everything that went
+// into the composition (mood, energy, flavour, texture, easyMode, place,
+// photoUrl) so a later "arrange" action can reconstruct a sensible studio
+// context without re-asking the user for any of it.
+export async function createVibeProgression(songId, { x, y }, composed, meta) {
+  return supabase.from('chord_progressions')
+    .insert({
+      song_id: songId, canvas_x: x, canvas_y: y, source: 'vibe',
+      title: composed.title, key: composed.key, progression: composed.progression,
+      vibe_meta: { summary: composed.summary, ...meta },
+    })
+    .select().single();
+}
+
 export async function deleteChordProgression(id) {
   return supabase.from('chord_progressions').delete().eq('id', id);
 }

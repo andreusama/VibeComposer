@@ -7,16 +7,21 @@ import '@xyflow/react/dist/style.css';
 import TextNoteNode from './TextNoteNode.jsx';
 import ChordProgressionNode from './ChordProgressionNode.jsx';
 import OutputNode from './OutputNode.jsx';
+import VibeComposeNode from './VibeComposeNode.jsx';
 import NoteSidePanel from './NoteSidePanel.jsx';
+import { setState } from '../state/store.js';
 import {
-  loadCanvasData, createNote, createChordProgression,
+  loadCanvasData, createNote, createChordProgression, createVibeProgression,
   saveNotePosition, saveProgressionPosition,
   createMainThreadLink, deleteNoteLink, assignProgressionToNote,
   deleteNote, deleteChordProgression,
   ensureOutputNode, saveOutputPosition, setOutputPluggedNote,
 } from './canvasData.js';
 
-const NODE_TYPES = { textNote: TextNoteNode, chordProgression: ChordProgressionNode, outputNode: OutputNode };
+const NODE_TYPES = {
+  textNote: TextNoteNode, chordProgression: ChordProgressionNode,
+  outputNode: OutputNode, vibeCompose: VibeComposeNode,
+};
 
 // React Flow needs a concrete numeric width/height for every node up front —
 // leaving height undefined (canvas_height has no DB default, unlike
@@ -39,14 +44,14 @@ function noteToFlowNode(note, callbacks) {
   };
 }
 
-function progressionToFlowNode(cp, onDeleted) {
+function progressionToFlowNode(cp, callbacks) {
   return {
     id: cp.id,
     type: 'chordProgression',
     position: { x: cp.canvas_x || 0, y: cp.canvas_y || 0 },
     width: cp.canvas_width || 260,
     height: cp.canvas_height || DEFAULT_PROGRESSION_HEIGHT,
-    data: { progression: cp, onDeleted },
+    data: { progression: cp, ...callbacks },
   };
 }
 
@@ -162,6 +167,23 @@ export default function CanvasScreen({ state, onExit }) {
 
   const noteCallbacks = { onDeleted: handleNodeDeleted, onOpenPanel: handleOpenPanel, onTextChange: handleNoteTextChange };
 
+  // Sends a progression's current chords over to the studio's deeper
+  // verse/chorus/bridge arrangement view — studio reads only from
+  // state.studioSource, never the canvas's own data, so this is the one
+  // place that translates between the two.
+  const handleArrange = useCallback(({ title, key, progression, vibeMeta }) => {
+    setState({
+      screen: 'studio',
+      studioSource: {
+        title, key, progression,
+        energy: vibeMeta?.energy || 'medium',
+        rgb: vibeMeta?.rgb || { r: 69, g: 82, b: 214 },
+      },
+    });
+  }, []);
+
+  const progressionCallbacks = { onDeleted: handleNodeDeleted, onArrange: handleArrange };
+
   useEffect(() => {
     if (!song) { onExit(); return; }
     let cancelled = false;
@@ -179,7 +201,7 @@ export default function CanvasScreen({ state, onExit }) {
           ...noteCallbacks,
           chordSummary: summarizeProgression(progressionsById[n.chord_progression_id]),
         })),
-        ...progressions.map((p) => progressionToFlowNode(p, handleNodeDeleted)),
+        ...progressions.map((p) => progressionToFlowNode(p, progressionCallbacks)),
         outputToFlowNode(output),
       ]);
       const plugEdge = outputPlugEdge(output);
@@ -302,8 +324,30 @@ export default function CanvasScreen({ state, onExit }) {
   const handleAddProgression = useCallback(async () => {
     const { data: cp, error } = await createChordProgression(song.id, { x: 460, y: 120 });
     if (error) { setLoadError(error.message); return; }
-    setNodes((nds) => [...nds, progressionToFlowNode(cp, handleNodeDeleted)]);
+    setNodes((nds) => [...nds, progressionToFlowNode(cp, progressionCallbacks)]);
   }, [song?.id, handleNodeDeleted]);
+
+  // The vibe-compose node is a tool, not content — it never gets a DB row of
+  // its own (no position/size to persist), so adding and removing it is
+  // local-only React state, same as any other ephemeral UI element.
+  const handleAddVibeNode = useCallback(() => {
+    const nodeId = crypto.randomUUID();
+    setNodes((nds) => [...nds, {
+      id: nodeId,
+      type: 'vibeCompose',
+      position: { x: 120, y: 120 },
+      width: 420,
+      height: 560,
+      data: {
+        onClose: (id) => setNodes((cur) => cur.filter((n) => n.id !== id)),
+        onGenerated: async (composed, meta) => {
+          const { data: cp, error } = await createVibeProgression(song.id, { x: 560, y: 120 }, composed, meta);
+          if (error) { setLoadError(error.message); return; }
+          setNodes((cur) => [...cur, progressionToFlowNode(cp, progressionCallbacks)]);
+        },
+      },
+    }]);
+  }, [song?.id]);
 
   // The output node doesn't own its own content — it renders whatever the
   // rest of the graph currently looks like, so its inputs are recomputed
@@ -333,6 +377,7 @@ export default function CanvasScreen({ state, onExit }) {
         <div className="canvas-toolbar-right">
           <button className="canvas-btn" onClick={handleAddNote}>+ note</button>
           <button className="canvas-btn" onClick={handleAddProgression}>+ chord progression</button>
+          <button className="canvas-btn" onClick={handleAddVibeNode}>✦ compose by vibe</button>
         </div>
       </div>
 

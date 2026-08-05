@@ -194,72 +194,82 @@ export async function setOutputSelection(outputId, sourceNoteId, noteLinkId) {
     .upsert({ output_id: outputId, source_note_id: sourceNoteId, note_link_id: noteLinkId });
 }
 
-// Plugging in a note should render the whole song leading up to it too, not
-// just the note itself — but walking backward blindly runs into the mirror
-// image of the fork problem: a note with two *incoming* links (two verses
-// converging on one chorus) has no unambiguous "previous note." So this
-// only extends backward while each step is unambiguous (exactly one
-// predecessor); a note with zero predecessors is a genuine start, and a
-// note with two or more is a real merge point — stop there rather than
-// silently guessing which branch feeds it. To start from that exact point,
-// plug into that specific note instead.
-//
-// Along the way it also records exactly which link was taken at each step
-// (`impliedPath`) — reversed, that's the forward path from the found start
-// back to the plugged note. Any fork on that stretch was already answered
-// the moment the user chose to plug into a note reachable only through one
-// specific branch; there's nothing left to ask.
-function findChainStart(notes, links, fromId) {
-  const byId = new Map(notes.map((n) => [n.id, n]));
-  const parentsOf = new Map();
+// Two links between the same pair of notes is one connection drawn twice,
+// never a real second parent/child — collapse those before anything else
+// looks at fork/merge counts (onConnect guards against creating these going
+// forward, but resolution stays tolerant of any that already exist).
+function dedupeLinks(links, keyField) {
+  const byGroup = new Map();
   links.forEach((l) => {
-    if (!parentsOf.has(l.target_note_id)) parentsOf.set(l.target_note_id, []);
-    const list = parentsOf.get(l.target_note_id);
-    // Two links from the same source into the same target is the same
-    // connection drawn twice, not a real second parent — collapse it so a
-    // stray duplicate can't masquerade as an actual merge point (onConnect
-    // guards against creating these going forward, but this stays tolerant
-    // of any that already exist).
-    if (!list.some((existing) => existing.source_note_id === l.source_note_id)) list.push(l);
+    const groupKey = keyField === 'target' ? l.target_note_id : l.source_note_id;
+    if (!byGroup.has(groupKey)) byGroup.set(groupKey, []);
+    const list = byGroup.get(groupKey);
+    const otherField = keyField === 'target' ? l.source_note_id : l.target_note_id;
+    const other = keyField === 'target' ? 'source_note_id' : 'target_note_id';
+    if (!list.some((existing) => existing[other] === otherField)) list.push(l);
   });
+  byGroup.forEach((list) => list.sort((a, b) => (a.position ?? 0) - (b.position ?? 0)));
+  return byGroup;
+}
+
+// Plugging in a note renders the whole song leading up to it too, not just
+// the note itself — walking backward while each step is unambiguous
+// (exactly one parent). A note with zero parents is a genuine start. A note
+// with two or more distinct parents is a real merge (two branches
+// rejoining) and needs a decision exactly like a forward fork does:
+// `selections[mergeNoteId]` says which parent this mix arrived from; with
+// no entry, the default is the parent link with the lowest position — so a
+// merge is never left silently truncating the mix, same guarantee a fork
+// already gets. Every merge resolved this way is recorded in `merges` so
+// the render can show it as a picker at the right spot.
+function findChainStart(notes, links, fromId, selections) {
+  const byId = new Map(notes.map((n) => [n.id, n]));
+  const parentsOf = dedupeLinks(links, 'target');
 
   const impliedPath = [];
+  const merges = [];
   let current = fromId;
   const seen = new Set([current]);
+
   while (byId.has(current)) {
     const parents = parentsOf.get(current) || [];
-    if (parents.length !== 1 || seen.has(parents[0].source_note_id)) break;
-    impliedPath.unshift(parents[0]);
-    current = parents[0].source_note_id;
+    if (!parents.length) break; // genuine start, nothing feeds it
+
+    let chosen = parents[0];
+    if (parents.length > 1) {
+      merges.push({ noteId: current, candidates: parents });
+      const chosenLinkId = selections[current];
+      chosen = parents.find((p) => p.id === chosenLinkId) || parents[0];
+    }
+    if (seen.has(chosen.source_note_id)) break; // cycle guard
+
+    impliedPath.unshift(chosen);
+    current = chosen.source_note_id;
     seen.add(current);
   }
-  return { start: current, impliedPath };
+
+  return { start: current, impliedPath, merges };
 }
 
 // A note with several *outgoing* links is a real fork — but only once the
-// walk has reached the plugged note. Before that point, whichever branch
-// actually leads to the plugged note is used silently (no picker, nothing
-// to choose). From the plugged note onward, `selections` (a plain
-// {sourceNoteId: noteLinkId} map for this one mix) says which branch this
-// mix takes; with no entry, the default is whichever link has the lowest
-// `position` (drawn first) — always something deterministic, never both.
+// walk has reached the plugged note; before that point, whichever branch
+// actually leads to the plugged note is used silently (already answered by
+// findChainStart). From the plugged note onward, `selections` (a plain
+// {noteId: linkId} map for this one mix, shared between forks and merges —
+// they key off different notes so there's no collision) says which branch
+// this mix takes; with no entry, the default is whichever link has the
+// lowest `position` (drawn first) — always something deterministic, never
+// both, and never a silent dead end either.
 export function resolveMainThreadPath(notes, links, startNoteId, selections = {}) {
   const byId = new Map(notes.map((n) => [n.id, n]));
   if (!startNoteId || !byId.has(startNoteId)) return [];
 
-  const childrenOf = new Map();
-  links.forEach((l) => {
-    if (!childrenOf.has(l.source_note_id)) childrenOf.set(l.source_note_id, []);
-    const list = childrenOf.get(l.source_note_id);
-    // Same dedup as findChainStart, mirrored for the forward direction —
-    // two links to the same target isn't a real fork.
-    if (!list.some((existing) => existing.target_note_id === l.target_note_id)) list.push(l);
-  });
-  childrenOf.forEach((candidates) => candidates.sort((a, b) => (a.position ?? 0) - (b.position ?? 0)));
+  const childrenOf = dedupeLinks(links, 'source');
 
-  const { start: chainStart, impliedPath } = findChainStart(notes, links, startNoteId);
+  const { start: chainStart, impliedPath, merges } = findChainStart(notes, links, startNoteId, selections);
   const impliedChoices = {};
   impliedPath.forEach((l) => { impliedChoices[l.source_note_id] = l.id; });
+  const mergesByNote = new Map(merges.map((m) => [m.noteId, m.candidates]));
 
   const path = [];
   const seen = new Set();
@@ -270,7 +280,11 @@ export function resolveMainThreadPath(notes, links, startNoteId, selections = {}
     seen.add(currentId);
     const candidates = childrenOf.get(currentId) || [];
     const isRealFork = reachedPlug && candidates.length > 1;
-    path.push({ note: byId.get(currentId), fork: isRealFork ? candidates : null });
+    path.push({
+      note: byId.get(currentId),
+      fork: isRealFork ? candidates : null,
+      mergedFrom: mergesByNote.get(currentId) || null,
+    });
     if (!candidates.length) break;
 
     const chosenLinkId = reachedPlug ? selections[currentId] : impliedChoices[currentId];

@@ -1848,6 +1848,20 @@ body::before {
     border-radius: var(--r-sm);
 }
 
+/* A merge sits before the note it feeds into (not after, like a fork), and
+   uses the chord/indigo accent instead of amber so "which branch got me
+   here" reads as visually distinct from "where do I go from here." */
+.output-merge {
+    margin-top: 0;
+    margin-bottom: calc(var(--space-2) * var(--canvas-scale));
+    background: var(--chord-soft);
+    border-color: var(--chord-line);
+}
+
+.output-merge .output-fork-label { color: var(--chord); }
+.output-merge .output-fork-btn.chosen { background: var(--chord); border-color: var(--chord); }
+.output-merge .output-fork-btn:hover { border-color: var(--chord); }
+
 .output-fork-label {
     font-family: var(--font-mono);
     font-size: calc(var(--fs-micro) * var(--canvas-scale));

@@ -183,6 +183,18 @@ export default function CanvasScreen({ state, onExit }) {
       : n)));
   }, []);
 
+  // Same reasoning as handleNoteTextChange: the type dropdown lives inside
+  // TextNoteNode and already saves to Supabase itself, but the note's type
+  // is also read by the final-mix nodes (see renderNodes' textNotes) — those
+  // read from this component's own `nodes` state, not from TextNoteNode's
+  // local state, so without this mirror a type change would only show up
+  // after a full reload.
+  const handleNoteTypeChange = useCallback((id, type, customLabel) => {
+    setNodes((nds) => nds.map((n) => (n.id === id
+      ? { ...n, data: { ...n.data, note: { ...n.data.note, type, custom_label: customLabel } } }
+      : n)));
+  }, []);
+
   // For changes that originate OUTSIDE the note itself (promote a variant,
   // restore a history entry) — bumps textVersion so TextNoteNode knows to
   // resync its local text state instead of silently going stale.
@@ -199,7 +211,7 @@ export default function CanvasScreen({ state, onExit }) {
       : n)));
   }, []);
 
-  const noteCallbacks = { onDeleted: handleNodeDeleted, onOpenPanel: handleOpenPanel, onTextChange: handleNoteTextChange };
+  const noteCallbacks = { onDeleted: handleNodeDeleted, onOpenPanel: handleOpenPanel, onTextChange: handleNoteTextChange, onTypeChange: handleNoteTypeChange };
 
   // Sends a progression's current chords over to the studio's deeper
   // verse/chorus/bridge arrangement view — studio reads only from

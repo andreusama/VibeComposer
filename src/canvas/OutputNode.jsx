@@ -11,10 +11,12 @@ function summarizeProgression(cp) {
   return chords.length ? chords.join(' · ') : null;
 }
 
-// A short, human label for a fork candidate — enough to tell two branches
-// apart in the picker without needing to go find the actual note on canvas.
-function candidateLabel(byId, candidate) {
-  const note = byId.get(candidate.target_note_id);
+// A short, human label for a fork/merge candidate — enough to tell two
+// branches apart in the picker without needing to go find the actual note
+// on canvas. `field` picks which end of the link the label describes: the
+// note a fork continues *to*, or the note a merge arrives *from*.
+function candidateLabel(byId, candidate, field) {
+  const note = byId.get(candidate[field]);
   if (!note) return 'deleted note';
   const label = note.custom_label || note.type;
   const text = note.lines?.[0]?.text?.trim();
@@ -72,12 +74,30 @@ export default function OutputNode({ id, data, selected }) {
         {!path.length ? (
           <p className="output-empty">plug a note in to render the song here</p>
         ) : (
-          path.map(({ note, fork }) => {
+          path.map(({ note, fork, mergedFrom }) => {
             const line = note.lines?.[0];
             const chordSummary = summarizeProgression(progressionsById[note.chord_progression_id]);
             const chosenLinkId = selections[note.id];
             return (
               <div className="output-line" key={note.id}>
+                {mergedFrom && (
+                  <div className="output-fork output-merge nodrag">
+                    <span className="output-fork-label">arrives from</span>
+                    {mergedFrom.map((candidate, i) => {
+                      const isChosen = chosenLinkId ? chosenLinkId === candidate.id : i === 0;
+                      return (
+                        <button
+                          key={candidate.id}
+                          className={`output-fork-btn${isChosen ? ' chosen' : ''}`}
+                          onClick={() => onSelectBranch?.(output.id, note.id, candidate.id)}
+                        >
+                          {candidateLabel(byId, candidate, 'source_note_id')}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
                 <div className="output-line-head">
                   <span className="output-line-type">{note.type}{note.custom_label ? ` · ${note.custom_label}` : ''}</span>
                   {chordSummary && <span className="output-line-chords">{chordSummary}</span>}
@@ -88,14 +108,14 @@ export default function OutputNode({ id, data, selected }) {
                   <div className="output-fork nodrag">
                     <span className="output-fork-label">continues to</span>
                     {fork.map((candidate, i) => {
-                      const isChosen = chosenLinkId ? chosenLinkId === candidate.id : i === 0;
+                      const isForkChosen = chosenLinkId ? chosenLinkId === candidate.id : i === 0;
                       return (
                         <button
                           key={candidate.id}
-                          className={`output-fork-btn${isChosen ? ' chosen' : ''}`}
+                          className={`output-fork-btn${isForkChosen ? ' chosen' : ''}`}
                           onClick={() => onSelectBranch?.(output.id, note.id, candidate.id)}
                         >
-                          {candidateLabel(byId, candidate)}
+                          {candidateLabel(byId, candidate, 'target_note_id')}
                         </button>
                       );
                     })}

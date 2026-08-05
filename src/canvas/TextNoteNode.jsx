@@ -15,7 +15,7 @@ const HANDLE_STYLE = { width: 10, height: 10, background: '#1D1C1A', border: '2p
 const CHORD_HANDLE_STYLE = { width: 12, height: 12, background: '#4552D6', border: '2px solid #fff' };
 
 export default function TextNoteNode({ id, data, selected }) {
-  const { note, onDeleted, onOpenPanel, onTextChange, chordSummary } = data;
+  const { note, onDeleted, onOpenPanel, onTextChange, onTypeChange, chordSummary } = data;
   const [type, setType] = useState(note.type);
   const [customLabel, setCustomLabel] = useState(note.custom_label || '');
   const [text, setText] = useState(note.lines?.[0]?.text || '');
@@ -51,12 +51,15 @@ export default function TextNoteNode({ id, data, selected }) {
   const handleTypeChange = useCallback((e) => {
     const val = e.target.value;
     setType(val);
-    saveNoteType(id, val, val === 'custom' ? customLabel : null);
-  }, [id, customLabel]);
+    const label = val === 'custom' ? customLabel : null;
+    saveNoteType(id, val, label);
+    onTypeChange?.(id, val, label);
+  }, [id, customLabel, onTypeChange]);
 
   const handleCustomLabelBlur = useCallback(() => {
     saveNoteType(id, type, customLabel);
-  }, [id, type, customLabel]);
+    onTypeChange?.(id, type, customLabel);
+  }, [id, type, customLabel, onTypeChange]);
 
   const handleCycleStatus = useCallback((e) => {
     e.stopPropagation();

@@ -1575,9 +1575,9 @@ body::before {
     background: transparent;
 }
 
+.canvas-note-muse,
 .canvas-note-details,
 .canvas-note-delete {
-    margin-left: auto;
     background: none;
     border: none;
     color: #c7c2b6;
@@ -1585,6 +1585,11 @@ body::before {
     font-size: calc(var(--fs-label) * var(--canvas-scale));
 }
 
+/* First of the right-hand icon cluster — the one that actually pushes the
+   group to the edge, the other two just follow it in normal flow. */
+.canvas-note-muse { margin-left: auto; }
+
+.canvas-note-muse:hover { color: var(--amber); }
 .canvas-note-details:hover { color: var(--graphite); }
 .canvas-note-delete:hover { color: var(--rose); }
 
@@ -2706,12 +2711,19 @@ body::before {
     padding: var(--space-2-5) var(--space-3-5) var(--space-2);
 }
 
-.note-panel-title {
+/* Reuses .canvas-note-type's pill look (same green, same shape) so the
+   panel's title reads as the same control as the one on the node card —
+   just a bigger tap target and a touch larger, since it's not competing
+   with three other head buttons for space the way the card version is. */
+.note-panel-type-select {
+    font-size: calc(var(--fs-label) * var(--canvas-scale));
+    padding: 4px 12px;
+    cursor: pointer;
+}
+
+.note-panel-custom-label {
     font-family: var(--font-sans);
-    font-weight: 600;
-    font-size: calc(var(--fs-eyebrow) * var(--canvas-scale));
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    font-size: calc(var(--fs-label) * var(--canvas-scale));
     color: var(--graphite);
 }
 
@@ -2751,31 +2763,135 @@ body::before {
     font-size: calc(var(--fs-secondary) * var(--canvas-scale));
 }
 
+.note-panel-open-muse {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    width: calc(100% - var(--space-3-5) * 2);
+    margin: 0 var(--space-3-5) var(--space-2-5);
+    background: var(--amber-soft);
+    border: 1px solid var(--amber);
+    border-radius: var(--r-md);
+    color: var(--amber);
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: calc(var(--fs-label) * var(--canvas-scale));
+    padding: var(--space-2-5);
+    cursor: pointer;
+}
+.note-panel-open-muse:hover { background: var(--amber); color: #fff; }
+.note-panel-open-muse:hover .note-panel-open-muse-icon { color: var(--amber); }
+
+.note-panel-open-muse-icon {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    background: #fff;
+    border-radius: var(--r-sm);
+    color: var(--amber);
+    box-shadow: var(--sh-1);
+}
+
+.note-panel-open-muse-label { flex: 1; text-align: left; }
+.note-panel-open-muse-arrow { flex-shrink: 0; }
+
+/* Which section of a note's content is showing — variants/notes/
+   history are mutually exclusive views of the same note, not things you'd
+   ever need open side by side, so a tab switch (not a long stacked scroll)
+   is the honest shape for it. */
+.note-panel-tabs {
+    display: flex;
+    gap: var(--space-3-5);
+    padding: 0 var(--space-3-5);
+    border-bottom: 1px solid var(--hairline);
+}
+
+.note-panel-tab {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: var(--space-2) 0 var(--space-2-5);
+    font-family: var(--font-sans);
+    font-size: calc(var(--fs-label) * var(--canvas-scale));
+    color: var(--graphite-soft);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+}
+
+.note-panel-tab.active {
+    color: var(--ink);
+    font-weight: 600;
+    border-bottom-color: var(--thread);
+}
+
+.note-panel-tab-count {
+    font-family: var(--font-mono);
+    font-size: calc(var(--fs-micro) * var(--canvas-scale));
+    color: var(--graphite-soft);
+    background: var(--paper-deep);
+    border-radius: 10px;
+    padding: 1px 6px;
+}
+
+
 .note-panel-body {
     flex: 1;
     overflow-y: auto;
     padding: var(--space-3-5) var(--space-3-5) var(--space-5);
     display: flex;
     flex-direction: column;
-    /* Gap between cards (external rhythm) is deliberately looser than a
-       card's own padding (internal, --space-3 below) — see the spacing-scale
-       note in :root: external spacing should never be tighter than internal. */
-    gap: var(--space-5);
 }
 
-.note-group {
+/* Pinned below the tab content, not part of the switching above it — see
+   the comment in NoteSidePanel.jsx for why this tool stays put regardless
+   of which tab is active. */
+.note-panel-tools-bar {
     display: flex;
-    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding: var(--space-2-5) var(--space-3-5);
+    border-top: 1px solid var(--hairline);
+    background: var(--paper-deep);
 }
 
-.note-group-label {
+.note-panel-tools-label {
     font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: calc(var(--fs-label) * var(--canvas-scale));
+    color: var(--ink);
+}
+
+.note-panel-tools-sublabel {
+    font-family: var(--font-mono);
     font-size: calc(var(--fs-micro) * var(--canvas-scale));
-    letter-spacing: 0.02em;
-    color: var(--graphite);
-    font-weight: 500;
-    opacity: 0.75;
-    margin: 0 var(--space-0-5) var(--space-1-5);
+    color: var(--graphite-soft);
+}
+
+.note-panel-run-btn {
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: calc(var(--fs-label) * var(--canvas-scale));
+    color: var(--chord);
+    background: var(--chord-soft);
+    border: 1px solid var(--chord-line);
+    border-radius: 999px;
+    padding: var(--space-1) var(--space-3);
+    cursor: pointer;
+}
+.note-panel-run-btn:hover { background: var(--chord); color: #fff; }
+
+.note-panel-tools-results {
+    padding: var(--space-2-5) var(--space-3-5);
+    border-top: 1px solid var(--hairline);
+    max-height: 160px;
+    overflow-y: auto;
 }
 
 .note-group-card {
@@ -2823,18 +2939,24 @@ body::before {
     background: #fff;
 }
 
+/* Solid, not outlined — a single glyph like variants' bare "+" reads as a
+   circle at this border-radius, a wider label like "+ add" or the muse's
+   "send" reads as a pill; same rule covers both since it's just how much
+   text is inside. */
 .note-panel-add-row button {
     font-family: var(--font-sans);
+    font-weight: 700;
     font-size: calc(var(--fs-label) * var(--canvas-scale));
-    border: 1px solid var(--hairline);
-    border-radius: var(--r-sm);
-    background: #fff;
-    padding: var(--space-1-5) var(--space-2-5);
+    border: none;
+    border-radius: 999px;
+    background: var(--ink);
+    color: #fff;
+    padding: var(--space-1-5) var(--space-3);
     cursor: pointer;
     white-space: nowrap;
 }
 
-.note-panel-add-row button:hover { border-color: var(--graphite); }
+.note-panel-add-row button:hover { background: var(--graphite); }
 
 .note-panel-add-col {
     display: flex;
@@ -3018,66 +3140,206 @@ body::before {
 .note-history-meta button:hover { border-color: var(--thread); color: var(--thread); }
 .note-history-delete:hover { border-color: var(--rose) !important; color: var(--rose) !important; }
 
-/* Tools */
+/* Muse — a conversation thread (you ask, it clarifies or suggests), not a
+   single question/answer card. */
 
-.note-tool-row {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2-5);
-    margin-bottom: var(--space-2-5);
-    flex-wrap: wrap;
-}
-
-.note-group-sublabel {
-    font-family: var(--font-sans);
-    font-size: calc(var(--fs-micro) * var(--canvas-scale));
-    color: var(--graphite-soft);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-}
-
-.note-syllable-list {
+.muse-thread {
     display: flex;
     flex-direction: column;
-    gap: var(--space-1);
-    margin-bottom: var(--space-2-5);
+    gap: var(--space-2-5);
 }
 
-.note-syllable-row {
+.muse-turn-user {
+    align-self: flex-end;
+    max-width: 85%;
+    font-family: var(--font-sans);
+    font-size: calc(var(--fs-secondary) * var(--canvas-scale));
+    color: var(--ink);
+    background: var(--paper-deep);
+    border-radius: var(--r-md);
+    padding: var(--space-1-5) var(--space-2-5);
+    overflow-wrap: break-word;
+}
+
+.muse-turn-muse {
+    max-width: 92%;
+}
+
+.muse-question {
+    font-family: var(--font-sans);
+    font-style: italic;
+    font-size: calc(var(--fs-secondary) * var(--canvas-scale));
+    color: var(--amber);
+    margin-bottom: var(--space-1);
+}
+
+.muse-answer {
+    font-family: var(--font-sans);
+    font-size: calc(var(--fs-secondary) * var(--canvas-scale));
+    color: var(--ink);
+    margin-bottom: var(--space-1-5);
+    overflow-wrap: break-word;
+}
+
+.muse-options {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2-5);
+    margin-top: var(--space-1-5);
+}
+
+/* Fully rounded, more air inside — reads as a considered offer to pick up,
+   not a dense data row. Kept to a soft cream rather than solid amber so a
+   handful of them in a row doesn't turn into a wall of color. */
+.muse-option-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    background: var(--paper);
+    border: 1px solid var(--amber);
+    border-radius: var(--r-lg);
+    padding: var(--space-2) var(--space-3);
+}
+
+.muse-option-text {
+    font-family: var(--font-serif);
+    font-size: calc(var(--fs-secondary) * var(--canvas-scale));
+    color: var(--ink);
+    overflow-wrap: break-word;
+}
+
+.muse-save-btn {
+    flex-shrink: 0;
+    font-family: var(--font-sans);
+    font-size: calc(var(--fs-micro) * var(--canvas-scale));
+    border: 1px dashed var(--graphite-soft);
+    border-radius: var(--r-sm);
+    background: none;
+    padding: var(--space-1) var(--space-2);
+    cursor: pointer;
+    color: var(--graphite);
+}
+.muse-save-btn:hover { border-color: var(--thread); color: var(--thread); }
+.muse-save-btn:disabled {
+    cursor: default;
+    border-style: solid;
+    border-color: var(--thread);
+    color: var(--thread);
+    opacity: 0.8;
+}
+
+/* The float node itself — a small popover that lives on the canvas, not in
+   the docked panel. Same visual language as the other node cards
+   (.canvas-note etc.) so it reads as belonging on the canvas, with an
+   amber accent throughout since that's the muse's established color. */
+.muse-float {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    background: #fff;
+    border: 1px solid var(--amber);
+    border-radius: var(--r-md);
+    box-shadow: var(--sh-2);
+    overflow: hidden;
+}
+.muse-float.selected { box-shadow: var(--sh-3); }
+
+.muse-float-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: var(--space-2);
+    padding: calc(var(--space-2) * var(--canvas-scale)) calc(var(--space-3) * var(--canvas-scale));
+    background: var(--amber-soft);
+    border-bottom: 1px solid var(--amber);
+    /* The drag handle for the whole node — everything else in the float
+       has .nodrag so a click there doesn't also start moving the card. */
+    cursor: grab;
 }
 
-.note-syllable-line {
-    flex: 1;
-    min-width: 0;
-    font-size: calc(var(--fs-utility) * var(--canvas-scale));
-    color: var(--ink);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.note-syllable-count {
-    flex-shrink: 0;
+.muse-float-title {
     font-family: var(--font-mono);
-    font-size: calc(var(--fs-utility) * var(--canvas-scale));
-    color: var(--chord);
-    background: var(--chord-soft);
-    padding: var(--space-1) var(--space-2-5);
-    border-radius: var(--r-sm);
+    font-weight: 600;
+    font-size: calc(var(--fs-label) * var(--canvas-scale));
+    letter-spacing: 0.04em;
+    text-transform: lowercase;
+    color: var(--amber);
 }
 
-.note-tool-row select {
-    font-family: var(--font-sans);
-    font-size: calc(var(--fs-eyebrow) * var(--canvas-scale));
-    border: 1px solid var(--hairline);
+.muse-float-close {
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: none;
+    color: var(--amber);
+    cursor: pointer;
     border-radius: var(--r-sm);
-    padding: var(--space-1) var(--space-1-5);
+}
+.muse-float-close:hover { background: var(--amber); color: #fff; }
+
+.muse-float-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: calc(var(--space-2-5) * var(--canvas-scale)) calc(var(--space-3) * var(--canvas-scale));
+}
+
+.muse-float-composer {
+    border-top: 1px solid var(--hairline);
+    padding: calc(var(--space-2) * var(--canvas-scale)) calc(var(--space-3) * var(--canvas-scale));
+}
+
+/* Scoped to just the muse composer, not every .note-panel-add-row input —
+   the rounder, cream-bordered look is specific to this one, not a general
+   input restyle. */
+.muse-float-composer .note-panel-add-row input {
+    border-radius: 999px;
+    border-color: var(--amber);
+    background: var(--amber-soft);
+    padding: var(--space-2) var(--space-3);
+}
+.muse-float-composer .note-panel-add-row input:focus {
+    outline: none;
+    border-color: var(--amber);
     background: #fff;
 }
+
+.muse-skip-btn {
+    display: block;
+    margin-top: var(--space-1-5);
+    background: none;
+    border: none;
+    font-family: var(--font-sans);
+    font-size: calc(var(--fs-micro) * var(--canvas-scale));
+    color: var(--graphite-soft);
+    text-decoration: underline;
+    cursor: pointer;
+    padding: 0;
+}
+.muse-skip-btn:hover { color: var(--graphite); }
+
+.muse-float-hint {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    margin-top: var(--space-2);
+    font-family: var(--font-mono);
+    font-size: calc(var(--fs-micro) * var(--canvas-scale));
+    color: var(--graphite-soft);
+}
+.muse-float-hint::before {
+    content: '';
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--thread);
+}
+
+/* Tools */
 
 .note-check-repeats-btn {
     width: 100%;

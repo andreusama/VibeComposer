@@ -63,13 +63,19 @@ export default function ChordProgressionNode({ id, data, selected, width }) {
     clearTimeout(saveTimer.current);
     beginSave();
     saveTimer.current = setTimeout(async () => {
-      const { error } = await saveProgressionContent(id, { title: nextTitle, key: nextKey, progression: nextChords });
-      // This save has no error UI of its own (unlike the note panel) — without
-      // at least a console log, a rejected write (stale session, RLS edge
-      // case) fails completely silently and the next reload just looks like
-      // the typed edits never happened.
-      if (error) console.error('chord progression save failed:', error);
-      endSave();
+      // finally, not a trailing call — a genuinely rejected promise (not
+      // just a resolved {error}, an actual throw) would otherwise skip
+      // endSave() and leave the toolbar's "saving…" indicator stuck.
+      try {
+        const { error } = await saveProgressionContent(id, { title: nextTitle, key: nextKey, progression: nextChords });
+        // This save has no error UI of its own (unlike the note panel) —
+        // without at least a console log, a rejected write (stale session,
+        // RLS edge case) fails completely silently and the next reload
+        // just looks like the typed edits never happened.
+        if (error) console.error('chord progression save failed:', error);
+      } finally {
+        endSave();
+      }
     }, 500);
   }, [id]);
 

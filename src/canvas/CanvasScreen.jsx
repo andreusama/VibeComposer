@@ -9,6 +9,7 @@ import ChordProgressionNode from './ChordProgressionNode.jsx';
 import OutputNode from './OutputNode.jsx';
 import VibeComposeNode from './VibeComposeNode.jsx';
 import TempoNode from './TempoNode.jsx';
+import MuseFloatNode from './MuseFloatNode.jsx';
 import NoteSidePanel from './NoteSidePanel.jsx';
 import { setState } from '../state/store.js';
 import { supabase } from '../utils/supabaseClient.js';
@@ -23,10 +24,12 @@ import {
   loadTempoNodes, createTempoNode, saveTempoBpm, saveTempoPosition, deleteTempoNode,
 } from './canvasData.js';
 import { DIALECTS } from '../utils/rhyme.js';
+import { loadMuseProfile } from './museData.js';
 
 const NODE_TYPES = {
   textNote: TextNoteNode, chordProgression: ChordProgressionNode,
   outputNode: OutputNode, vibeCompose: VibeComposeNode, tempoNode: TempoNode,
+  museFloat: MuseFloatNode,
 };
 
 // The pills a right-click on empty canvas offers, grouped by what they're
@@ -301,8 +304,11 @@ export default function CanvasScreen({ state, onExit }) {
     clearTimeout(songTitleTimer.current);
     beginSave();
     songTitleTimer.current = setTimeout(async () => {
-      if (song?.id) await saveSongTitle(song.id, val);
-      endSave();
+      try {
+        if (song?.id) await saveSongTitle(song.id, val);
+      } finally {
+        endSave();
+      }
     }, 500);
   }, [song?.id]);
 
@@ -327,6 +333,28 @@ export default function CanvasScreen({ state, onExit }) {
     if (song?.id) { beginSave(); saveSongLyricSettings(song.id, language, dialect).finally(endSave); }
   }, [song?.id]);
 
+  // The muse's per-project, per-register profile — a plain {register:
+  // summary} map client-side, built from muse_profile's one-row-per-
+  // register shape. Kept in local state so the background profile refresh
+  // (see museProfileUpdater.js) can hand back one updated register without
+  // needing a reload for the *next* question to read it.
+  const [museProfile, setMuseProfile] = useState({});
+
+  useEffect(() => {
+    if (!song?.id) { setMuseProfile({}); return; }
+    let cancelled = false;
+    (async () => {
+      const { data } = await loadMuseProfile(song.id);
+      if (cancelled) return;
+      setMuseProfile(Object.fromEntries((data || []).map((row) => [row.register, row.summary])));
+    })();
+    return () => { cancelled = true; };
+  }, [song?.id]);
+
+  const handleMuseProfileUpdated = useCallback(({ register, summary }) => {
+    setMuseProfile((profile) => ({ ...profile, [register]: summary }));
+  }, []);
+
   const handleLyricDialectChange = useCallback((e) => {
     const dialect = e.target.value;
     setLyricDialect(dialect);
@@ -348,6 +376,41 @@ export default function CanvasScreen({ state, onExit }) {
     setEdges((eds) => eds.filter((e) => e.source !== id && e.target !== id));
     setSelectedNoteId((cur) => (cur === id ? null : cur));
   }, []);
+
+  // Opens (or, if one's already open for this note, just leaves alone —
+  // one float per note, not a pile of duplicates) the muse's floating
+  // node, positioned just to the right of the note it's about. verseText/
+  // noteFunction aren't set here — they're injected live in renderNodes
+  // below, same as a chord progression's bpm, so the float always reads
+  // the note's current text instead of a snapshot from when it opened.
+  const handleOpenMuse = useCallback((note) => {
+    const floatId = `muse-float-${note.id}`;
+    setNodes((nds) => {
+      if (nds.some((n) => n.id === floatId)) return nds;
+      const sourceNode = nds.find((n) => n.id === note.id);
+      const position = sourceNode
+        ? { x: sourceNode.position.x + (sourceNode.width || 280) + 40, y: sourceNode.position.y }
+        : { x: 400, y: 200 };
+      return [...nds, {
+        id: floatId,
+        type: 'museFloat',
+        position,
+        width: 320,
+        height: 340,
+        data: {
+          songId: song?.id,
+          sourceNoteId: note.id,
+          lineId: note.lines?.[0]?.id,
+          userId: state.session?.user?.id,
+          museProfile,
+          onMuseProfileUpdated: handleMuseProfileUpdated,
+          lyricLanguage,
+          lyricDialect,
+          onClose: handleNodeDeleted,
+        },
+      }];
+    });
+  }, [song?.id, state.session?.user?.id, museProfile, handleMuseProfileUpdated, lyricLanguage, lyricDialect, handleNodeDeleted]);
 
   const handleOpenPanel = useCallback((id) => setSelectedNoteId(id), []);
   const handleClosePanel = useCallback(() => setSelectedNoteId(null), []);
@@ -390,7 +453,10 @@ export default function CanvasScreen({ state, onExit }) {
       : n)));
   }, []);
 
-  const noteCallbacks = { onDeleted: handleNodeDeleted, onOpenPanel: handleOpenPanel, onTextChange: handleNoteTextChange, onTypeChange: handleNoteTypeChange };
+  const noteCallbacks = {
+    onDeleted: handleNodeDeleted, onOpenPanel: handleOpenPanel,
+    onTextChange: handleNoteTextChange, onTypeChange: handleNoteTypeChange, onOpenMuse: handleOpenMuse,
+  };
 
   // Sends a progression's current chords over to the studio's deeper
   // verse/chorus/bridge arrangement view — studio reads only from
@@ -707,6 +773,7 @@ export default function CanvasScreen({ state, onExit }) {
   // every time any unrelated note/link changes.
   const renderNodes = useMemo(() => {
     const textNotes = nodes.filter((n) => n.type === 'textNote').map((n) => n.data.note);
+    const textNotesById = Object.fromEntries(textNotes.map((n) => [n.id, n]));
     // id + position are load-bearing here — resolveMainThreadPath needs id to
     // match a stored selection and position to pick a stable default when
     // there isn't one (see canvasData.js).
@@ -736,9 +803,26 @@ export default function CanvasScreen({ state, onExit }) {
       if (n.type === 'textNote') {
         return { ...n, data: { ...n.data, lyricLanguage, lyricDialect } };
       }
+      if (n.type === 'museFloat') {
+        // Reads the source note's CURRENT text every render, same reasoning
+        // as a chord progression's bpm — a float opened a while ago
+        // shouldn't keep prompting off a stale snapshot of the verse.
+        const sourceNote = textNotesById[n.data.sourceNoteId];
+        return {
+          ...n,
+          data: {
+            ...n.data,
+            verseText: sourceNote?.lines?.[0]?.text || '',
+            noteFunction: sourceNote?.custom_label || sourceNote?.type || '',
+            museProfile,
+            lyricLanguage,
+            lyricDialect,
+          },
+        };
+      }
       return n;
     });
-  }, [nodes, edges, selections, lyricLanguage, lyricDialect]);
+  }, [nodes, edges, selections, lyricLanguage, lyricDialect, museProfile]);
 
   const handleSignOut = useCallback(async () => {
     if (!confirm('Sign out?')) return;
@@ -820,9 +904,8 @@ export default function CanvasScreen({ state, onExit }) {
       {selectedNoteId && (() => {
         const selectedNode = nodes.find((n) => n.id === selectedNoteId);
         if (!selectedNode) return null;
-        const allNoteTexts = nodes
-          .filter((n) => n.type === 'textNote')
-          .map((n) => n.data.note.lines?.[0]?.text || '');
+        const textNoteNodes = nodes.filter((n) => n.type === 'textNote');
+        const allNoteTexts = textNoteNodes.map((n) => n.data.note.lines?.[0]?.text || '');
         return (
           <NoteSidePanel
             note={selectedNode.data.note}
@@ -830,6 +913,8 @@ export default function CanvasScreen({ state, onExit }) {
             allNoteTexts={allNoteTexts}
             onClose={handleClosePanel}
             onTextUpdated={handleNoteTextExternalUpdate}
+            onOpenMuse={handleOpenMuse}
+            onTypeChange={handleNoteTypeChange}
           />
         );
       })()}

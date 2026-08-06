@@ -165,6 +165,40 @@ function wordsOf(line) {
   }));
 }
 
+// The two exports below exist for the muse's rhyme-suggestion feature: it
+// needs to know what a line (or a single target word) actually rhymes with
+// by this module's own rules, and to check a candidate word against that —
+// the same primitives classifyStanzaRhymes already uses internally, just
+// exposed for a single word instead of a whole stanza.
+
+// The rhyme key a *line* ends on — its last word's tail, by the same rule
+// classifyStanzaRhymes uses to group lines.
+export function getLineRhymeKey(line, lang = 'es', dialect = 'central') {
+  const words = wordsOf(line);
+  const lastWord = words[words.length - 1];
+  return lastWord ? rhymeKeys(lastWord.clean, lang, dialect) : null;
+}
+
+// The rhyme key of a single bare word (e.g. one the user typed as "rhyme
+// with this"), not a whole line.
+export function getWordRhymeKey(word, lang = 'es', dialect = 'central') {
+  const clean = (word || '').toLowerCase().replace(/[^a-zàèéíïòóúüñç]/gi, '');
+  return clean ? rhymeKeys(clean, lang, dialect) : null;
+}
+
+// Does a candidate word/short phrase actually rhyme with a target key?
+// Checked against the candidate's own last word, consonant match or
+// assonant match either counts.
+export function wordMatchesRhyme(candidate, targetKey, lang = 'es', dialect = 'central') {
+  if (!targetKey) return false;
+  const words = wordsOf(candidate);
+  const lastWord = words[words.length - 1];
+  if (!lastWord) return false;
+  const keys = rhymeKeys(lastWord.clean, lang, dialect);
+  if (!keys) return false;
+  return keys.consonant === targetKey.consonant || keys.assonant === targetKey.assonant;
+}
+
 // One stanza (one note) at a time — letters restart at A for every note,
 // since each note already represents one structural block of the song.
 export function classifyStanzaRhymes(lines, lang = 'es', dialect = 'central') {

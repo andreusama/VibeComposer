@@ -1,17 +1,29 @@
 import { useState, useEffect, useCallback } from 'react';
-import { countLineSyllables } from '../utils/syllables.js';
-import { splitIntoLines } from '../utils/textLines.js';
 import { findRepeatedWords } from '../utils/repeatedWords.js';
 import {
   loadNoteDetail, addVariant, updateVariantText, deleteVariant, promoteVariant,
   addAnnotation, updateAnnotation, deleteAnnotation, restoreVersion, deleteHistoryVersion,
+  SECTION_TYPES, saveNoteType,
 } from './canvasData.js';
 
 const CATEGORY_LABELS = { duda: 'duda', idea: 'idea', referencia: 'referencia' };
 
-export default function NoteSidePanel({ note, userId, allNoteTexts, onClose, onTextUpdated }) {
+export default function NoteSidePanel({
+  note, userId, allNoteTexts, onClose, onTextUpdated, onOpenMuse, onTypeChange,
+}) {
   const lineId = note.lines?.[0]?.id;
   const currentText = note.lines?.[0]?.text || '';
+
+  // note.type is bound straight from the prop, no local state needed — the
+  // node itself is the source of truth, and CanvasScreen already mirrors a
+  // type change back into the same `nodes` state this panel's `note` prop
+  // is read from, so picking a new type here re-renders this select too.
+  const handleTypeChange = useCallback((e) => {
+    const val = e.target.value;
+    const label = val === 'custom' ? note.custom_label : null;
+    saveNoteType(note.id, val, label);
+    onTypeChange?.(note.id, val, label);
+  }, [note.id, note.custom_label, onTypeChange]);
 
   const [variants, setVariants] = useState([]);
   const [annotations, setAnnotations] = useState([]);
@@ -22,8 +34,9 @@ export default function NoteSidePanel({ note, userId, allNoteTexts, onClose, onT
   const [newVariant, setNewVariant] = useState('');
   const [newNote, setNewNote] = useState('');
   const [newNoteCategory, setNewNoteCategory] = useState('');
-  const [lang, setLang] = useState('es');
   const [repeatResults, setRepeatResults] = useState(null);
+
+  const [activeTab, setActiveTab] = useState('variants');
 
   useEffect(() => {
     let cancelled = false;
@@ -110,18 +123,43 @@ export default function NoteSidePanel({ note, userId, allNoteTexts, onClose, onT
     setRepeatResults(findRepeatedWords(allNoteTexts));
   }, [allNoteTexts]);
 
-  // One count per physical line — counting the whole note as a single blob
-  // silently merged separate lines' words together (sinalefa doesn't apply
-  // across a line break), so a multi-line note reported the wrong number.
-  const syllableLines = splitIntoLines(currentText)
-    .map((line) => ({ line, count: countLineSyllables(line, lang) }))
-    .filter(({ line }) => line);
-
   return (
     <div className="note-panel">
       <div className="note-panel-head">
-        <span className="note-panel-title">{note.type}{note.custom_label ? ` · ${note.custom_label}` : ''}</span>
+        <select value={note.type} onChange={handleTypeChange} className="canvas-note-type note-panel-type-select">
+          {SECTION_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+        </select>
+        {note.custom_label && <span className="note-panel-custom-label">{note.custom_label}</span>}
         <button className="note-panel-close" onClick={onClose}>✕</button>
+      </div>
+
+      {/* The muse lives as its own floating node on the canvas now, not a
+          tab here — this just opens (or re-focuses) the one for this note. */}
+      <button className="note-panel-open-muse" onClick={() => onOpenMuse?.(note)}>
+        <span className="note-panel-open-muse-icon">✦</span>
+        <span className="note-panel-open-muse-label">ask the muse</span>
+        <span className="note-panel-open-muse-arrow">›</span>
+      </button>
+
+      <div className="note-panel-tabs">
+        <button
+          className={`note-panel-tab${activeTab === 'variants' ? ' active' : ''}`}
+          onClick={() => setActiveTab('variants')}
+        >
+          variants <span className="note-panel-tab-count">{variants.length}</span>
+        </button>
+        <button
+          className={`note-panel-tab${activeTab === 'notes' ? ' active' : ''}`}
+          onClick={() => setActiveTab('notes')}
+        >
+          notes <span className="note-panel-tab-count">{annotations.length}</span>
+        </button>
+        <button
+          className={`note-panel-tab${activeTab === 'history' ? ' active' : ''}`}
+          onClick={() => setActiveTab('history')}
+        >
+          history <span className="note-panel-tab-count">{history.length}</span>
+        </button>
       </div>
 
       {error && <div className="note-panel-error">{error}</div>}
@@ -129,132 +167,121 @@ export default function NoteSidePanel({ note, userId, allNoteTexts, onClose, onT
       {loading ? (
         <div className="note-panel-loading">loading…</div>
       ) : (
-        <div className="note-panel-body">
+        <>
+          <div className="note-panel-body">
 
-          <div className="note-group">
-            <h4 className="note-group-label">Variantes</h4>
-            <div className="note-group-card">
-              {variants.length === 0 && <p className="note-panel-empty">no alternates yet</p>}
-              {variants.map((v) => (
-                <div className="note-variant-row" key={v.id}>
-                  <textarea
-                    className="note-variant-text"
-                    value={v.text}
-                    onChange={(e) => handleVariantTextChange(v.id, e.target.value)}
-                    onBlur={() => handleVariantBlur(v)}
-                  />
-                  <div className="note-variant-actions">
-                    <button onClick={() => handlePromote(v)} title="make this the active text">use ⇧</button>
-                    <button onClick={() => handleDeleteVariant(v.id)} title="delete variant">✕</button>
-                  </div>
-                </div>
-              ))}
-              <div className="note-panel-add-row">
-                <input
-                  value={newVariant}
-                  placeholder="alternate wording…"
-                  onChange={(e) => setNewVariant(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleAddVariant()}
-                />
-                <button onClick={handleAddVariant}>+ add</button>
-              </div>
-            </div>
-          </div>
-
-          <div className="note-group">
-            <h4 className="note-group-label">Apuntes</h4>
-            <div className="note-group-card">
-              {annotations.length === 0 && <p className="note-panel-empty">no notes yet</p>}
-              {annotations.map((a) => (
-                <div className={`note-annotation-row${a.resolved ? ' resolved' : ''}`} key={a.id}>
-                  <span className={`note-annotation-dot${a.category ? ` ${a.category}` : ''}`} />
-                  <div className="note-annotation-main">
-                    {a.category && <span className="note-annotation-category">{CATEGORY_LABELS[a.category]}</span>}
-                    <p className="note-annotation-body">{a.body}</p>
-                    <div className="note-annotation-actions">
-                      <button onClick={() => handleToggleResolved(a)}>{a.resolved ? 'reopen' : 'resolve'}</button>
-                      <button onClick={() => handleDeleteAnnotation(a.id)}>✕</button>
+            {activeTab === 'variants' && (
+              <div className="note-group-card">
+                {variants.length === 0 && <p className="note-panel-empty">no alternates yet — the version on the canvas is your only one</p>}
+                {variants.map((v) => (
+                  <div className="note-variant-row" key={v.id}>
+                    <textarea
+                      className="note-variant-text"
+                      value={v.text}
+                      onChange={(e) => handleVariantTextChange(v.id, e.target.value)}
+                      onBlur={() => handleVariantBlur(v)}
+                    />
+                    <div className="note-variant-actions">
+                      <button onClick={() => handlePromote(v)} title="make this the active text">use ⇧</button>
+                      <button onClick={() => handleDeleteVariant(v.id)} title="delete variant">✕</button>
                     </div>
                   </div>
-                </div>
-              ))}
-              <div className="note-panel-add-col">
-                <textarea
-                  className="note-annotation-input"
-                  value={newNote}
-                  placeholder="a doubt, an idea, a reference…"
-                  onChange={(e) => setNewNote(e.target.value)}
-                />
+                ))}
                 <div className="note-panel-add-row">
-                  <select value={newNoteCategory} onChange={(e) => setNewNoteCategory(e.target.value)}>
-                    <option value="">no category</option>
-                    <option value="duda">duda</option>
-                    <option value="idea">idea</option>
-                    <option value="referencia">referencia</option>
-                  </select>
-                  <button onClick={handleAddAnnotation}>+ add</button>
+                  <input
+                    value={newVariant}
+                    placeholder="alternate wording…"
+                    onChange={(e) => setNewVariant(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleAddVariant()}
+                  />
+                  <button onClick={handleAddVariant}>+</button>
                 </div>
               </div>
-            </div>
-          </div>
+            )}
 
-          <div className="note-group">
-            <h4 className="note-group-label">Historial</h4>
-            <div className="note-group-card">
-              {history.length === 0 && <p className="note-panel-empty">no previous versions</p>}
-              {history.map((v) => (
-                <div className="note-history-row" key={v.id}>
-                  <p className="note-history-text">{v.snapshot?.[0]?.text}</p>
-                  <div className="note-history-meta">
-                    <span>{new Date(v.created_at).toLocaleString()}</span>
-                    <div className="note-history-buttons">
-                      <button onClick={() => handleRestore(v)}>restore</button>
-                      <button className="note-history-delete" onClick={() => handleDeleteHistory(v.id)}>delete</button>
+            {activeTab === 'notes' && (
+              <div className="note-group-card">
+                {annotations.length === 0 && <p className="note-panel-empty">no notes yet</p>}
+                {annotations.map((a) => (
+                  <div className={`note-annotation-row${a.resolved ? ' resolved' : ''}`} key={a.id}>
+                    <span className={`note-annotation-dot${a.category ? ` ${a.category}` : ''}`} />
+                    <div className="note-annotation-main">
+                      {a.category && <span className="note-annotation-category">{CATEGORY_LABELS[a.category]}</span>}
+                      <p className="note-annotation-body">{a.body}</p>
+                      <div className="note-annotation-actions">
+                        <button onClick={() => handleToggleResolved(a)}>{a.resolved ? 'reopen' : 'resolve'}</button>
+                        <button onClick={() => handleDeleteAnnotation(a.id)}>✕</button>
+                      </div>
                     </div>
                   </div>
+                ))}
+                <div className="note-panel-add-col">
+                  <textarea
+                    className="note-annotation-input"
+                    value={newNote}
+                    placeholder="a doubt, an idea, a reference…"
+                    onChange={(e) => setNewNote(e.target.value)}
+                  />
+                  <div className="note-panel-add-row">
+                    <select value={newNoteCategory} onChange={(e) => setNewNoteCategory(e.target.value)}>
+                      <option value="">no category</option>
+                      <option value="duda">duda</option>
+                      <option value="idea">idea</option>
+                      <option value="referencia">referencia</option>
+                    </select>
+                    <button onClick={handleAddAnnotation}>+ add</button>
+                  </div>
                 </div>
-              ))}
-            </div>
+              </div>
+            )}
+
+            {activeTab === 'history' && (
+              <div className="note-group-card">
+                {history.length === 0 && <p className="note-panel-empty">no previous versions</p>}
+                {history.map((v) => (
+                  <div className="note-history-row" key={v.id}>
+                    <p className="note-history-text">{v.snapshot?.[0]?.text}</p>
+                    <div className="note-history-meta">
+                      <span>{new Date(v.created_at).toLocaleString()}</span>
+                      <div className="note-history-buttons">
+                        <button onClick={() => handleRestore(v)}>restore</button>
+                        <button className="note-history-delete" onClick={() => handleDeleteHistory(v.id)}>delete</button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
           </div>
 
-          <div className="note-group">
-            <h4 className="note-group-label">Herramientas</h4>
-            <div className="note-group-card">
-              <div className="note-tool-row">
-                <span className="note-group-sublabel">syllables per line</span>
-                <select value={lang} onChange={(e) => setLang(e.target.value)}>
-                  <option value="es">ES</option>
-                  <option value="ca">CA</option>
-                </select>
-              </div>
-              {syllableLines.length === 0 ? (
-                <p className="note-panel-empty">write a line to count</p>
+          {/* Pinned regardless of which tab is open — a whole-lyric tool,
+              not something scoped to one category of note content, so it
+              doesn't belong inside the tab switching above it. Syllable
+              counts used to live here too; they're on the canvas note's own
+              gutter now, so showing them a second time here would just be
+              a second, out-of-sync copy. */}
+          <div className="note-panel-tools-bar">
+            <div>
+              <div className="note-panel-tools-label">check repeated words</div>
+              <div className="note-panel-tools-sublabel">across the whole lyric</div>
+            </div>
+            <button className="note-panel-run-btn" onClick={handleCheckRepeats}>run</button>
+          </div>
+          {repeatResults && (
+            <div className="note-panel-tools-results">
+              {repeatResults.length === 0 ? (
+                <p className="note-panel-empty">no repeats found across the lyric</p>
               ) : (
-                <ul className="note-syllable-list">
-                  {syllableLines.map(({ line, count }, i) => (
-                    <li className="note-syllable-row" key={i}>
-                      <span className="note-syllable-line">{line}</span>
-                      <span className="note-syllable-count">{count}</span>
-                    </li>
+                <ul className="note-repeats-list">
+                  {repeatResults.map((r) => (
+                    <li key={r.word}><strong>{r.word}</strong> × {r.count}</li>
                   ))}
                 </ul>
               )}
-              <button className="note-check-repeats-btn" onClick={handleCheckRepeats}>revisar repeticiones</button>
-              {repeatResults && (
-                repeatResults.length === 0 ? (
-                  <p className="note-panel-empty">no repeats found across the lyric</p>
-                ) : (
-                  <ul className="note-repeats-list">
-                    {repeatResults.map((r) => (
-                      <li key={r.word}><strong>{r.word}</strong> × {r.count}</li>
-                    ))}
-                  </ul>
-                )
-              )}
             </div>
-          </div>
-
-        </div>
+          )}
+        </>
       )}
     </div>
   );

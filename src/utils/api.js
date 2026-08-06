@@ -1,6 +1,9 @@
 import { SYSTEM_PROMPT } from '../constants.js';
 
-const API_URL   = '/api/claude';
+// Exported so other Claude-calling features (e.g. museApi.js) can reuse the
+// same endpoint and rate limit without duplicating them — API_MODEL stays
+// local on purpose, other callers may need a different model.
+export const API_URL = '/api/claude';
 const API_MODEL = 'claude-sonnet-4-5';
 
 // ─── Toggle to avoid API calls during visual development ──────────────────────
@@ -46,7 +49,7 @@ export async function composeProgression(vibeProfile) {
 const DAILY_LIMIT = 100;
 const TODAY = new Date().toDateString();
 
-function checkAndIncrementLimit() {
+export function checkAndIncrementLimit() {
   const stored = JSON.parse(localStorage.getItem('vc_usage') || '{}');
   
   if (stored.date !== TODAY) {

@@ -18,7 +18,7 @@ const HANDLE_STYLE = { width: 10, height: 10, background: '#1D1C1A', border: '2p
 const CHORD_HANDLE_STYLE = { width: 12, height: 12, background: '#4552D6', border: '2px solid #fff' };
 
 export default function TextNoteNode({ id, data, selected }) {
-  const { note, onDeleted, onOpenPanel, onTextChange, onTypeChange, chordSummary, lyricLanguage, lyricDialect } = data;
+  const { note, onDeleted, onOpenPanel, onOpenMuse, onTextChange, onTypeChange, chordSummary, lyricLanguage, lyricDialect } = data;
   const [type, setType] = useState(note.type);
   const [customLabel, setCustomLabel] = useState(note.custom_label || '');
   const [text, setText] = useState(note.lines?.[0]?.text || '');
@@ -63,6 +63,18 @@ export default function TextNoteNode({ id, data, selected }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.textVersion]);
 
+  // Type/label don't have a "mid-keystroke" race the way free text does —
+  // a dropdown pick is atomic — so this can just always mirror the prop
+  // directly, no version-bump indirection needed. Without this, a type
+  // change made from the side panel (which edits the same note.type prop
+  // through the exact same onTypeChange mirror as this node's own select)
+  // would only ever show up here after a remount, since useState's
+  // initial value is only read once.
+  useEffect(() => {
+    setType(note.type);
+    setCustomLabel(note.custom_label || '');
+  }, [note.type, note.custom_label]);
+
   const handleTextChange = useCallback((e) => {
     const val = e.target.value;
     setText(val);
@@ -73,8 +85,15 @@ export default function TextNoteNode({ id, data, selected }) {
     clearTimeout(saveTimer.current);
     beginSave();
     saveTimer.current = setTimeout(async () => {
-      if (lineId) await saveNoteText(lineId, val);
-      endSave();
+      // finally, not a trailing call — a rejected save (network hiccup,
+      // Supabase throwing rather than resolving with {error}) would
+      // otherwise skip endSave() entirely, leaving the toolbar's "saving…"
+      // indicator stuck on forever with no way to clear itself.
+      try {
+        if (lineId) await saveNoteText(lineId, val);
+      } finally {
+        endSave();
+      }
     }, 500);
   }, [lineId, id, onTextChange]);
 
@@ -134,6 +153,11 @@ export default function TextNoteNode({ id, data, selected }) {
           onClick={handleCycleStatus}
           title={`status: ${status} (click to change)`}
         />
+        <button
+          className="canvas-note-muse nodrag"
+          onClick={(e) => { e.stopPropagation(); onOpenMuse?.(note); }}
+          title="ask the muse"
+        >✦</button>
         <button
           className="canvas-note-details nodrag"
           onClick={(e) => { e.stopPropagation(); onOpenPanel?.(id); }}

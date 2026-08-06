@@ -46,8 +46,11 @@ export default function OutputNode({ id, data, selected }) {
     clearTimeout(saveTimer.current);
     beginSave();
     saveTimer.current = setTimeout(async () => {
-      await saveOutputTitle(id, val);
-      endSave();
+      try {
+        await saveOutputTitle(id, val);
+      } finally {
+        endSave();
+      }
     }, 500);
   }, [id]);
 

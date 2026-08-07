@@ -3310,6 +3310,39 @@ body::before {
 .muse-float-debug-toggle:hover { opacity: 0.85; background: rgba(29, 28, 26, 0.06); }
 .muse-float-debug-toggle.active { opacity: 1; background: rgba(184, 132, 42, 0.18); }
 
+/* Wraps body + composer (not the head) so a single overlay can cover both
+   at once — closing the float still works while it's loading, everything
+   else underneath doesn't. min-height:0 is load-bearing: without it this
+   flex child won't let .muse-float-body's own flex:1 + overflow actually
+   shrink/scroll inside a column flex parent. */
+.muse-float-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    min-height: 0;
+}
+
+.muse-float-loading-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.75);
+    backdrop-filter: blur(1px);
+}
+
+.muse-float-spinner {
+    width: 28px;
+    height: 28px;
+    border: 3px solid var(--hairline);
+    border-top-color: var(--amber);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
 .muse-float-body {
     flex: 1;
     overflow-y: auto;
@@ -3511,6 +3544,37 @@ body::before {
     border-radius: var(--r-sm);
 }
 .baul-float-close:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
+
+/* Same wrapping trick as .muse-float-content — see its comment. */
+.baul-float-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    min-height: 0;
+}
+
+.baul-float-loading-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.75);
+    backdrop-filter: blur(1px);
+}
+
+/* Ink, not amber — matches the black hole's own identity rather than
+   borrowing the muse's accent color. */
+.baul-float-spinner {
+    width: 28px;
+    height: 28px;
+    border: 3px solid var(--hairline);
+    border-top-color: var(--ink);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
 
 .baul-float-body {
     flex: 1;

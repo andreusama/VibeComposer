@@ -115,50 +115,61 @@ export default function BaulFloatNode({ id, data, selected }) {
         <button className="baul-float-close nodrag" onClick={() => onClose?.(id)} title="close">✕</button>
       </div>
 
-      <div className="baul-float-body nodrag nowheel">
-        {error && <div className="note-panel-error">{error}</div>}
-        <p className="note-panel-empty">
-          {hasAbsorbedSomething
-            ? 'sigue volcando material — cuanto más le des, más afinada llega la musa. Lo que ya ha absorbido se queda dentro, no se muestra aquí.'
-            : 'vuelca aquí lo que tengas — una nota de voz transcrita, un texto a las 3 AM, una foto de tu libreta, un documento — y el baúl irá destilando tu ADN lírico con cada entrada, en silencio.'}
-        </p>
-      </div>
-
-      <div className="baul-float-composer nodrag">
-        {file && (
-          <div className="baul-file-chip">
-            <span>{file.name}</span>
-            <button onClick={() => setFile(null)} title="remove attachment">✕</button>
+      {/* Same pattern as the muse's float: covers body + composer, not the
+          header, so closing still works mid-process but nothing else is
+          clickable while a submission is being processed. */}
+      <div className="baul-float-content">
+        {processing && (
+          <div className="baul-float-loading-overlay">
+            <span className="baul-float-spinner" />
           </div>
         )}
-        <div className="note-panel-add-row">
-          <input
-            value={text}
-            placeholder="vuelca algo al baúl…"
-            disabled={processing || !!file}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
-          />
-          <button onClick={handleSubmit} disabled={processing || (!text.trim() && !file)}>
-            {processing ? '…' : 'volcar'}
-          </button>
+
+        <div className="baul-float-body nodrag nowheel">
+          {error && <div className="note-panel-error">{error}</div>}
+          <p className="note-panel-empty">
+            {hasAbsorbedSomething
+              ? 'sigue volcando material — cuanto más le des, más afinada llega la musa. Lo que ya ha absorbido se queda dentro, no se muestra aquí.'
+              : 'vuelca aquí lo que tengas — una nota de voz transcrita, un texto a las 3 AM, una foto de tu libreta, un documento — y el baúl irá destilando tu ADN lírico con cada entrada, en silencio.'}
+          </p>
         </div>
-        <div className="baul-float-actions">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*,application/pdf"
-            className="baul-file-input"
-            onChange={handleFilePick}
-          />
-          <button
-            className="baul-attach-btn"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={processing}
-          >
-            📎 adjuntar foto de libreta o PDF
-          </button>
-          {justSaved && <span className="baul-saved-hint">ADN actualizado</span>}
+
+        <div className="baul-float-composer nodrag">
+          {file && (
+            <div className="baul-file-chip">
+              <span>{file.name}</span>
+              <button onClick={() => setFile(null)} title="remove attachment">✕</button>
+            </div>
+          )}
+          <div className="note-panel-add-row">
+            <input
+              value={text}
+              placeholder="vuelca algo al baúl…"
+              disabled={processing || !!file}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
+            />
+            <button onClick={handleSubmit} disabled={processing || (!text.trim() && !file)}>
+              {processing ? '…' : 'volcar'}
+            </button>
+          </div>
+          <div className="baul-float-actions">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*,application/pdf"
+              className="baul-file-input"
+              onChange={handleFilePick}
+            />
+            <button
+              className="baul-attach-btn"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={processing}
+            >
+              📎 adjuntar foto de libreta o PDF
+            </button>
+            {justSaved && <span className="baul-saved-hint">ADN actualizado</span>}
+          </div>
         </div>
       </div>
     </div>

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { NodeResizer } from '@xyflow/react';
 import { loadMuseConversation, saveMuseTurn, markMuseOptionSaved } from './museData.js';
 import { askMuse } from '../utils/museApi.js';
@@ -41,6 +41,11 @@ export default function MuseFloatNode({ id, data, selected }) {
   // counts. debugInfo holds the _debug object from the most recent call.
   const [debugMode, setDebugMode] = useState(false);
   const [debugInfo, setDebugInfo] = useState(null);
+  // Points at whichever conversation entry is currently last, so a fresh
+  // reply scrolls itself into view instead of landing below the fold in a
+  // long thread — re-pointed every render via the ref callback below, not
+  // tracked as its own state.
+  const lastEntryRef = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -52,6 +57,12 @@ export default function MuseFloatNode({ id, data, selected }) {
     })();
     return () => { cancelled = true; };
   }, [lineId]);
+
+  useEffect(() => {
+    if (conversation.length > 0) {
+      lastEntryRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [conversation]);
 
   const send = useCallback(async (rawMessage) => {
     const message = rawMessage.trim();
@@ -133,69 +144,75 @@ export default function MuseFloatNode({ id, data, selected }) {
         <button className="muse-float-close nodrag" onClick={() => onClose?.(id)} title="close">✕</button>
       </div>
 
-      <div className="muse-float-body nodrag nowheel">
-        {loading ? (
-          <p className="note-panel-loading">loading…</p>
-        ) : (
-          <>
-            {error && <div className="note-panel-error">{error}</div>}
-            <div className="muse-thread">
-              {conversation.length === 0 && (
-                <p className="note-panel-empty">pídele ayuda a la musa: continuar el verso, complementar una idea, encontrar una rima…</p>
-              )}
-              {conversation.map((entry) => (
-                entry.role === 'user' ? (
-                  <p className="muse-turn muse-turn-user" key={entry.id}>{entry.content}</p>
-                ) : (
-                  <div className="muse-turn muse-turn-muse" key={entry.id}>
-                    <p className={entry.action === 'clarify' ? 'muse-question' : 'muse-answer'}>{entry.content}</p>
-                    {entry.options?.length > 0 && (
-                      <div className="muse-options">
-                        {entry.options.map((rawOpt, i) => {
-                          const opt = normalizeOption(rawOpt);
-                          const saved = savedOptions.has(`${entry.id}:${i}`);
-                          return (
-                            <div className="muse-option-row" key={i}>
-                              <div className="muse-option-main">
-                                {opt.angle && <span className="muse-option-angle">{ANGLE_LABELS[opt.angle] || opt.angle}</span>}
-                                <span className="muse-option-text">{opt.text}</span>
-                              </div>
-                              <button
-                                className="muse-save-btn"
-                                disabled={saved}
-                                onClick={() => handleSaveOption(entry, opt.text, i)}
-                              >
-                                {saved ? 'guardado' : 'guardar'}
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )
-              ))}
-            </div>
-            {debugMode && <MuseDebugPanel debug={debugInfo} />}
-          </>
+      {/* Covers body + composer together, not the header — closing should
+          still work while the muse is thinking, only the actual content
+          and controls underneath are blocked. */}
+      <div className="muse-float-content">
+        {(loading || asking) && (
+          <div className="muse-float-loading-overlay">
+            <span className="muse-float-spinner" />
+          </div>
         )}
-      </div>
 
-      <div className="muse-float-composer nodrag">
-        <div className="note-panel-add-row">
-          <input
-            value={draft}
-            placeholder={isPendingClarify ? 'your answer…' : 'pídele algo a la musa…'}
-            disabled={asking}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-          />
-          <button onClick={handleSend} disabled={asking}>{asking ? '…' : 'send'}</button>
+        <div className="muse-float-body nodrag nowheel">
+          {error && <div className="note-panel-error">{error}</div>}
+          <div className="muse-thread">
+            {conversation.length === 0 && (
+              <p className="note-panel-empty">pídele ayuda a la musa: continuar el verso, complementar una idea, encontrar una rima…</p>
+            )}
+            {conversation.map((entry, i) => {
+              const isLast = i === conversation.length - 1;
+              return entry.role === 'user' ? (
+                <p ref={isLast ? lastEntryRef : null} className="muse-turn muse-turn-user" key={entry.id}>{entry.content}</p>
+              ) : (
+                <div ref={isLast ? lastEntryRef : null} className="muse-turn muse-turn-muse" key={entry.id}>
+                  <p className={entry.action === 'clarify' ? 'muse-question' : 'muse-answer'}>{entry.content}</p>
+                  {entry.options?.length > 0 && (
+                    <div className="muse-options">
+                      {entry.options.map((rawOpt, j) => {
+                        const opt = normalizeOption(rawOpt);
+                        const saved = savedOptions.has(`${entry.id}:${j}`);
+                        return (
+                          <div className="muse-option-row" key={j}>
+                            <div className="muse-option-main">
+                              {opt.angle && <span className="muse-option-angle">{ANGLE_LABELS[opt.angle] || opt.angle}</span>}
+                              <span className="muse-option-text">{opt.text}</span>
+                            </div>
+                            <button
+                              className="muse-save-btn"
+                              disabled={saved}
+                              onClick={() => handleSaveOption(entry, opt.text, j)}
+                            >
+                              {saved ? 'guardado' : 'guardar'}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {debugMode && <MuseDebugPanel debug={debugInfo} />}
         </div>
-        {isPendingClarify && (
-          <button className="muse-skip-btn nodrag" onClick={handleSkip} disabled={asking}>skip this one</button>
-        )}
-        <div className="muse-float-hint">draft saves automatically — drag out anytime</div>
+
+        <div className="muse-float-composer nodrag">
+          <div className="note-panel-add-row">
+            <input
+              value={draft}
+              placeholder={isPendingClarify ? 'your answer…' : 'pídele algo a la musa…'}
+              disabled={asking}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+            />
+            <button onClick={handleSend} disabled={asking}>{asking ? '…' : 'send'}</button>
+          </div>
+          {isPendingClarify && (
+            <button className="muse-skip-btn nodrag" onClick={handleSkip} disabled={asking}>skip this one</button>
+          )}
+          <div className="muse-float-hint">draft saves automatically — drag out anytime</div>
+        </div>
       </div>
     </div>
   );

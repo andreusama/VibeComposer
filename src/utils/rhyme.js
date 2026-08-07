@@ -188,7 +188,11 @@ export function getWordRhymeKey(word, lang = 'es', dialect = 'central') {
 
 // Does a candidate word/short phrase actually rhyme with a target key?
 // Checked against the candidate's own last word, consonant match or
-// assonant match either counts.
+// assonant match either counts. A word trivially "matches" its own rhyme
+// key (same word → same key), but repeating the exact word you were asked
+// to rhyme with isn't a rhyme at all — rima repetida doesn't count in
+// either language's convention — so that case is rejected explicitly
+// rather than left to slip through as a false positive.
 export function wordMatchesRhyme(candidate, targetKey, lang = 'es', dialect = 'central') {
   if (!targetKey) return false;
   const words = wordsOf(candidate);
@@ -196,6 +200,7 @@ export function wordMatchesRhyme(candidate, targetKey, lang = 'es', dialect = 'c
   if (!lastWord) return false;
   const keys = rhymeKeys(lastWord.clean, lang, dialect);
   if (!keys) return false;
+  if (keys.clean === targetKey.clean) return false;
   return keys.consonant === targetKey.consonant || keys.assonant === targetKey.assonant;
 }
 

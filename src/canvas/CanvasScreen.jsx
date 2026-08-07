@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
-  ReactFlow, Background, addEdge, useReactFlow, useViewport,
+  ReactFlow, Background, useReactFlow, useViewport,
   applyNodeChanges, applyEdgeChanges, ReactFlowProvider,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
@@ -20,10 +20,12 @@ import {
   createMainThreadLink, deleteNoteLink, assignProgressionToNote, setProgressionTempo,
   deleteNote, deleteChordProgression,
   loadOutputNodes, createOutputNode, deleteOutputNode, saveOutputPosition, setOutputPluggedNote,
-  loadOutputSelections, setOutputSelection, saveSongTitle, saveSongLyricSettings,
+  saveSongTitle, saveSongLyricSettings,
   loadTempoNodes, createTempoNode, saveTempoBpm, saveTempoPosition, deleteTempoNode,
+  getAdjacentNotes,
 } from './canvasData.js';
 import { DIALECTS } from '../utils/rhyme.js';
+import { splitIntoLines } from '../utils/textLines.js';
 import { loadMuseProfile } from './museData.js';
 
 const NODE_TYPES = {
@@ -180,10 +182,49 @@ function mainThreadEdges(links) {
   }));
 }
 
+// connectionMode="loose" on the <ReactFlow> below lets a drag start on
+// EITHER handle and land on EITHER handle, so a raw onConnect `connection`
+// object's source/target just mean "node the drag started on" / "node it
+// landed on" — not upstream/downstream. What actually determines that is
+// which HANDLE was used on each end: 'right' is every note's single OUT
+// port; 'left' (a text note's input) and 'output-in' (a Final Song's only
+// handle) are both IN ports. Two OUT ports meeting, or two IN ports
+// meeting, is a real male-female mismatch and gets rejected; one of each,
+// in either drag direction, is a normal connection — this resolves it back
+// to its true upstream → downstream pair before anything downstream
+// touches the database.
+const OUT_HANDLES = new Set(['right']);
+const IN_HANDLES = new Set(['left', 'output-in']);
+
+function resolveNoteLinkDirection(connection) {
+  const sourceIsOut = OUT_HANDLES.has(connection.sourceHandle);
+  const sourceIsIn = IN_HANDLES.has(connection.sourceHandle);
+  const targetIsOut = OUT_HANDLES.has(connection.targetHandle);
+  const targetIsIn = IN_HANDLES.has(connection.targetHandle);
+  if (sourceIsOut && targetIsIn) return { upstreamId: connection.source, downstreamId: connection.target };
+  if (sourceIsIn && targetIsOut) return { upstreamId: connection.target, downstreamId: connection.source };
+  if (sourceIsOut && targetIsOut) return { mismatch: 'out' };
+  if (sourceIsIn && targetIsIn) return { mismatch: 'in' };
+  return {}; // neither handle is part of this family (chord/tempo handles) — not our concern
+}
+
 function summarizeProgression(cp) {
   if (!cp?.progression?.length) return null;
   const chords = cp.progression.map((c) => c.chord).filter(Boolean);
   return chords.length ? chords.join(' · ') : null;
+}
+
+// A cheap digest of a neighboring note for the muse's local narrative
+// context — not a real summary (no extra LLM call just to describe a
+// neighbor), just the one physical line that actually matters for that
+// direction: the previous note's *last* line is what the current note picks
+// up from, the next note's *first* line is what it should be building
+// toward.
+function describeAdjacentNote(note, edge) {
+  if (!note) return null;
+  const lines = splitIntoLines(note.lines?.[0]?.text || '').filter(Boolean);
+  const line = edge === 'previous' ? lines[lines.length - 1] : lines[0];
+  return { type: note.custom_label || note.type, line: line || '' };
 }
 
 // Needs to live inside <ReactFlowProvider> to call useReactFlow/useViewport
@@ -270,11 +311,6 @@ export default function CanvasScreen({ state, onExit }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [selectedNoteId, setSelectedNoteId] = useState(null);
-  // Per-mix fork choices: [{ output_id, source_note_id, note_link_id }, ...].
-  // Kept flat and filtered per-node in renderNodes rather than nested inside
-  // each output's own data, since a single connect/delete action elsewhere
-  // never needs to touch this.
-  const [selections, setSelections] = useState([]);
   // Drives .canvas-flow-dragging (see style.css) — while true, every node
   // except the one being dragged stops taking pointer events, so the
   // browser isn't hover/hit-testing a whole board of irrelevant nodes on
@@ -475,19 +511,7 @@ export default function CanvasScreen({ state, onExit }) {
 
   const progressionCallbacks = { onDeleted: handleNodeDeleted, onArrange: handleArrange };
 
-  // A final mix is one linear playthrough — this is how it records which
-  // branch it takes at a specific fork (see resolveMainThreadPath). Local
-  // state is an upsert-by-hand since there's no DB round trip to wait on
-  // before the mix should already reflect the new choice.
-  const handleSelectBranch = useCallback((outputId, sourceNoteId, noteLinkId) => {
-    setOutputSelection(outputId, sourceNoteId, noteLinkId);
-    setSelections((sels) => [
-      ...sels.filter((s) => !(s.output_id === outputId && s.source_note_id === sourceNoteId)),
-      { output_id: outputId, source_note_id: sourceNoteId, note_link_id: noteLinkId },
-    ]);
-  }, []);
-
-  const outputCallbacks = { onDeleted: handleNodeDeleted, onSelectBranch: handleSelectBranch };
+  const outputCallbacks = { onDeleted: handleNodeDeleted };
 
   // Tempo's bpm needs to reach every chord progression currently plugged
   // into it too, not just its own node — otherwise turning the dial only
@@ -522,9 +546,6 @@ export default function CanvasScreen({ state, onExit }) {
       if (error) { setLoadError(error.message); setLoading(false); return; }
       if (outputError) { setLoadError(outputError.message); setLoading(false); return; }
       if (tempoError) { setLoadError(tempoError.message); setLoading(false); return; }
-      const { selections: loadedSelections, error: selectionsError } = await loadOutputSelections(outputs.map((o) => o.id));
-      if (cancelled) return;
-      if (selectionsError) { setLoadError(selectionsError.message); setLoading(false); return; }
       const progressionsById = Object.fromEntries(progressions.map((p) => [p.id, p]));
       const tempoById = Object.fromEntries(tempos.map((t) => [t.id, t]));
       setNodes([
@@ -541,7 +562,6 @@ export default function CanvasScreen({ state, onExit }) {
       ]);
       const plugEdges = outputs.map(outputPlugEdge).filter(Boolean);
       setEdges([...mainThreadEdges(links), ...assignmentEdges(notes), ...tempoAssignmentEdges(progressions), ...plugEdges]);
-      setSelections(loadedSelections);
       setLoading(false);
     })();
     return () => { cancelled = true; };
@@ -576,9 +596,33 @@ export default function CanvasScreen({ state, onExit }) {
     if (save) { beginSave(); save.finally(endSave); }
   }, []);
 
-  // One connect gesture, two meanings depending on what's being connected:
-  // chord-progression → text-note assigns it as that note's chords; text-note
-  // → text-note extends the main-thread (the clean-view lyric order).
+  // A rejected connection attempt (two OUT ports or two IN ports — see
+  // resolveNoteLinkDirection above) still draws the edge the user was
+  // dragging — just in red, briefly, with an explanation, instead of
+  // silently doing nothing. Never persisted (no DB call): a plain local
+  // edge that removes itself after the blink finishes.
+  const flashRejectedConnection = useCallback((connection, mismatch) => {
+    const flashId = `rejected-${crypto.randomUUID()}`;
+    setEdges((eds) => [...eds, {
+      ...connection,
+      id: flashId,
+      type: 'default',
+      style: { stroke: '#C24444', strokeWidth: 2 },
+      className: 'edge-rejected',
+      label: `${mismatch} with ${mismatch} not possible`,
+      labelStyle: { fill: '#C24444', fontFamily: 'var(--font-mono, monospace)', fontSize: 11 },
+      labelBgStyle: { fill: '#fff', fillOpacity: 0.9 },
+      data: { kind: 'rejected' },
+    }]);
+    setTimeout(() => setEdges((eds) => eds.filter((e) => e.id !== flashId)), 1000);
+  }, []);
+
+  // One connect gesture, several meanings depending on what's being
+  // connected: chord-progression → text-note assigns it as that note's
+  // chords; tempo-node → chord-progression assigns its bpm; a note ↔
+  // another note or note ↔ Final Song extends the main-thread (the clean-
+  // view lyric order) — resolved to a true upstream/downstream pair first,
+  // see resolveNoteLinkDirection.
   const onConnect = useCallback((connection) => {
     setNodes((nds) => {
       const sourceNode = nds.find((n) => n.id === connection.source);
@@ -625,48 +669,100 @@ export default function CanvasScreen({ state, onExit }) {
           : n);
       }
 
-      if (sourceNode.type === 'textNote' && targetNode.type === 'textNote') {
-        // Two links between the same pair isn't a real fork/merge, just the
-        // same connection twice — guard here so it can't happen from a
-        // stray double-drag, rather than relying on every downstream reader
-        // (the final-mix chain walk) to shrug it off.
-        const alreadyLinked = edgesRef.current.some((e) =>
-          e.data?.kind === 'main-thread' && e.source === sourceNode.id && e.target === targetNode.id
-        );
-        if (!alreadyLinked) {
-          const linkId = crypto.randomUUID();
-          const position = edgesRef.current.filter((e) => e.data?.kind === 'main-thread').length;
-          createMainThreadLink(linkId, song.id, sourceNode.id, targetNode.id, position);
-          setEdges((eds) => addEdge({
-            ...connection, id: linkId, type: 'default',
-            style: { stroke: '#1F6F63', strokeWidth: 1.5, opacity: 0.6 }, data: { kind: 'main-thread', position },
-          }, eds));
+      const noteLinkPair = (
+        (sourceNode.type === 'textNote' && targetNode.type === 'textNote') ||
+        (sourceNode.type === 'textNote' && targetNode.type === 'outputNode') ||
+        (sourceNode.type === 'outputNode' && targetNode.type === 'textNote')
+      );
+      if (noteLinkPair) {
+        const direction = resolveNoteLinkDirection(connection);
+        if (direction.mismatch) {
+          // The only thing actually rejected: two OUT ports or two IN
+          // ports plugged into each other — not "this slot is already
+          // used." A note's IN and OUT are each freely replaceable, same
+          // as re-plugging a chord progression or a tempo node.
+          flashRejectedConnection(connection, direction.mismatch);
+          return nds;
         }
-      }
+        if (direction.upstreamId && direction.downstreamId) {
+          const upstream = nds.find((n) => n.id === direction.upstreamId);
+          const downstream = nds.find((n) => n.id === direction.downstreamId);
+          if (!upstream || !downstream) return nds;
 
-      // Only one note can be plugged into a given final-mix node at a time —
-      // a fresh connection replaces whichever plug edge existed on THIS
-      // output node, same pattern as re-assigning a chord progression to a
-      // note. Other final-mix nodes (there can be several now) keep theirs —
-      // scope the replacement to this target only, not every output edge.
-      if (sourceNode.type === 'textNote' && targetNode.type === 'outputNode') {
-        setOutputPluggedNote(targetNode.id, sourceNode.id);
-        setEdges((eds) => [
-          ...eds.filter((e) => !(e.data?.kind === 'output' && e.target === targetNode.id)),
-          {
-            id: `output-plug-${targetNode.id}`, source: sourceNode.id, target: targetNode.id,
-            sourceHandle: 'right', targetHandle: 'output-in',
-            type: 'default', style: { stroke: '#1D1C1A', strokeWidth: 1.5, opacity: 0.5 }, data: { kind: 'output' },
-          },
-        ]);
-        return nds.map((n) => n.id === targetNode.id
-          ? { ...n, data: { ...n.data, output: { ...n.data.output, plugged_note_id: sourceNode.id } } }
-          : n);
+          const isOutputTarget = downstream.type === 'outputNode';
+          const alreadyLinked = edgesRef.current.some((e) =>
+            e.data?.kind === (isOutputTarget ? 'output' : 'main-thread')
+            && e.source === upstream.id && e.target === downstream.id
+          );
+          if (alreadyLinked) return nds;
+
+          // Reconnecting either end replaces whatever was plugged in
+          // before, silently — an upstream note's OUT and a downstream
+          // note's IN are each a single slot, one per note, regardless of
+          // whether the far end is another note or a Final Song.
+          const staleFromUpstream = edgesRef.current.filter((e) =>
+            (e.data?.kind === 'main-thread' || e.data?.kind === 'output') && e.source === upstream.id
+          );
+          const staleIntoDownstream = edgesRef.current.filter((e) =>
+            e.data?.kind === (isOutputTarget ? 'output' : 'main-thread') && e.target === downstream.id
+          );
+          const stale = [...staleFromUpstream, ...staleIntoDownstream];
+          const staleIds = new Set(stale.map((e) => e.id));
+          // A stale 'output' edge has no note_links row to delete — its
+          // owning output node's plugged_note_id just gets cleared, DB and
+          // local state both. Missing the local half of this (like
+          // onEdgesDelete's 'output' branch does below) is exactly what
+          // left an orphaned Final Song still rendering its old chain
+          // instead of falling back to "plug a note in" — the DB was
+          // right, but nothing ever told that node's own React state.
+          const orphanedOutputIds = [];
+          stale.forEach((e) => {
+            if (e.data?.kind === 'main-thread') {
+              deleteNoteLink(e.id);
+            } else if (e.data?.kind === 'output' && e.target !== downstream.id) {
+              setOutputPluggedNote(e.target, null);
+              orphanedOutputIds.push(e.target);
+            }
+          });
+
+          let nextNds = orphanedOutputIds.length
+            ? nds.map((n) => orphanedOutputIds.includes(n.id)
+              ? { ...n, data: { ...n.data, output: { ...n.data.output, plugged_note_id: null } } }
+              : n)
+            : nds;
+          if (isOutputTarget) {
+            setOutputPluggedNote(downstream.id, upstream.id);
+            setEdges((eds) => [
+              ...eds.filter((e) => !staleIds.has(e.id)),
+              {
+                id: `output-plug-${downstream.id}`, source: upstream.id, target: downstream.id,
+                sourceHandle: 'right', targetHandle: 'output-in',
+                type: 'default', style: { stroke: '#1D1C1A', strokeWidth: 1.5, opacity: 0.5 }, data: { kind: 'output' },
+              },
+            ]);
+            nextNds = nextNds.map((n) => n.id === downstream.id
+              ? { ...n, data: { ...n.data, output: { ...n.data.output, plugged_note_id: upstream.id } } }
+              : n);
+          } else {
+            const linkId = crypto.randomUUID();
+            const position = edgesRef.current.filter((e) => e.data?.kind === 'main-thread').length;
+            createMainThreadLink(linkId, song.id, upstream.id, downstream.id, position);
+            setEdges((eds) => [
+              ...eds.filter((e) => !staleIds.has(e.id)),
+              {
+                id: linkId, source: upstream.id, target: downstream.id,
+                sourceHandle: 'right', targetHandle: 'left',
+                type: 'default', style: { stroke: '#1F6F63', strokeWidth: 1.5, opacity: 0.6 }, data: { kind: 'main-thread', position },
+              },
+            ]);
+          }
+          return nextNds;
+        }
       }
 
       return nds;
     });
-  }, [song?.id]);
+  }, [song?.id, flashRejectedConnection]);
 
   // Fires when a node is removed via the selection + Delete/Backspace gesture
   // (the standard canvas-editor way to delete something) — the in-node ✕
@@ -792,9 +888,6 @@ export default function CanvasScreen({ state, onExit }) {
             notes: textNotes,
             links: mainThreadLinks,
             progressionsById,
-            selections: Object.fromEntries(
-              selections.filter((s) => s.output_id === n.id).map((s) => [s.source_note_id, s.note_link_id])
-            ),
             lyricLanguage,
             lyricDialect,
           },
@@ -808,12 +901,18 @@ export default function CanvasScreen({ state, onExit }) {
         // as a chord progression's bpm — a float opened a while ago
         // shouldn't keep prompting off a stale snapshot of the verse.
         const sourceNote = textNotesById[n.data.sourceNoteId];
+        // Same main-thread edges the Output node already walks for the full
+        // song — here we only need the one hop on each side of this note,
+        // not the whole resolved path.
+        const { previous, next } = getAdjacentNotes(textNotes, mainThreadLinks, n.data.sourceNoteId);
         return {
           ...n,
           data: {
             ...n.data,
             verseText: sourceNote?.lines?.[0]?.text || '',
             noteFunction: sourceNote?.custom_label || sourceNote?.type || '',
+            previousNote: describeAdjacentNote(previous, 'previous'),
+            nextNote: describeAdjacentNote(next, 'next'),
             museProfile,
             lyricLanguage,
             lyricDialect,
@@ -822,7 +921,7 @@ export default function CanvasScreen({ state, onExit }) {
       }
       return n;
     });
-  }, [nodes, edges, selections, lyricLanguage, lyricDialect, museProfile]);
+  }, [nodes, edges, lyricLanguage, lyricDialect, museProfile]);
 
   const handleSignOut = useCallback(async () => {
     if (!confirm('Sign out?')) return;

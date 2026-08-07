@@ -1100,6 +1100,19 @@ body::before {
     transform: scale(1.4);
 }
 
+/* A rejected connection attempt ("out with out" — see onConnect in
+   CanvasScreen.jsx) draws the edge the user was dragging in red and blinks
+   it for exactly as long as it stays mounted (1s) before it's removed from
+   state — never persisted, purely a "that didn't work" flash. */
+.react-flow__edge.edge-rejected .react-flow__edge-path {
+    animation: edge-reject-blink 1s ease-in-out;
+}
+@keyframes edge-reject-blink {
+    0%, 100% { opacity: 1; }
+    25%, 75% { opacity: 0.15; }
+    50% { opacity: 1; }
+}
+
 /* ─── Right-click "add a node" menu ──────────────────────────────────────────── */
 
 /* Catches the outside click that closes the menu — sits between the canvas
@@ -2231,63 +2244,6 @@ body::before {
 .output-inline-badge.rhyme-badge.consonant { background: var(--thread-soft); }
 .output-inline-badge.rhyme-badge.assonant { background: var(--amber-soft); }
 
-/* A fork inside a final mix — the note itself renders as one normal line,
-   this is just the "which way does THIS mix go" picker underneath it. */
-.output-fork {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: calc(var(--space-1-5) * var(--canvas-scale));
-    margin-top: calc(var(--space-2) * var(--canvas-scale));
-    padding: calc(var(--space-2) * var(--canvas-scale));
-    background: var(--amber-soft);
-    border: 1px dashed var(--amber);
-    border-radius: var(--r-sm);
-}
-
-/* A merge sits before the note it feeds into (not after, like a fork), and
-   uses the chord/indigo accent instead of amber so "which branch got me
-   here" reads as visually distinct from "where do I go from here." */
-.output-merge {
-    margin-top: 0;
-    margin-bottom: calc(var(--space-2) * var(--canvas-scale));
-    background: var(--chord-soft);
-    border-color: var(--chord-line);
-}
-
-.output-merge .output-fork-label { color: var(--chord); }
-.output-merge .output-fork-btn.chosen { background: var(--chord); border-color: var(--chord); }
-.output-merge .output-fork-btn:hover { border-color: var(--chord); }
-
-.output-fork-label {
-    font-family: var(--font-mono);
-    font-size: calc(var(--fs-micro) * var(--canvas-scale));
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--amber);
-    flex-shrink: 0;
-}
-
-.output-fork-btn {
-    font-family: var(--font-sans);
-    font-size: calc(var(--fs-eyebrow) * var(--canvas-scale));
-    padding: calc(var(--space-1) * var(--canvas-scale)) calc(var(--space-2) * var(--canvas-scale));
-    border-radius: 20px;
-    border: 1px solid var(--hairline);
-    background: #fff;
-    color: var(--graphite);
-    cursor: pointer;
-    transition: all 0.12s ease;
-}
-
-.output-fork-btn:hover { border-color: var(--amber); color: var(--ink); }
-
-.output-fork-btn.chosen {
-    background: var(--amber);
-    border-color: var(--amber);
-    color: #fff;
-}
-
 /* ─── Vibe-compose node — a 5-step wizard living on the canvas itself, tool
    not content: never persisted, removable with no confirmation dialog. ──────── */
 .vibe-node {
@@ -3165,11 +3121,15 @@ body::before {
     max-width: 92%;
 }
 
+/* Same plain body treatment as .muse-answer right below it — amber is the
+   muse's accent (icon, header, option borders), never full-paragraph body
+   copy. A clarifying question is already distinguishable by context (no
+   option pills under it, the composer prompts for a reply) — it doesn't
+   need its own color or slant to read as a question. */
 .muse-question {
     font-family: var(--font-sans);
-    font-style: italic;
     font-size: calc(var(--fs-secondary) * var(--canvas-scale));
-    color: var(--amber);
+    color: var(--ink);
     margin-bottom: var(--space-1);
 }
 
@@ -3233,18 +3193,23 @@ body::before {
    the docked panel. Same visual language as the other node cards
    (.canvas-note etc.) so it reads as belonging on the canvas, with an
    amber accent throughout since that's the muse's established color. */
+/* The card's own outline stays neutral — the amber identity lives in the
+   header wash and the icon badge below, never in the border. What gives
+   this card presence over the rest of the canvas is elevation (it's
+   literally draggable, floating above everything else), so the shadow is
+   deliberately much heavier than any other card in the system. */
 .muse-float {
     width: 100%;
     height: 100%;
     display: flex;
     flex-direction: column;
     background: #fff;
-    border: 1px solid var(--amber);
+    border: 1px solid var(--hairline);
     border-radius: var(--r-md);
-    box-shadow: var(--sh-2);
+    box-shadow: 0 24px 60px rgba(29, 28, 26, 0.22);
     overflow: hidden;
 }
-.muse-float.selected { box-shadow: var(--sh-3); }
+.muse-float.selected { box-shadow: 0 28px 70px rgba(29, 28, 26, 0.28); }
 
 .muse-float-head {
     display: flex;
@@ -3252,19 +3217,45 @@ body::before {
     justify-content: space-between;
     gap: var(--space-2);
     padding: calc(var(--space-2) * var(--canvas-scale)) calc(var(--space-3) * var(--canvas-scale));
-    background: var(--amber-soft);
-    border-bottom: 1px solid var(--amber);
+    background: linear-gradient(135deg, #FCF6E8 0%, var(--amber-soft) 100%);
+    border-bottom: 1px solid var(--hairline);
     /* The drag handle for the whole node — everything else in the float
        has .nodrag so a click there doesn't also start moving the card. */
     cursor: grab;
 }
 
-.muse-float-title {
+.muse-float-head-left {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+/* A context label, not a headline — same visual weight as the note's own
+   VERSE badge or the panel's VARIANTES/HISTORIAL section labels, so it
+   reads as "this is what this card is" rather than competing with the
+   actual content underneath it. */
+.muse-float-head-label {
     font-family: var(--font-mono);
-    font-weight: 600;
-    font-size: calc(var(--fs-label) * var(--canvas-scale));
-    letter-spacing: 0.04em;
-    text-transform: lowercase;
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--graphite);
+}
+
+/* Same amber-circle badge treatment as everywhere else the muse appears
+   (canvas node badge, panel's "ask the muse" row) — one recognizable icon
+   across all three spots, not three different weights of the same idea. */
+.muse-float-icon {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--amber-soft);
+    border: 1px solid #EAD9B8;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
     color: var(--amber);
 }
 
@@ -3276,11 +3267,13 @@ body::before {
     justify-content: center;
     border: none;
     background: none;
-    color: var(--amber);
+    color: var(--graphite);
     cursor: pointer;
     border-radius: var(--r-sm);
 }
-.muse-float-close:hover { background: var(--amber); color: #fff; }
+/* A close action is generic utility, not a muse-branded control — only
+   background feedback on hover, no color shift to the amber identity. */
+.muse-float-close:hover { background: rgba(29, 28, 26, 0.06); }
 
 .muse-float-body {
     flex: 1;

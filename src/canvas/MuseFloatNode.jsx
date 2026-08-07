@@ -14,7 +14,7 @@ import { addAnnotation } from './canvasData.js';
 export default function MuseFloatNode({ id, data, selected }) {
   const {
     songId, lineId, verseText, noteFunction, museProfile, onMuseProfileUpdated,
-    lyricLanguage, lyricDialect, userId, onClose,
+    lyricLanguage, lyricDialect, userId, onClose, previousNote, nextNote,
   } = data;
 
   const [conversation, setConversation] = useState([]);
@@ -45,6 +45,7 @@ export default function MuseFloatNode({ id, data, selected }) {
         verseText, noteFunction, museProfile, userMessage: message,
         conversation: conversation.map((e) => ({ role: e.role, content: e.content, options: e.options })),
         lang: lyricLanguage, dialect: lyricDialect,
+        nodeContext: { previousNote, nextNote },
       });
       const { data: rows, error: saveError } = await saveMuseTurn(songId, lineId, response.register, message, response);
       if (saveError) { setError(saveError.message); return; }
@@ -61,7 +62,7 @@ export default function MuseFloatNode({ id, data, selected }) {
     } finally {
       setAsking(false);
     }
-  }, [asking, verseText, noteFunction, museProfile, conversation, lyricLanguage, lyricDialect, songId, lineId, onMuseProfileUpdated]);
+  }, [asking, verseText, noteFunction, museProfile, conversation, lyricLanguage, lyricDialect, songId, lineId, onMuseProfileUpdated, previousNote, nextNote]);
 
   const handleSend = useCallback(() => send(draft), [send, draft]);
 
@@ -92,7 +93,10 @@ export default function MuseFloatNode({ id, data, selected }) {
       <NodeResizer minWidth={280} minHeight={220} isVisible={selected} />
 
       <div className="muse-float-head">
-        <span className="muse-float-title">✦ the muse</span>
+        <div className="muse-float-head-left">
+          <span className="muse-float-icon">✦</span>
+          <span className="muse-float-head-label">the muse</span>
+        </div>
         <button className="muse-float-close nodrag" onClick={() => onClose?.(id)} title="close">✕</button>
       </div>
 

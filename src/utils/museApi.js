@@ -75,6 +75,16 @@ function describePhysicalLines(verseText, lang, dialect) {
         .join('\n');
 }
 
+// Split in two on purpose, for Anthropic prompt caching: everything in here
+// is identical across every turn of a conversation on the same song (it only
+// changes when museProfile itself gets rewritten by the periodic summary —
+// see museProfileUpdater.js), so it's the piece worth paying the one-time
+// cache-write cost on and reading back cheaply on every follow-up turn
+// within the session. Per-note, per-turn content (the line breakdown, the
+// recent conversation) lives in buildDynamicMuseContext instead, uncached,
+// since caching it would never hit — it's different on every call by
+// definition.
+//
 // The register-based calibration, the "never comment/psychoanalyze" rules,
 // and the sensitivity handling are the ones product settled on. What
 // changed from the original one-shot curious-question design: the muse now
@@ -82,7 +92,7 @@ function describePhysicalLines(verseText, lang, dialect) {
 // isn't an available move anymore — the user asked for help, it always
 // gives *something* back (a clarifying question or options), just gentler
 // in tone when the topic is delicate.
-function buildCompanionSystemPrompt({museProfile, noteFunction, verseText, conversation, lang, dialect}) {
+function buildStaticMuseInstructions(museProfile) {
     return `Eres la musa de un compositor: su compañera de escritura, no una
 espectadora que comenta la canción desde fuera. Tu trabajo es ayudarle a
 seguir escribiendo — continuar un verso, complementar una imagen,
@@ -96,7 +106,11 @@ Cómo funciona cada intercambio:
   la necesitas para ayudar mejor, nunca como fin en sí misma.
 - Si ya tienes contexto suficiente, da entre 5 y 6 opciones concretas:
   versos, palabras o direcciones que el usuario pueda usar tal cual o
-  adaptar. No las expliques largo, solo ofrécelas.
+  adaptar. No las expliques largo, solo ofrécelas. Genera más candidatas
+  de las que hacen falta a propósito — el sistema filtra después las que
+  no cumplen la métrica o la rima exactas y se queda con las mejores 3, así
+  que cuantas más opciones válidas y variadas propongas, mejor es lo que
+  sobrevive al filtro.
 
 Reglas:
 - Nunca comentes ni valores la canción como espectadora — eres parte del
@@ -120,15 +134,27 @@ Reglas:
   citando su contenido). A los compositores les encanta hablar de su
   canción, así que preguntar nunca sobra.
 - Cuando tus opciones sustituyen, completan o riman con una línea física
-  YA EXISTENTE (ver lista de abajo), cada opción debe tener
-  aproximadamente el mismo número de sílabas que esa línea (±1 sílaba) —
-  usa el recuento ya calculado abajo como referencia real, no lo estimes
-  a ojo. Indica esa línea exacta, copiada tal cual, en "targetLineText".
+  YA EXISTENTE (te la paso en cada turno, numerada, con su recuento de
+  sílabas), cada opción debe tener aproximadamente el mismo número de
+  sílabas que esa línea (±1 sílaba) — usa el recuento que te doy como
+  referencia real, no lo estimes a ojo. Indica esa línea exacta, copiada
+  tal cual, en "targetLineText".
 - Si en cambio propones una línea nueva que continúa la nota sin sustituir
   ninguna existente, deja "targetLineText" en null — no hay una longitud
   objetivo que cumplir.
 - Cada opción es una sola línea física: sin saltos de línea, sin dos
   frases que en realidad son dos versos distintos.
+- Cuando el usuario pida algo que rime, identifica la palabra objetivo y
+  ponla en "rhymeTargetWord" con "isRhymeRequest": true — igual que con la
+  métrica, un verificador aparte revisa después si tus opciones riman de
+  verdad, así que prioriza variedad de imágenes por encima de intentar
+  acertar la rima tú misma con precisión perfecta.
+- Repetir la misma palabra con la que se pide rimar NUNCA cuenta como
+  rima, en ningún idioma — una opción que termine en esa misma palabra
+  (aunque técnicamente "coincida") queda descartada por el verificador.
+  Esto aplica también si esa palabra viene del nodo anterior o siguiente:
+  la continuidad narrativa que se pide más abajo es de imagen y tema, no
+  de repetir literalmente su última palabra.
 
 Antes de responder, identifica en una palabra el registro emocional de
 esta nota (amor / amistad / familia / lugar / otro) y básate solo en el
@@ -138,20 +164,63 @@ se expresa de forma distinta según el registro.
 Perfil de musa para este proyecto (aprendido hasta ahora, por registro):
 ${JSON.stringify(museProfile || {})}
 
-Nota actual (${noteFunction}), línea por línea física — usa estos
+Responde ÚNICAMENTE con un JSON de una sola línea, sin explicación, sin
+markdown, con esta forma exacta:
+{"register": "amor"|"amistad"|"familia"|"lugar"|"otro", "action": "clarify"|"suggest", "message": "tu pregunta si action es clarify, o una frase breve introduciendo las opciones si action es suggest", "options": ["opción 1", "opción 2", "..."] (array vacío si action es clarify, 5 a 6 opciones si es suggest), "isRhymeRequest": true|false, "rhymeTargetWord": "la palabra con la que deben rimar las opciones, o null si no aplica", "targetLineText": "la línea física exacta (copiada tal cual de la lista que te paso en el turno) que tus opciones sustituyen o completan, o null si no aplica"}
+No muestres tu clasificación de registro como texto aparte, ni ningún
+razonamiento — va solo dentro del JSON.`;
+}
+
+// Local narrative position — only the immediate neighbor on each side (see
+// getAdjacentNotes in canvas/canvasData.js), not a fully resolved song path.
+// Deliberately NOT a model-generated "summary" of the neighbor: that would
+// mean an extra API call just to describe a note, and a synthetic label
+// (an invented "emotion") the model would have to trust blindly. The one
+// physical line that actually matters for that direction — the previous
+// note's last line, the next note's first — is real data the muse can
+// reason over itself, the same way it already infers register from raw
+// text instead of being handed a canned label for it.
+function describeNodeContext(nodeContext) {
+    const { previousNote, nextNote } = nodeContext || {};
+    const prev = previousNote
+        ? `termina con: "${previousNote.line}"`
+        : 'sin nodo anterior conectado en el hilo principal';
+    const next = nextNote
+        ? `empieza hacia: "${nextNote.line}"`
+        : 'sin nodo siguiente conectado en el hilo principal';
+    return `Ubicación de esta nota respecto a sus vecinos en el hilo principal:
+- Anterior (${previousNote ? previousNote.type : '—'}): ${prev}
+- Siguiente (${nextNote ? nextNote.type : '—'}): ${next}
+Si hay vecino anterior y/o siguiente, tus opciones deben actuar de puente:
+mantén continuidad con lo que viene del nodo anterior y prepara (sin
+resolverla ya) la idea del nodo siguiente — esa resolución le toca a él,
+no a esta nota. Continuidad es de imagen y tema, nunca repetir la última
+palabra del nodo anterior como si eso bastara.`;
+}
+
+// Everything that's different on every single call, by definition — never
+// worth caching, so it's kept out of the static block entirely rather than
+// invalidating that block's cache on every turn.
+function buildDynamicMuseContext({verseText, noteFunction, conversation, lang, dialect, nodeContext}) {
+    // Bounded on purpose: an unbounded transcript would make input tokens
+    // (and thus cost/latency) grow with every turn of a long conversation on
+    // the same line. Three turns is enough for the model to track what it
+    // already asked/offered without re-litigating early exchanges — the
+    // museProfile is what carries anything that needs to survive longer
+    // than that.
+    const recentConversation = conversation.slice(-3);
+    return `Nota actual (${noteFunction}), línea por línea física — usa estos
 recuentos de sílabas y claves de rima tal cual, no los recalcules
 (consonante = coincide todo desde la vocal tónica; asonante = solo las
 vocales coinciden):
 ${describePhysicalLines(verseText, lang, dialect)}
 
-Conversación hasta ahora sobre esta línea:
-${formatConversation(conversation)}
+${describeNodeContext(nodeContext)}
 
-Responde ÚNICAMENTE con un JSON de una sola línea, sin explicación, sin
-markdown, con esta forma exacta:
-{"register": "amor"|"amistad"|"familia"|"lugar"|"otro", "action": "clarify"|"suggest", "message": "tu pregunta si action es clarify, o una frase breve introduciendo las opciones si action es suggest", "options": ["opción 1", "opción 2"] (array vacío si action es clarify, 2 a 4 opciones si es suggest), "isRhymeRequest": true|false, "rhymeTargetWord": "la palabra con la que deben rimar las opciones, o null si no aplica", "targetLineText": "la línea física exacta (copiada tal cual de la lista de arriba) que tus opciones sustituyen o completan, o null si no aplica"}
-No muestres tu clasificación de registro como texto aparte, ni ningún
-razonamiento — va solo dentro del JSON.`;
+Conversación hasta ahora sobre esta línea:
+${formatConversation(recentConversation)}
+
+Recuerda: responde solo con el JSON descrito arriba, nada más.`;
 }
 
 function parseCompanionResponse(raw) {
@@ -205,7 +274,9 @@ function parseCompanionResponse(raw) {
  * conversation, so pass the full prior conversation every time.
  * @param {{verseText: string, noteFunction: string, museProfile: object,
  *   userMessage: string, conversation?: {role: 'user'|'muse', content: string,
- *   options?: string[]}[], lang?: string, dialect?: string}} args
+ *   options?: string[]}[], lang?: string, dialect?: string,
+ *   nodeContext?: {previousNote: {type: string, line: string}|null,
+ *   nextNote: {type: string, line: string}|null}}} args
  * @returns {Promise<{register: string, action: 'clarify'|'suggest',
  *   message: string, options: string[], isRhymeRequest: boolean,
  *   rhymeVerified: boolean}>}
@@ -217,17 +288,27 @@ export async function askMuse({
                                   userMessage,
                                   conversation = [],
                                   lang = 'es',
-                                  dialect = 'central'
+                                  dialect = 'central',
+                                  nodeContext,
                               }) {
-    const system = buildCompanionSystemPrompt({
-        museProfile,
-        noteFunction,
-        verseText,
-        conversation,
-        userMessage,
-        lang,
-        dialect
-    });
+    // Two content blocks, not one string: cache_control can only mark a
+    // block boundary, so the stable instructions (which we want Anthropic to
+    // cache and reuse across every turn of this conversation) and the
+    // per-turn note/conversation data (which must never be cached, since
+    // it's different every time — including nodeContext, which changes
+    // whenever the user opens the muse on a different note) have to be
+    // physically separate blocks.
+    const system = [
+        {
+            type: 'text',
+            text: buildStaticMuseInstructions(museProfile),
+            cache_control: {type: 'ephemeral'},
+        },
+        {
+            type: 'text',
+            text: buildDynamicMuseContext({verseText, noteFunction, conversation, lang, dialect, nodeContext}),
+        },
+    ];
     const raw = await callClaude(system, userMessage, 400);
     const parsed = parseCompanionResponse(raw);
 

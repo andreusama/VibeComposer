@@ -10,7 +10,10 @@ import OutputNode from './OutputNode.jsx';
 import VibeComposeNode from './VibeComposeNode.jsx';
 import TempoNode from './TempoNode.jsx';
 import MuseFloatNode from './MuseFloatNode.jsx';
+import InspirationBlackHoleNode from './InspirationBlackHoleNode.jsx';
+import BaulFloatNode from './BaulFloatNode.jsx';
 import NoteSidePanel from './NoteSidePanel.jsx';
+import DebugConsole from './DebugConsole.jsx';
 import { setState } from '../state/store.js';
 import { supabase } from '../utils/supabaseClient.js';
 import { beginSave, endSave, subscribeSaveStatus } from './saveStatus.js';
@@ -23,6 +26,8 @@ import {
   saveSongTitle, saveSongLyricSettings,
   loadTempoNodes, createTempoNode, saveTempoBpm, saveTempoPosition, deleteTempoNode,
   getAdjacentNotes,
+  loadBaulNodes, createBaulNode, saveBaulNodePosition, deleteBaulNode,
+  loadLyricDna,
 } from './canvasData.js';
 import { DIALECTS } from '../utils/rhyme.js';
 import { splitIntoLines } from '../utils/textLines.js';
@@ -31,7 +36,7 @@ import { loadMuseProfile } from './museData.js';
 const NODE_TYPES = {
   textNote: TextNoteNode, chordProgression: ChordProgressionNode,
   outputNode: OutputNode, vibeCompose: VibeComposeNode, tempoNode: TempoNode,
-  museFloat: MuseFloatNode,
+  museFloat: MuseFloatNode, blackHole: InspirationBlackHoleNode, baulFloat: BaulFloatNode,
 };
 
 // The pills a right-click on empty canvas offers, grouped by what they're
@@ -52,6 +57,12 @@ const NODE_PILL_GROUPS = [
       { type: 'tempo', label: 'Tempo', icon: '◍' },
     ],
   },
+  {
+    label: 'Inspiration',
+    pills: [
+      { type: 'blackhole', label: 'Inspiration Black Hole', icon: '●' },
+    ],
+  },
 ];
 const NODE_PILL_COUNT = NODE_PILL_GROUPS.reduce((sum, g) => sum + g.pills.length, 0);
 
@@ -66,6 +77,7 @@ const DEFAULT_OUTPUT_WIDTH = 320;
 const DEFAULT_OUTPUT_HEIGHT = 240;
 const DEFAULT_TEMPO_WIDTH = 160;
 const DEFAULT_TEMPO_HEIGHT = 120;
+const DEFAULT_BLACKHOLE_SIZE = 140;
 
 // Matches Figma's default grid — fine enough to feel unobtrusive, coarse
 // enough that "almost aligned" nodes stop happening.
@@ -117,6 +129,20 @@ function tempoToFlowNode(tempo, callbacks) {
     width: tempo.canvas_width || DEFAULT_TEMPO_WIDTH,
     height: tempo.canvas_height || DEFAULT_TEMPO_HEIGHT,
     data: { bpm: tempo.bpm, ...callbacks },
+  };
+}
+
+// No content of its own — everything it produces lives on the song
+// (songs.lyric_dna), so its data is just the callbacks, same as a plain
+// tool node, but with a real DB row for position/size like tempo.
+function blackHoleToFlowNode(node, callbacks) {
+  return {
+    id: node.id,
+    type: 'blackHole',
+    position: { x: node.canvas_x || 0, y: node.canvas_y || 0 },
+    width: node.canvas_width || DEFAULT_BLACKHOLE_SIZE,
+    height: node.canvas_height || DEFAULT_BLACKHOLE_SIZE,
+    data: { ...callbacks },
   };
 }
 
@@ -391,6 +417,25 @@ export default function CanvasScreen({ state, onExit }) {
     setMuseProfile((profile) => ({ ...profile, [register]: summary }));
   }, []);
 
+  // The baúl's fused ADN Lírico — deliberately separate from museProfile
+  // above (see baulProcessor.js / schema.sql for why). One evolving object
+  // per song, overwritten wholesale by BaulFloatNode after each
+  // processBaulInput call.
+  const [lyricDna, setLyricDna] = useState(null);
+
+  useEffect(() => {
+    if (!song?.id) { setLyricDna(null); return; }
+    let cancelled = false;
+    (async () => {
+      const { data } = await loadLyricDna(song.id);
+      if (cancelled) return;
+      setLyricDna(data?.lyric_dna || {});
+    })();
+    return () => { cancelled = true; };
+  }, [song?.id]);
+
+  const handleLyricDnaUpdated = useCallback((nextDna) => setLyricDna(nextDna), []);
+
   const handleLyricDialectChange = useCallback((e) => {
     const dialect = e.target.value;
     setLyricDialect(dialect);
@@ -447,6 +492,45 @@ export default function CanvasScreen({ state, onExit }) {
       }];
     });
   }, [song?.id, state.session?.user?.id, museProfile, handleMuseProfileUpdated, lyricLanguage, lyricDialect, handleNodeDeleted]);
+
+  // The black hole itself needs to show processing/success/error even if
+  // its float panel is closed or off-screen — a status line inside the
+  // panel alone is easy to miss entirely if the user submitted and looked
+  // away. Set directly on the black hole node's own data (not via
+  // renderNodes — this is a one-off "this specific node just changed"
+  // update, same pattern handleTempoBpmChange already uses for bpm).
+  const handleBaulStatusChange = useCallback((blackHoleId, status) => {
+    setNodes((nds) => nds.map((n) => (n.id === blackHoleId ? { ...n, data: { ...n.data, status } } : n)));
+  }, []);
+
+  // Same one-per-source pattern as handleOpenMuse, keyed off the black
+  // hole's own id (there's no separate "source note" here — the black hole
+  // node is itself the entry point).
+  const handleOpenBaul = useCallback((blackHoleId) => {
+    const floatId = `baul-float-${blackHoleId}`;
+    setNodes((nds) => {
+      if (nds.some((n) => n.id === floatId)) return nds;
+      const sourceNode = nds.find((n) => n.id === blackHoleId);
+      const position = sourceNode
+        ? { x: sourceNode.position.x + (sourceNode.width || DEFAULT_BLACKHOLE_SIZE) + 40, y: sourceNode.position.y }
+        : { x: 400, y: 200 };
+      return [...nds, {
+        id: floatId,
+        type: 'baulFloat',
+        position,
+        width: 320,
+        height: 360,
+        data: {
+          songId: song?.id,
+          lyricDna,
+          onLyricDnaUpdated: handleLyricDnaUpdated,
+          onClose: handleNodeDeleted,
+          sourceBlackHoleId: blackHoleId,
+          onStatusChange: handleBaulStatusChange,
+        },
+      }];
+    });
+  }, [song?.id, lyricDna, handleLyricDnaUpdated, handleNodeDeleted, handleBaulStatusChange]);
 
   const handleOpenPanel = useCallback((id) => setSelectedNoteId(id), []);
   const handleClosePanel = useCallback(() => setSelectedNoteId(null), []);
@@ -532,20 +616,28 @@ export default function CanvasScreen({ state, onExit }) {
   }, []);
 
   const tempoCallbacks = { onDeleted: handleNodeDeleted, onBpmChange: handleTempoBpmChange };
+  const blackHoleCallbacks = { onDeleted: handleNodeDeleted, onOpen: handleOpenBaul };
 
   useEffect(() => {
     if (!song) { onExit(); return; }
     let cancelled = false;
     (async () => {
-      const [{ notes, progressions, links, error }, { outputs, error: outputError }, { data: tempos, error: tempoError }] = await Promise.all([
+      const [
+        { notes, progressions, links, error },
+        { outputs, error: outputError },
+        { data: tempos, error: tempoError },
+        { data: baulNodes, error: baulError },
+      ] = await Promise.all([
         loadCanvasData(song.id),
         loadOutputNodes(song.id),
         loadTempoNodes(song.id),
+        loadBaulNodes(song.id),
       ]);
       if (cancelled) return;
       if (error) { setLoadError(error.message); setLoading(false); return; }
       if (outputError) { setLoadError(outputError.message); setLoading(false); return; }
       if (tempoError) { setLoadError(tempoError.message); setLoading(false); return; }
+      if (baulError) { setLoadError(baulError.message); setLoading(false); return; }
       const progressionsById = Object.fromEntries(progressions.map((p) => [p.id, p]));
       const tempoById = Object.fromEntries(tempos.map((t) => [t.id, t]));
       setNodes([
@@ -559,6 +651,7 @@ export default function CanvasScreen({ state, onExit }) {
         })),
         ...outputs.map((o) => outputToFlowNode(o, outputCallbacks)),
         ...tempos.map((t) => tempoToFlowNode(t, tempoCallbacks)),
+        ...(baulNodes || []).map((b) => blackHoleToFlowNode(b, blackHoleCallbacks)),
       ]);
       const plugEdges = outputs.map(outputPlugEdge).filter(Boolean);
       setEdges([...mainThreadEdges(links), ...assignmentEdges(notes), ...tempoAssignmentEdges(progressions), ...plugEdges]);
@@ -592,6 +685,7 @@ export default function CanvasScreen({ state, onExit }) {
       : node.type === 'chordProgression' ? saveProgressionPosition(node.id, position, node.width, node.height)
       : node.type === 'outputNode' ? saveOutputPosition(node.id, position, node.width, node.height)
       : node.type === 'tempoNode' ? saveTempoPosition(node.id, position, node.width, node.height)
+      : node.type === 'blackHole' ? saveBaulNodePosition(node.id, position, node.width, node.height)
       : null;
     if (save) { beginSave(); save.finally(endSave); }
   }, []);
@@ -775,6 +869,7 @@ export default function CanvasScreen({ state, onExit }) {
       else if (node.type === 'chordProgression') deleteChordProgression(node.id);
       else if (node.type === 'outputNode') deleteOutputNode(node.id);
       else if (node.type === 'tempoNode') deleteTempoNode(node.id);
+      else if (node.type === 'blackHole') deleteBaulNode(node.id);
     });
   }, []);
 
@@ -850,13 +945,20 @@ export default function CanvasScreen({ state, onExit }) {
     setNodes((nds) => [...nds, tempoToFlowNode(tempo, tempoCallbacks)]);
   }, [song?.id, handleTempoBpmChange, handleNodeDeleted]);
 
+  const handleAddBlackHole = useCallback(async (position = { x: 120, y: 500 }) => {
+    const { data: node, error } = await createBaulNode(song.id, position);
+    if (error) { setLoadError(error.message); return; }
+    setNodes((nds) => [...nds, blackHoleToFlowNode(node, blackHoleCallbacks)]);
+  }, [song?.id, handleOpenBaul, handleNodeDeleted]);
+
   const handleContextAdd = useCallback((type, position) => {
     if (type === 'note') handleAddNote(position);
     else if (type === 'chord') handleAddProgression(position);
     else if (type === 'output') handleAddOutput(position);
     else if (type === 'vibe') handleAddVibeNode(position);
     else if (type === 'tempo') handleAddTempo(position);
-  }, [handleAddNote, handleAddProgression, handleAddOutput, handleAddVibeNode, handleAddTempo]);
+    else if (type === 'blackhole') handleAddBlackHole(position);
+  }, [handleAddNote, handleAddProgression, handleAddOutput, handleAddVibeNode, handleAddTempo, handleAddBlackHole]);
 
   const onPaneContextMenu = useCallback((e) => {
     e.preventDefault();
@@ -914,14 +1016,21 @@ export default function CanvasScreen({ state, onExit }) {
             previousNote: describeAdjacentNote(previous, 'previous'),
             nextNote: describeAdjacentNote(next, 'next'),
             museProfile,
+            lyricDna,
             lyricLanguage,
             lyricDialect,
           },
         };
       }
+      if (n.type === 'baulFloat') {
+        // Same reasoning as museFloat above — reads the CURRENT lyric_dna
+        // every render, so a float left open while another baúl entry
+        // gets processed elsewhere isn't stuck showing a stale ADN.
+        return { ...n, data: { ...n.data, lyricDna } };
+      }
       return n;
     });
-  }, [nodes, edges, lyricLanguage, lyricDialect, museProfile]);
+  }, [nodes, edges, lyricLanguage, lyricDialect, museProfile, lyricDna]);
 
   const handleSignOut = useCallback(async () => {
     if (!confirm('Sign out?')) return;
@@ -972,6 +1081,7 @@ export default function CanvasScreen({ state, onExit }) {
         </div>
 
         <CanvasContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} onAdd={handleContextAdd} />
+        {import.meta.env.DEV && <DebugConsole />}
 
         {loadError && <div className="canvas-error">{loadError}</div>}
 

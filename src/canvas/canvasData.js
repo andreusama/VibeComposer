@@ -178,6 +178,42 @@ export async function deleteTempoNode(id) {
   return supabase.from('tempo_nodes').delete().eq('id', id);
 }
 
+// ─── Baúl node (Inspiration Black Hole) ────────────────────────────────────
+// Same shape as a tempo node — its own DB row for position/size, no content
+// columns of its own. What it produces (lyric_dna) lives on the song row,
+// not on this node, since there's only ever one evolving ADN per song even
+// if someone adds more than one black hole to the canvas.
+
+export async function loadBaulNodes(songId) {
+  return supabase.from('baul_nodes').select('*').eq('song_id', songId);
+}
+
+export async function createBaulNode(songId, { x, y }) {
+  return supabase.from('baul_nodes')
+    .insert({ song_id: songId, canvas_x: x, canvas_y: y })
+    .select().single();
+}
+
+export async function saveBaulNodePosition(id, { x, y }, width, height) {
+  return supabase.from('baul_nodes').update({
+    canvas_x: x, canvas_y: y, canvas_width: width, canvas_height: height,
+  }).eq('id', id);
+}
+
+export async function deleteBaulNode(id) {
+  return supabase.from('baul_nodes').delete().eq('id', id);
+}
+
+// Overwritten wholesale on every processBaulInput call, never appended to
+// — see the module header in baulProcessor.js for why.
+export async function saveLyricDna(songId, lyricDna) {
+  return supabase.from('songs').update({ lyric_dna: lyricDna }).eq('id', songId);
+}
+
+export async function loadLyricDna(songId) {
+  return supabase.from('songs').select('lyric_dna').eq('id', songId).single();
+}
+
 // ─── Output nodes ───────────────────────────────────────────────────────────
 // A song can hold several — variants/mixes of the same song ("radio edit",
 // "acoustic") — each a sink a note plugs into to render its own final

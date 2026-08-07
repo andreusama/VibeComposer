@@ -4,6 +4,19 @@ import { loadMuseConversation, saveMuseTurn, markMuseOptionSaved } from './museD
 import { askMuse } from '../utils/museApi.js';
 import { recordMuseTurnAndMaybeUpdateProfile } from './museProfileUpdater.js';
 import { addAnnotation } from './canvasData.js';
+import MuseDebugPanel from './MuseDebugPanel.jsx';
+import { logDebugEvent } from './debugLog.js';
+
+// Display-only labels for the three creative angles (see museApi.js's
+// MUSE_ANGLES / buildStaticMuseInstructions) — purely cosmetic, doesn't
+// affect anything the model reads.
+const ANGLE_LABELS = { raw: 'cruda', atmospheric: 'atmosférica', abstract: 'abstracta' };
+
+// Tolerates conversation history saved before angle-tagging existed (plain
+// strings) alongside the current {text, angle} shape.
+function normalizeOption(opt) {
+  return typeof opt === 'string' ? { text: opt, angle: null } : opt;
+}
 
 // The muse used to permanently occupy a tab in the note's side panel —
 // always docked, always taking up space, whether or not you were using it.
@@ -14,7 +27,7 @@ import { addAnnotation } from './canvasData.js';
 export default function MuseFloatNode({ id, data, selected }) {
   const {
     songId, lineId, verseText, noteFunction, museProfile, onMuseProfileUpdated,
-    lyricLanguage, lyricDialect, userId, onClose, previousNote, nextNote,
+    lyricLanguage, lyricDialect, userId, onClose, previousNote, nextNote, lyricDna,
   } = data;
 
   const [conversation, setConversation] = useState([]);
@@ -23,6 +36,11 @@ export default function MuseFloatNode({ id, data, selected }) {
   const [asking, setAsking] = useState(false);
   const [error, setError] = useState(null);
   const [savedOptions, setSavedOptions] = useState(new Set());
+  // Dev-only observability toggle — never rendered in production builds,
+  // so there's no way an end user stumbles into raw prompt text or char
+  // counts. debugInfo holds the _debug object from the most recent call.
+  const [debugMode, setDebugMode] = useState(false);
+  const [debugInfo, setDebugInfo] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -42,11 +60,17 @@ export default function MuseFloatNode({ id, data, selected }) {
     setError(null);
     try {
       const response = await askMuse({
-        verseText, noteFunction, museProfile, userMessage: message,
+        verseText, noteFunction, museProfile, lyricDna, userMessage: message,
         conversation: conversation.map((e) => ({ role: e.role, content: e.content, options: e.options })),
         lang: lyricLanguage, dialect: lyricDialect,
         nodeContext: { previousNote, nextNote },
+        debug: debugMode,
       });
+      setDebugInfo(response._debug || null);
+      // Only ever set when debugMode was on for this call — pushing to the
+      // global log is what lets DebugConsole show history across multiple
+      // calls/floats, not just whatever the last inline panel captured.
+      if (response._debug) logDebugEvent('muse', response._debug);
       const { data: rows, error: saveError } = await saveMuseTurn(songId, lineId, response.register, message, response);
       if (saveError) { setError(saveError.message); return; }
       setConversation((c) => [...c, ...rows]);
@@ -62,7 +86,7 @@ export default function MuseFloatNode({ id, data, selected }) {
     } finally {
       setAsking(false);
     }
-  }, [asking, verseText, noteFunction, museProfile, conversation, lyricLanguage, lyricDialect, songId, lineId, onMuseProfileUpdated, previousNote, nextNote]);
+  }, [asking, verseText, noteFunction, museProfile, lyricDna, conversation, lyricLanguage, lyricDialect, songId, lineId, onMuseProfileUpdated, previousNote, nextNote, debugMode]);
 
   const handleSend = useCallback(() => send(draft), [send, draft]);
 
@@ -97,6 +121,15 @@ export default function MuseFloatNode({ id, data, selected }) {
           <span className="muse-float-icon">✦</span>
           <span className="muse-float-head-label">the muse</span>
         </div>
+        {import.meta.env.DEV && (
+          <button
+            className={`muse-float-debug-toggle nodrag${debugMode ? ' active' : ''}`}
+            onClick={() => setDebugMode((v) => !v)}
+            title="toggle debug telemetry (dev only)"
+          >
+            🔧
+          </button>
+        )}
         <button className="muse-float-close nodrag" onClick={() => onClose?.(id)} title="close">✕</button>
       </div>
 
@@ -118,15 +151,19 @@ export default function MuseFloatNode({ id, data, selected }) {
                     <p className={entry.action === 'clarify' ? 'muse-question' : 'muse-answer'}>{entry.content}</p>
                     {entry.options?.length > 0 && (
                       <div className="muse-options">
-                        {entry.options.map((opt, i) => {
+                        {entry.options.map((rawOpt, i) => {
+                          const opt = normalizeOption(rawOpt);
                           const saved = savedOptions.has(`${entry.id}:${i}`);
                           return (
                             <div className="muse-option-row" key={i}>
-                              <span className="muse-option-text">{opt}</span>
+                              <div className="muse-option-main">
+                                {opt.angle && <span className="muse-option-angle">{ANGLE_LABELS[opt.angle] || opt.angle}</span>}
+                                <span className="muse-option-text">{opt.text}</span>
+                              </div>
                               <button
                                 className="muse-save-btn"
                                 disabled={saved}
-                                onClick={() => handleSaveOption(entry, opt, i)}
+                                onClick={() => handleSaveOption(entry, opt.text, i)}
                               >
                                 {saved ? 'guardado' : 'guardar'}
                               </button>
@@ -139,6 +176,7 @@ export default function MuseFloatNode({ id, data, selected }) {
                 )
               ))}
             </div>
+            {debugMode && <MuseDebugPanel debug={debugInfo} />}
           </>
         )}
       </div>

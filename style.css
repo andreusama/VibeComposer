@@ -1209,7 +1209,6 @@ body::before {
     justify-content: center;
     gap: calc(var(--space-1) * var(--canvas-scale));
     background: #fff;
-    border: 1px solid var(--amber);
     border-radius: var(--r-md);
     box-shadow: var(--sh-2);
     position: relative;
@@ -3157,9 +3156,15 @@ body::before {
     justify-content: space-between;
     gap: var(--space-3);
     background: var(--paper);
-    border: 1px solid var(--amber);
     border-radius: var(--r-lg);
     padding: var(--space-2) var(--space-3);
+}
+
+.muse-option-main {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-0-5);
+    min-width: 0;
 }
 
 .muse-option-text {
@@ -3167,6 +3172,17 @@ body::before {
     font-size: calc(var(--fs-secondary) * var(--canvas-scale));
     color: var(--ink);
     overflow-wrap: break-word;
+}
+
+/* Which of the three creative angles this option leans into (see
+   MUSE_ANGLES in museApi.js) — a quiet mono tag, not a colored badge, so
+   three different angles in a row don't read as competing for attention. */
+.muse-option-angle {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--graphite-soft);
 }
 
 .muse-save-btn {
@@ -3275,6 +3291,25 @@ body::before {
    background feedback on hover, no color shift to the amber identity. */
 .muse-float-close:hover { background: rgba(29, 28, 26, 0.06); }
 
+/* Dev-only (see import.meta.env.DEV gate in MuseFloatNode.jsx) — never
+   reachable in a production build, so no risk of a real user stumbling
+   into raw prompt internals. */
+.muse-float-debug-toggle {
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: none;
+    font-size: 12px;
+    cursor: pointer;
+    border-radius: var(--r-sm);
+    opacity: 0.55;
+}
+.muse-float-debug-toggle:hover { opacity: 0.85; background: rgba(29, 28, 26, 0.06); }
+.muse-float-debug-toggle.active { opacity: 1; background: rgba(184, 132, 42, 0.18); }
+
 .muse-float-body {
     flex: 1;
     overflow-y: auto;
@@ -3291,7 +3326,6 @@ body::before {
    input restyle. */
 .muse-float-composer .note-panel-add-row input {
     border-radius: 999px;
-    border-color: var(--amber);
     background: var(--amber-soft);
     padding: var(--space-2) var(--space-3);
 }
@@ -3330,6 +3364,414 @@ body::before {
     height: 5px;
     border-radius: 50%;
     background: var(--thread);
+}
+
+/* ─── Baúl — the "Inspiration Black Hole" node + its floating input panel.
+   A cousin of the muse (same sparkle glyph, same floating-panel mechanic)
+   but its own identity: black/void instead of amber, since it's a
+   different accumulation — raw material in, ADN lírico out, not a
+   conversation. See baulProcessor.js / schema.sql for why lyric_dna is
+   kept deliberately separate from museProfile. ──────────────────────────── */
+
+.baul-blackhole {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    position: relative;
+    cursor: pointer;
+    background: radial-gradient(circle at 34% 28%, #423e38 0%, #221f1b 45%, #100f0d 100%);
+    box-shadow: var(--sh-2), inset 0 -6px 14px rgba(0, 0, 0, 0.5), inset 0 6px 10px rgba(255, 255, 255, 0.06);
+}
+.baul-blackhole.selected { box-shadow: var(--sh-3), inset 0 -6px 14px rgba(0, 0, 0, 0.5), inset 0 6px 10px rgba(255, 255, 255, 0.06); }
+
+.baul-blackhole-sparkle {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: clamp(14px, 20cqw, 28px);
+    color: var(--amber);
+    pointer-events: none;
+}
+
+.baul-blackhole-delete {
+    position: absolute;
+    top: calc(var(--space-1-5) * var(--canvas-scale));
+    right: calc(var(--space-1-5) * var(--canvas-scale));
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.6);
+    cursor: pointer;
+    border-radius: 50%;
+    font-size: calc(var(--fs-micro) * var(--canvas-scale));
+}
+.baul-blackhole-delete:hover { background: rgba(255, 255, 255, 0.18); color: #fff; }
+
+/* Processing/success/error feedback lives on the black hole itself, not
+   just inside its float panel — the panel's own confirmation is easy to
+   miss if it's been closed or the user looked away while a photo/PDF was
+   uploading. This is what makes "did it work?" answerable at a glance. */
+.baul-blackhole.processing {
+    animation: baul-pulse 1.1s ease-in-out infinite;
+}
+.baul-blackhole.processing .baul-blackhole-sparkle {
+    animation: spin 1.4s linear infinite;
+}
+@keyframes baul-pulse {
+    0%, 100% { box-shadow: var(--sh-2), inset 0 -6px 14px rgba(0, 0, 0, 0.5), inset 0 6px 10px rgba(255, 255, 255, 0.06), 0 0 0 0 rgba(184, 132, 42, 0.45); }
+    50% { box-shadow: var(--sh-2), inset 0 -6px 14px rgba(0, 0, 0, 0.5), inset 0 6px 10px rgba(255, 255, 255, 0.06), 0 0 0 8px rgba(184, 132, 42, 0); }
+}
+
+.baul-blackhole.success {
+    animation: baul-success-ring 1.3s ease-out;
+}
+.baul-blackhole.success .baul-blackhole-sparkle { color: var(--thread); }
+@keyframes baul-success-ring {
+    0% { box-shadow: var(--sh-2), inset 0 -6px 14px rgba(0, 0, 0, 0.5), inset 0 6px 10px rgba(255, 255, 255, 0.06), 0 0 0 0 rgba(31, 111, 99, 0.55); }
+    70% { box-shadow: var(--sh-2), inset 0 -6px 14px rgba(0, 0, 0, 0.5), inset 0 6px 10px rgba(255, 255, 255, 0.06), 0 0 0 18px rgba(31, 111, 99, 0); }
+    100% { box-shadow: var(--sh-2), inset 0 -6px 14px rgba(0, 0, 0, 0.5), inset 0 6px 10px rgba(255, 255, 255, 0.06), 0 0 0 0 rgba(31, 111, 99, 0); }
+}
+
+.baul-blackhole.error {
+    animation: baul-error-flash 0.7s ease-in-out;
+}
+.baul-blackhole.error .baul-blackhole-sparkle { color: var(--rose); }
+@keyframes baul-error-flash {
+    0%, 100% { box-shadow: var(--sh-2), inset 0 -6px 14px rgba(0, 0, 0, 0.5), inset 0 6px 10px rgba(255, 255, 255, 0.06); }
+    50% { box-shadow: var(--sh-2), inset 0 -6px 14px rgba(0, 0, 0, 0.5), inset 0 6px 10px rgba(255, 255, 255, 0.06), 0 0 0 8px rgba(176, 74, 74, 0.45); }
+}
+
+.baul-float {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    background: #fff;
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    box-shadow: 0 24px 60px rgba(29, 28, 26, 0.22);
+    overflow: hidden;
+}
+.baul-float.selected { box-shadow: 0 28px 70px rgba(29, 28, 26, 0.28); }
+
+.baul-float-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    padding: calc(var(--space-2) * var(--canvas-scale)) calc(var(--space-3) * var(--canvas-scale));
+    background: linear-gradient(135deg, #2a2825 0%, #100f0d 100%);
+    border-bottom: 1px solid var(--hairline);
+    cursor: grab;
+}
+
+.baul-float-head-left {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.baul-float-icon {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    color: var(--amber);
+}
+
+.baul-float-head-label {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.baul-float-close {
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: none;
+    color: rgba(255, 255, 255, 0.6);
+    cursor: pointer;
+    border-radius: var(--r-sm);
+}
+.baul-float-close:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
+
+.baul-float-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: calc(var(--space-2-5) * var(--canvas-scale)) calc(var(--space-3) * var(--canvas-scale));
+}
+
+.baul-float-composer {
+    border-top: 1px solid var(--hairline);
+    padding: calc(var(--space-2) * var(--canvas-scale)) calc(var(--space-3) * var(--canvas-scale));
+}
+
+.baul-float-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-top: var(--space-1-5);
+}
+
+.baul-file-input { display: none; }
+
+.baul-attach-btn {
+    font-family: var(--font-sans);
+    font-size: calc(var(--fs-micro) * var(--canvas-scale));
+    color: var(--graphite);
+    background: none;
+    border: 1px dashed var(--graphite-soft);
+    border-radius: var(--r-sm);
+    padding: var(--space-1) var(--space-2);
+    cursor: pointer;
+}
+.baul-attach-btn:hover { border-color: var(--ink); color: var(--ink); }
+.baul-attach-btn:disabled { cursor: default; opacity: 0.5; }
+
+.baul-file-chip {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    font-family: var(--font-mono);
+    font-size: calc(var(--fs-micro) * var(--canvas-scale));
+    color: var(--ink);
+    background: var(--paper-deep);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-sm);
+    padding: var(--space-1) var(--space-2);
+    margin-bottom: var(--space-1-5);
+}
+.baul-file-chip button {
+    border: none;
+    background: none;
+    color: var(--graphite);
+    cursor: pointer;
+}
+.baul-file-chip button:hover { color: var(--rose); }
+
+.baul-saved-hint {
+    font-family: var(--font-mono);
+    font-size: calc(var(--fs-micro) * var(--canvas-scale));
+    color: var(--thread);
+}
+
+/* ─── Muse debug panel — dev-only observability (see the 🔧 toggle in
+   MuseFloatNode.jsx). Deliberately plain/utilitarian, not styled to blend
+   in with the rest of the card, so it always reads as "developer tooling,"
+   never as part of the actual product surface. ──────────────────────────── */
+
+.muse-debug-panel {
+    margin-top: var(--space-3);
+    padding: var(--space-2-5);
+    background: var(--paper-deep);
+    border: 1px dashed var(--graphite-soft);
+    border-radius: var(--r-md);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.muse-debug-bar {
+    display: flex;
+    width: 100%;
+    height: 8px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: var(--hairline);
+}
+.muse-debug-bar-segment { height: 100%; }
+
+.muse-debug-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-3);
+}
+.muse-debug-legend-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--graphite);
+}
+.muse-debug-legend-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.muse-debug-metrics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1-5);
+}
+.muse-debug-metric {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: var(--space-1) var(--space-1-5);
+    background: #fff;
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-sm);
+    min-width: 64px;
+}
+.muse-debug-metric-label {
+    font-family: var(--font-mono);
+    font-size: 8.5px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--graphite-soft);
+}
+.muse-debug-metric-value {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--ink);
+}
+
+.muse-debug-tabs {
+    display: flex;
+    gap: var(--space-1);
+    border-bottom: 1px solid var(--hairline);
+}
+.muse-debug-tab {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--graphite-soft);
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: var(--space-1) var(--space-1-5);
+    cursor: pointer;
+}
+.muse-debug-tab:hover { color: var(--ink); }
+.muse-debug-tab.active { color: var(--ink); border-bottom-color: var(--amber); }
+
+.muse-debug-code {
+    max-height: 220px;
+    overflow: auto;
+    margin: 0;
+    padding: var(--space-2);
+    background: var(--ink);
+    color: #E8E4D8;
+    border-radius: var(--r-sm);
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* ─── Debug console — global overlay, opened with ` (backtick), the "open a
+   dev console" muscle memory games and dev tools have already trained
+   people to reach for. Fixed over the whole viewport, independent of the
+   canvas's own pan/zoom, dev-only (see the import.meta.env.DEV gate where
+   it's mounted). ──────────────────────────────────────────────────────── */
+
+.debug-console {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 40vh;
+    max-height: 420px;
+    background: rgba(16, 15, 13, 0.97);
+    color: #E8E4D8;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    font-family: var(--font-mono);
+    box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.4);
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.debug-console-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-2) var(--space-3);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    flex-shrink: 0;
+}
+
+.debug-console-title {
+    font-size: 11px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--amber);
+}
+
+.debug-console-clear {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.6);
+    background: none;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: var(--r-sm);
+    padding: 2px 8px;
+    cursor: pointer;
+}
+.debug-console-clear:hover { color: #fff; border-color: rgba(255, 255, 255, 0.4); }
+
+.debug-console-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--space-2) var(--space-3);
+}
+
+.debug-console-empty {
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 11px;
+}
+
+.debug-console-entry {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    padding: var(--space-1-5) 0;
+}
+.debug-console-entry summary {
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    list-style: none;
+}
+.debug-console-entry summary::-webkit-details-marker { display: none; }
+
+.debug-console-entry-source {
+    font-size: 10.5px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--amber);
+}
+.debug-console-entry-time {
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.4);
+}
+.debug-console-entry pre {
+    margin: var(--space-1-5) 0 0;
+    font-size: 10.5px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: #E8E4D8;
 }
 
 /* Tools */

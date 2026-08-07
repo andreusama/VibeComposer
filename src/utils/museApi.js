@@ -22,6 +22,7 @@ import {countLineSyllables} from './syllables.js';
 const MUSE_MODEL = 'claude-sonnet-5';
 
 export const MUSE_REGISTERS = ['amor', 'amistad', 'familia', 'lugar', 'otro'];
+export const MUSE_ANGLES = ['raw', 'atmospheric', 'abstract'];
 
 async function callClaude(system, userContent, maxTokens) {
     checkAndIncrementLimit();
@@ -36,6 +37,11 @@ async function callClaude(system, userContent, maxTokens) {
             // budget on its own (stop_reason "max_tokens", zero text emitted) —
             // disabling it is what actually fixed the muse's "no reply" bug.
             thinking: {type: 'disabled'},
+            // No temperature/top_p override, deliberately: Anthropic's default
+            // temperature IS 1.0 when omitted (already the max standard
+            // variance), and their own guidance is to tune temperature OR
+            // top_p, never both. Fighting genericness here is a prompting
+            // problem (see the three-angle structure below), not a sampling one.
             system,
             messages: [{role: 'user', content: userContent}],
         }),
@@ -50,7 +56,12 @@ function formatConversation(conversation) {
     return conversation
         .map((turn) => {
             if (turn.role === 'user') return `Usuario: "${turn.content}"`;
-            const optionsText = turn.options?.length ? ` Opciones ofrecidas: ${turn.options.map((o) => `"${o}"`).join(', ')}` : '';
+            // Tolerates both shapes: {text, angle} (current) and a bare
+            // string (conversation history saved before angle-tagging
+            // existed) — old saved turns still need to read back cleanly.
+            const optionsText = turn.options?.length
+                ? ` Opciones ofrecidas: ${turn.options.map((o) => `"${typeof o === 'string' ? o : o.text}"`).join(', ')}`
+                : '';
             return `Tú (musa): "${turn.content}"${optionsText}`;
         })
         .join('\n');
@@ -77,13 +88,13 @@ function describePhysicalLines(verseText, lang, dialect) {
 
 // Split in two on purpose, for Anthropic prompt caching: everything in here
 // is identical across every turn of a conversation on the same song (it only
-// changes when museProfile itself gets rewritten by the periodic summary —
-// see museProfileUpdater.js), so it's the piece worth paying the one-time
-// cache-write cost on and reading back cheaply on every follow-up turn
-// within the session. Per-note, per-turn content (the line breakdown, the
-// recent conversation) lives in buildDynamicMuseContext instead, uncached,
-// since caching it would never hit — it's different on every call by
-// definition.
+// changes when museProfile/lyricDna themselves get rewritten — by the
+// periodic summary or by a new baúl entry), so it's the piece worth paying
+// the one-time cache-write cost on and reading back cheaply on every
+// follow-up turn within the session. Per-note, per-turn content (the line
+// breakdown, the recent conversation) lives in buildDynamicMuseContext
+// instead, uncached, since caching it would never hit — it's different on
+// every call by definition.
 //
 // The register-based calibration, the "never comment/psychoanalyze" rules,
 // and the sensitivity handling are the ones product settled on. What
@@ -92,25 +103,60 @@ function describePhysicalLines(verseText, lang, dialect) {
 // isn't an available move anymore — the user asked for help, it always
 // gives *something* back (a clarifying question or options), just gentler
 // in tone when the topic is delicate.
-function buildStaticMuseInstructions(museProfile) {
+function buildStaticMuseInstructions(lyricDna, museProfile) {
     return `Eres la musa de un compositor: su compañera de escritura, no una
 espectadora que comenta la canción desde fuera. Tu trabajo es ayudarle a
 seguir escribiendo — continuar un verso, complementar una imagen,
 encontrar una rima — dándole opciones concretas y utilizables, nunca solo
 una reacción o una pregunta por curiosidad.
 
+Trata el lenguaje como pintura cruda, no como piezas de un rompecabezas
+que deben encajar perfecto. Ancla siempre en la realidad física y en el
+subtexto emocional — un detalle concreto (una luz, una textura, un objeto,
+un gesto) vale más que diez adjetivos abstractos. Cuando algo te salga
+"bonito" pero genérico, la primera frase que se te ocurre, esa es la que
+menos vale — sigue un paso más allá de ahí.
+
+=== 1. ESTILO Y VOZ DEL ESCRITOR (lyric_dna) — el CÓMO ===
+Invariable a nivel de TODA la canción: no de qué habla esta nota en
+concreto, sino cómo suena esta persona cuando escribe — léxico, actitud,
+nivel de abstracción, complejidad métrica. Tus opciones DEBEN sonar con
+esta voz pase lo que pase con el tema de la nota.
+${describeLyricDna(lyricDna)}
+
+=== 2. TEMÁTICA Y REGISTRO DE ESTA CANCIÓN (muse_profile) — el QUÉ ===
+De qué trata la canción — el universo narrativo, los conceptos y hechos
+que ya sabes por conversaciones anteriores en este mismo proyecto,
+segmentados por registro emocional. Antes de responder, identifica en una
+palabra el registro emocional de esta nota (amor / amistad / familia /
+lugar / otro) y básate SOLO en su sub-perfil correspondiente de abajo —
+ignora los demás, el usuario se expresa distinto según el registro:
+${JSON.stringify(museProfile || {})}
+
+Regla de oro: (1) dicta CÓMO se dice, (2) dicta DE QUÉ se habla. Nunca
+dejes que la temática cambie la voz del escritor, ni que el estilo te saque
+del tema real de la canción o de esta nota concreta.
+
 Cómo funciona cada intercambio:
 - El usuario te pide ayuda con algo concreto sobre esta línea.
 - Si te falta contexto imprescindible para dar opciones útiles, puedes
   hacer UNA pregunta concreta antes de responder — pero solo si de verdad
   la necesitas para ayudar mejor, nunca como fin en sí misma.
-- Si ya tienes contexto suficiente, da entre 5 y 6 opciones concretas:
-  versos, palabras o direcciones que el usuario pueda usar tal cual o
-  adaptar. No las expliques largo, solo ofrécelas. Genera más candidatas
-  de las que hacen falta a propósito — el sistema filtra después las que
-  no cumplen la métrica o la rima exactas y se queda con las mejores 3, así
-  que cuantas más opciones válidas y variadas propongas, mejor es lo que
-  sobrevive al filtro.
+- Si ya tienes contexto suficiente, da entre 5 y 6 opciones concretas,
+  repartidas entre tres ángulos creativos genuinamente distintos — no tres
+  variaciones tibias de la misma idea, sino tres maneras diferentes de
+  resolver lo mismo:
+  · "raw": crudo, hablado, casi conversacional — como si se dijera en voz
+    alta sin pulir, lenguaje de calle antes que lenguaje de canción.
+  · "atmospheric": anclado en un detalle sensorial físico muy concreto
+    (luz, temperatura, textura, sonido, olor, momento del día) — trátalo
+    como pintura, no como texto que describe una escena.
+  · "abstract": un giro inesperado, una imagen que no sería la primera
+    ocurrencia de nadie — el ángulo menos obvio, no el más raro porque sí.
+  Etiqueta cada opción con su ángulo en el campo "angle". Dale 1-2 opciones
+  a cada ángulo (para que sobrevivan al filtro de métrica/rima que viene
+  después) — el resultado final que ve el usuario es una por ángulo, así
+  que cada ángulo necesita variedad real detrás, no una sola apuesta.
 
 Reglas:
 - Nunca comentes ni valores la canción como espectadora — eres parte del
@@ -148,7 +194,13 @@ Reglas:
   ponla en "rhymeTargetWord" con "isRhymeRequest": true — igual que con la
   métrica, un verificador aparte revisa después si tus opciones riman de
   verdad, así que prioriza variedad de imágenes por encima de intentar
-  acertar la rima tú misma con precisión perfecta.
+  acertar la rima tú misma con precisión perfecta. Esto aplica también
+  cuando lo que pide es rimar como una línea de referencia (suya, de otra
+  canción, de un verso ya escrito) en vez de una palabra suelta: identifica
+  con qué palabra termina esa línea de referencia y trátala exactamente
+  igual que si el usuario la hubiera dado como palabra objetivo — "la rima
+  del primer verso" o "que rime como esta línea" son peticiones de rima
+  tanto como "que rime con luz".
 - Repetir la misma palabra con la que se pide rimar NUNCA cuenta como
   rima, en ningún idioma — una opción que termine en esa misma palabra
   (aunque técnicamente "coincida") queda descartada por el verificador.
@@ -156,19 +208,42 @@ Reglas:
   la continuidad narrativa que se pide más abajo es de imagen y tema, no
   de repetir literalmente su última palabra.
 
-Antes de responder, identifica en una palabra el registro emocional de
-esta nota (amor / amistad / familia / lugar / otro) y básate solo en el
-sub-perfil correspondiente de abajo — ignora los demás, ya que el usuario
-se expresa de forma distinta según el registro.
-
-Perfil de musa para este proyecto (aprendido hasta ahora, por registro):
-${JSON.stringify(museProfile || {})}
-
 Responde ÚNICAMENTE con un JSON de una sola línea, sin explicación, sin
 markdown, con esta forma exacta:
-{"register": "amor"|"amistad"|"familia"|"lugar"|"otro", "action": "clarify"|"suggest", "message": "tu pregunta si action es clarify, o una frase breve introduciendo las opciones si action es suggest", "options": ["opción 1", "opción 2", "..."] (array vacío si action es clarify, 5 a 6 opciones si es suggest), "isRhymeRequest": true|false, "rhymeTargetWord": "la palabra con la que deben rimar las opciones, o null si no aplica", "targetLineText": "la línea física exacta (copiada tal cual de la lista que te paso en el turno) que tus opciones sustituyen o completan, o null si no aplica"}
+{"register": "amor"|"amistad"|"familia"|"lugar"|"otro", "action": "clarify"|"suggest", "message": "tu pregunta si action es clarify, o una frase breve introduciendo las opciones si action es suggest", "options": [{"text": "opción 1", "angle": "raw"|"atmospheric"|"abstract"}, "..."] (array vacío si action es clarify, 5 a 6 objetos si es suggest, repartidos entre los tres ángulos), "isRhymeRequest": true|false, "rhymeTargetWord": "la palabra con la que deben rimar las opciones, o null si no aplica", "targetLineText": "la línea física exacta (copiada tal cual de la lista que te paso en el turno) que tus opciones sustituyen o completan, o null si no aplica"}
 No muestres tu clasificación de registro como texto aparte, ni ningún
 razonamiento — va solo dentro del JSON.`;
+}
+
+// The artist's aesthetic identity, extracted asynchronously from raw
+// material dropped into the baúl (src/utils/baulProcessor.js) — a very
+// different signal from museProfile: museProfile is what the muse has
+// learned FROM TALKING to this person about THIS song's subject matter;
+// lyricDna is what the artist's own raw material (voice notes, notebook
+// photos, documents) says about how they sound, independent of any one
+// song's topic. That's the CÓMO/QUÉ split the caller (buildStaticMuseInstructions)
+// hierarchizes explicitly — everything worded here stays on the CÓMO side
+// of that line on purpose, including imagenesHabituales: it reads like
+// content (concrete images), but here it's framed as the writer's own
+// recurring sensory vocabulary — texture and word choice, not subject
+// matter to import — so it doesn't fight the golden rule that theme is
+// muse_profile's job, never lyric_dna's.
+function describeLyricDna(lyricDna) {
+    const dna = lyricDna || {};
+    const voz = dna.vozPropia || {};
+    const influencias = dna.influenciasYReferentes || {};
+    const hasContent = voz.estiloVocabulario || voz.imagenesHabituales?.length || influencias.artistasClave?.length;
+    if (!hasContent) {
+        return '(todavía vacío — no ha volcado nada en el baúl de inspiración, así que no fuerces una voz que no conoces).';
+    }
+
+    const parts = [];
+    if (voz.estiloVocabulario) parts.push(`- Voz propia: ${voz.estiloVocabulario}`);
+    if (voz.imagenesHabituales?.length) parts.push(`- Vocabulario y textura sensorial recurrente en su forma de escribir — úsalo como color de estilo, nunca como el tema de esta nota: ${voz.imagenesHabituales.join(', ')}`);
+    if (voz.palabrasProhibidas?.length) parts.push(`- Conceptos abstractos de los que este artista se aleja instintivamente para no perder crudeza: ${voz.palabrasProhibidas.join(', ')}`);
+    if (influencias.artistasClave?.length) parts.push(`- Referentes de tono, solo como temperatura, nunca para citar o imitar literalmente: ${influencias.artistasClave.join(', ')}`);
+    if (influencias.tonoDeseado) parts.push(`- Choque de tono que busca: ${influencias.tonoDeseado}`);
+    return parts.join('\n');
 }
 
 // Local narrative position — only the immediate neighbor on each side (see
@@ -223,6 +298,23 @@ ${formatConversation(recentConversation)}
 Recuerda: responde solo con el JSON descrito arriba, nada más.`;
 }
 
+// Pure and synchronous on purpose — just measures what's already been
+// built, no API involvement, so it's independently testable and safe to
+// call whether or not debug mode is on.
+export function calculateContextWeights(staticText, dynamicText, userMessage) {
+    const staticChars = staticText?.length || 0;
+    const dynamicChars = dynamicText?.length || 0;
+    const userChars = userMessage?.length || 0;
+    const totalChars = staticChars + dynamicChars + userChars;
+    const pct = (n) => `${totalChars > 0 ? Math.round((n / totalChars) * 100) : 0}%`;
+    return {
+        museProfileAndSystem: {charCount: staticChars, percentage: pct(staticChars)},
+        localNodeAndLines: {charCount: dynamicChars, percentage: pct(dynamicChars)},
+        userIntent: {charCount: userChars, percentage: pct(userChars)},
+        totalChars,
+    };
+}
+
 function parseCompanionResponse(raw) {
     try {
         const cleaned = raw.replace(/```json|```/g, '').trim();
@@ -230,8 +322,18 @@ function parseCompanionResponse(raw) {
         const register = MUSE_REGISTERS.includes(parsed.register) ? parsed.register : 'otro';
         const action = parsed.action === 'clarify' ? 'clarify' : 'suggest';
         const message = typeof parsed.message === 'string' ? parsed.message.trim() : '';
+        // Each option is {text, angle} — but a bare string is tolerated and
+        // normalized (angle: null) rather than dropped, same "sanitize what's
+        // salvageable" spirit as baulProcessor's parsing: a model that slips
+        // and forgets the wrapper shouldn't lose the actual suggestion.
         const options = action === 'suggest' && Array.isArray(parsed.options)
-            ? parsed.options.filter((o) => typeof o === 'string' && o.trim()).map((o) => o.trim())
+            ? parsed.options
+                .map((o) => (typeof o === 'string' ? {text: o, angle: null} : o))
+                .filter((o) => o && typeof o.text === 'string' && o.text.trim())
+                .map((o) => ({
+                    text: o.text.trim(),
+                    angle: MUSE_ANGLES.includes(o.angle) ? o.angle : null,
+                }))
             : [];
 
         // A syntactically valid JSON reply that's *empty* (no message, no
@@ -273,24 +375,34 @@ function parseCompanionResponse(raw) {
  * exchange. Not idempotent: each call is one turn in an ongoing
  * conversation, so pass the full prior conversation every time.
  * @param {{verseText: string, noteFunction: string, museProfile: object,
- *   userMessage: string, conversation?: {role: 'user'|'muse', content: string,
- *   options?: string[]}[], lang?: string, dialect?: string,
- *   nodeContext?: {previousNote: {type: string, line: string}|null,
- *   nextNote: {type: string, line: string}|null}}} args
+ *   lyricDna?: object, userMessage: string,
+ *   conversation?: {role: 'user'|'muse', content: string,
+ *   options?: {text: string, angle: string|null}[]}[], lang?: string,
+ *   dialect?: string, nodeContext?: {previousNote: {type: string, line: string}|null,
+ *   nextNote: {type: string, line: string}|null}, debug?: boolean}} args
  * @returns {Promise<{register: string, action: 'clarify'|'suggest',
- *   message: string, options: string[], isRhymeRequest: boolean,
- *   rhymeVerified: boolean}>}
+ *   message: string, options: {text: string, angle: string|null}[],
+ *   isRhymeRequest: boolean, rhymeVerified: boolean, _debug?: object}>}
  */
 export async function askMuse({
                                   verseText,
                                   noteFunction,
                                   museProfile,
+                                  lyricDna,
                                   userMessage,
                                   conversation = [],
                                   lang = 'es',
                                   dialect = 'central',
                                   nodeContext,
+                                  debug = false,
                               }) {
+    // Built as named strings, not inline in the array below, for two
+    // reasons: calculateContextWeights needs the raw text to measure, and
+    // debug mode wants to show them verbatim — neither should require
+    // re-deriving what was actually sent.
+    const staticText = buildStaticMuseInstructions(lyricDna, museProfile);
+    const dynamicText = buildDynamicMuseContext({verseText, noteFunction, conversation, lang, dialect, nodeContext});
+
     // Two content blocks, not one string: cache_control can only mark a
     // block boundary, so the stable instructions (which we want Anthropic to
     // cache and reuse across every turn of this conversation) and the
@@ -299,17 +411,14 @@ export async function askMuse({
     // whenever the user opens the muse on a different note) have to be
     // physically separate blocks.
     const system = [
-        {
-            type: 'text',
-            text: buildStaticMuseInstructions(museProfile),
-            cache_control: {type: 'ephemeral'},
-        },
-        {
-            type: 'text',
-            text: buildDynamicMuseContext({verseText, noteFunction, conversation, lang, dialect, nodeContext}),
-        },
+        {type: 'text', text: staticText, cache_control: {type: 'ephemeral'}},
+        {type: 'text', text: dynamicText},
     ];
-    const raw = await callClaude(system, userMessage, 400);
+    // 600, not 400: options are now {text, angle} objects across three
+    // creative angles instead of bare strings, which runs a bit longer.
+    const startedAt = Date.now();
+    const raw = await callClaude(system, userMessage, 600);
+    const latencyMs = Date.now() - startedAt;
     const parsed = parseCompanionResponse(raw);
 
     if (parsed.action === 'suggest' && parsed.targetLineText && parsed.options.length) {
@@ -317,17 +426,13 @@ export async function askMuse({
 
         if (targetSyllables > 0) {
             const verifiedByMetric = parsed.options.filter((opt) => {
-                const optSyllables = countLineSyllables(opt, lang);
+                const optSyllables = countLineSyllables(opt.text, lang);
                 return Math.abs(optSyllables - targetSyllables) <= 1;
             });
-
-            if (verifiedByMetric.length > 0) {
-                // Te quedas solo con las primeras 3 que pasaron el filtro estricto
-                parsed.options = verifiedByMetric.slice(0, 3);
-            } else {
-                // Fallback si ninguna cumple exacto: recortas las originales a 3
-                parsed.options = parsed.options.slice(0, 3);
-            }
+            // Narrows the pool if the metric filter found real survivors —
+            // does NOT cap to a final count yet, that's selectDiverseAngles'
+            // job below, once rhyme has also had a chance to narrow it.
+            if (verifiedByMetric.length > 0) parsed.options = verifiedByMetric;
         }
     }
 
@@ -339,7 +444,7 @@ export async function askMuse({
     if (parsed.action === 'suggest' && parsed.isRhymeRequest && parsed.rhymeTargetWord && parsed.options.length) {
         const targetKey = getWordRhymeKey(parsed.rhymeTargetWord, lang, dialect);
         if (targetKey) {
-            const verified = parsed.options.filter((opt) => wordMatchesRhyme(opt, targetKey, lang, dialect));
+            const verified = parsed.options.filter((opt) => wordMatchesRhyme(opt.text, targetKey, lang, dialect));
             if (verified.length) {
                 parsed.options = verified;
                 parsed.rhymeVerified = true;
@@ -348,7 +453,56 @@ export async function askMuse({
             }
         }
     }
+
+    // Final step, after metric/rhyme have already narrowed the pool: pick
+    // one survivor per creative angle instead of just the first 3 that
+    // passed. Without this, the metric/rhyme filters alone could easily
+    // leave 3 "raw" options and zero from the other two angles — technically
+    // valid, but not the genuinely-distinct-directions promise the prompt
+    // is asking the model for.
+    if (parsed.action === 'suggest' && parsed.options.length) {
+        parsed.options = selectDiverseAngles(parsed.options, 3);
+    }
+
+    if (debug) {
+        parsed._debug = {
+            latencyMs,
+            model: MUSE_MODEL,
+            // temperature is genuinely not overridden — see callClaude's own
+            // comment. Reporting a made-up value here would defeat the whole
+            // point of an observability panel: it has to say what actually
+            // happened, not what a prompt once asked for.
+            parameters: {temperature: 'default (1.0, not overridden)', thinking: 'disabled'},
+            weights: calculateContextWeights(staticText, dynamicText, userMessage),
+            rawSystemPrompt: staticText,
+            rawDynamicContext: dynamicText,
+        };
+    }
     return parsed;
+}
+
+// One candidate per angle, in the order angles first appear, then backfills
+// from whatever's left over if fewer than `limit` distinct angles survived
+// the metric/rhyme filters above — never shrinks the result just because
+// one angle happened to get filtered out entirely.
+function selectDiverseAngles(options, limit) {
+    const seen = new Set();
+    const byAngle = [];
+    const rest = [];
+    for (const opt of options) {
+        if (opt.angle && !seen.has(opt.angle)) {
+            seen.add(opt.angle);
+            byAngle.push(opt);
+        } else {
+            rest.push(opt);
+        }
+    }
+    const result = byAngle.slice(0, limit);
+    for (const opt of rest) {
+        if (result.length >= limit) break;
+        result.push(opt);
+    }
+    return result;
 }
 
 // ─── Profile refresh — isolated on purpose (see file header) ───────────────

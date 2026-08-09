@@ -314,23 +314,6 @@ export function resolveMainThreadPath(notes, links, startNoteId) {
   return path;
 }
 
-// The muse's local narrative context (previous/next section) only ever
-// needs the immediate neighbor on each side, not a fully resolved
-// output-style walk — same source of truth as the main-thread edges
-// (note_links). A note has at most one link in each direction (see
-// onConnect / oneLinkPer above), so this is never actually ambiguous; the
-// sort-and-take-first is just the same defensive tolerance for stray
-// legacy data as resolveMainThreadPath uses.
-export function getAdjacentNotes(notes, links, noteId) {
-  const byId = new Map(notes.map((n) => [n.id, n]));
-  const incoming = links.filter((l) => l.target_note_id === noteId).sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
-  const outgoing = links.filter((l) => l.source_note_id === noteId).sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
-  return {
-    previous: incoming[0] ? byId.get(incoming[0].source_note_id) || null : null,
-    next: outgoing[0] ? byId.get(outgoing[0].target_note_id) || null : null,
-  };
-}
-
 // ─── Note detail: variants, apuntes, history ───────────────────────────────────
 // All three reuse tables that already existed for the (now-retired) flat
 // block editor — nothing new here except annotations.category.

@@ -1619,7 +1619,31 @@ body::before {
     flex: 1;
     display: flex;
     min-height: 0;
+    /* Anchor for .canvas-note-ask-selection, which floats over a corner of
+       the textarea rather than tracking the caret position. */
+    position: relative;
 }
+
+/* Genius-style "select text, ask about it" affordance — only mounted while
+   there's a live, non-empty selection (see TextNoteNode's `selection`
+   state), so it never competes for attention with the rest of the note's
+   chrome. Amber identity, same as everywhere else the muse shows up. */
+.canvas-note-ask-selection {
+    position: absolute;
+    right: calc(8px * var(--canvas-scale));
+    bottom: calc(8px * var(--canvas-scale));
+    z-index: 2;
+    font-family: var(--font-sans);
+    font-size: calc(var(--fs-micro) * var(--canvas-scale));
+    color: var(--amber);
+    background: var(--amber-soft);
+    border: 1px solid #EAD9B8;
+    border-radius: 999px;
+    padding: var(--space-1) var(--space-2-5);
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(29, 28, 26, 0.14);
+}
+.canvas-note-ask-selection:hover { border-color: var(--amber); }
 
 .canvas-note-text {
     flex: 1;
@@ -3120,6 +3144,19 @@ body::before {
     max-width: 92%;
 }
 
+/* Which of the four modes this turn answered in (see MUSE_ACTION_TYPES in
+   museApi.js) — same quiet mono-tag treatment as .muse-option-angle below,
+   just above the answer instead of on each option, since the mode applies
+   to the whole turn. */
+.muse-mode-label {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--amber);
+    margin-bottom: var(--space-0-5);
+}
+
 /* Same plain body treatment as .muse-answer right below it — amber is the
    muse's accent (icon, header, option borders), never full-paragraph body
    copy. A clarifying question is already distinguishable by context (no
@@ -3184,6 +3221,116 @@ body::before {
     text-transform: uppercase;
     color: var(--graphite-soft);
 }
+
+/* Narrative-function axis (CONTINUITY/CONTRAST/RESOLUTION) — the primary
+   diversity axis for a suggestion, so it gets a touch more presence than
+   .muse-option-angle's secondary tone tag, but still a quiet inline tag,
+   never a colored badge competing with the option text itself. */
+.muse-option-type {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--amber);
+}
+
+/* SOCRATIC's quick-answer chips — same pill language as .muse-save-btn
+   (dashed border, no fill) so they read as "click to pick" without
+   competing with the amber identity reserved for the muse's own voice. */
+.muse-chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1-5);
+    margin-top: var(--space-1-5);
+}
+.muse-chip {
+    font-family: var(--font-sans);
+    font-size: calc(var(--fs-secondary) * var(--canvas-scale));
+    border: 1px solid var(--chord-line);
+    border-radius: 999px;
+    background: var(--chord-soft);
+    padding: var(--space-1) var(--space-2-5);
+    cursor: pointer;
+    color: var(--ink);
+}
+.muse-chip:hover { border-color: var(--chord); }
+.muse-chip:disabled { cursor: default; opacity: 0.6; }
+
+/* WORD_BANK — a dense grid of loose words, not a list of crafted lines, so
+   it reads visually distinct from .muse-options (which promises a finished
+   line each). Grouped by syllable count, same mono micro-label as the
+   syllable badges elsewhere in the app. */
+.muse-word-bank {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin-top: var(--space-1-5);
+}
+.muse-word-group-label {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--graphite-soft);
+    margin-bottom: var(--space-1);
+}
+.muse-word-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1-5);
+}
+.muse-word-chip {
+    font-family: var(--font-serif);
+    font-size: calc(var(--fs-secondary) * var(--canvas-scale));
+    border: 1px dashed var(--graphite-soft);
+    border-radius: var(--r-sm);
+    background: var(--paper);
+    padding: var(--space-0-5) var(--space-2);
+    cursor: pointer;
+    color: var(--ink);
+}
+.muse-word-chip:hover { border-color: var(--thread); }
+.muse-word-chip.saved {
+    border-style: solid;
+    border-color: var(--thread);
+    color: var(--thread);
+}
+.muse-phrase-chip { font-style: italic; }
+
+/* The fragment selected in the note before opening/asking the muse (see
+   the textarea selection flow in TextNoteNode.jsx) — sits above the input
+   row so it's obviously "this is what your next message is about", with
+   its own dismiss action independent of clearing the draft text. */
+.muse-target-chip {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    background: var(--amber-soft);
+    border: 1px solid #EAD9B8;
+    border-radius: var(--r-sm);
+    padding: var(--space-1) var(--space-2);
+    margin-bottom: var(--space-1-5);
+}
+.muse-target-chip-text {
+    font-family: var(--font-serif);
+    font-style: italic;
+    font-size: calc(var(--fs-secondary) * var(--canvas-scale));
+    color: var(--ink);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.muse-target-chip-clear {
+    flex-shrink: 0;
+    border: none;
+    background: none;
+    color: var(--graphite);
+    cursor: pointer;
+    padding: 0 var(--space-1);
+}
+.muse-target-chip-clear:hover { color: var(--rose); }
 
 .muse-save-btn {
     flex-shrink: 0;

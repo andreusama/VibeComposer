@@ -32,6 +32,17 @@ function tokenize(text) {
     .match(/[a-zà-ÿ'’]+/gi) || [];
 }
 
+// The content words a line/note actually carries — strips stopwords and
+// short filler, same rule both findRepeatedWords (project-wide frequency)
+// and museApi.js's word-repetition guard (per-suggestion, against one
+// note's own other lines) key off, so the two never drift on what counts
+// as "a real word" vs. noise.
+export function significantWords(text, minLength = 3) {
+  return tokenize(text)
+    .map((w) => w.replace(/['’]/g, ''))
+    .filter((w) => w.length >= minLength && !STOPWORDS.has(w));
+}
+
 /**
  * @param {string[]} texts one entry per note's active text, project-wide
  * @param {{minLength?: number, minCount?: number}} opts
@@ -43,10 +54,7 @@ export function findRepeatedWords(texts, opts = {}) {
 
   const counts = new Map();
   for (const text of texts) {
-    for (const raw of tokenize(text)) {
-      const word = raw.replace(/['’]/g, '');
-      if (word.length < minLength) continue;
-      if (STOPWORDS.has(word)) continue;
+    for (const word of significantWords(text, minLength)) {
       counts.set(word, (counts.get(word) || 0) + 1);
     }
   }

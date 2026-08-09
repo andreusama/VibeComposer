@@ -17,12 +17,42 @@ const HANDLE_STYLE = { width: 10, height: 10, background: '#1D1C1A', border: '2p
 // feel mixed up.
 const CHORD_HANDLE_STYLE = { width: 12, height: 12, background: '#4552D6', border: '2px solid #fff' };
 
+// Genius-style "select a piece, ask about it": textarea.value uses \n only
+// (browsers normalize this, never \r\n), so plain offset math against a
+// \n-split of the raw text lines up exactly with selectionStart/End — unlike
+// splitIntoLines (textLines.js), which trims each line and would shift
+// those offsets. Returns null for an empty/whitespace-only selection or one
+// that starts outside any line (shouldn't happen, but a stale selection
+// surviving a text edit is cheap to guard against).
+function getSelectionLineContext(text, start, end) {
+  if (start === end) return null;
+  const lines = text.split('\n');
+  let offset = 0;
+  for (const line of lines) {
+    const lineEnd = offset + line.length;
+    if (start >= offset && start <= lineEnd) {
+      const localStart = start - offset;
+      const localEnd = Math.min(line.length, end - offset);
+      const selectedText = line.slice(localStart, localEnd);
+      if (!selectedText.trim()) return null;
+      return { text: selectedText, before: line.slice(0, localStart), after: line.slice(localEnd) };
+    }
+    offset = lineEnd + 1; // +1 for the \n this split() consumed
+  }
+  return null;
+}
+
 export default function TextNoteNode({ id, data, selected }) {
   const { note, onDeleted, onOpenPanel, onOpenMuse, onTextChange, onTypeChange, chordSummary, lyricLanguage, lyricDialect } = data;
   const [type, setType] = useState(note.type);
   const [customLabel, setCustomLabel] = useState(note.custom_label || '');
   const [text, setText] = useState(note.lines?.[0]?.text || '');
   const [status, setStatus] = useState(note.lines?.[0]?.status || 'provisional');
+  // The fragment currently selected in the textarea, if any — ephemeral,
+  // never saved; just feeds the "ask the muse about this ↗" affordance
+  // below the text. See MuseFloatNode's pendingTargetVerse for where it
+  // ends up once the user acts on it.
+  const [selection, setSelection] = useState(null);
   const saveTimer = useRef(null);
   const lineId = note.lines?.[0]?.id;
   const textareaRef = useRef(null);
@@ -78,6 +108,7 @@ export default function TextNoteNode({ id, data, selected }) {
   const handleTextChange = useCallback((e) => {
     const val = e.target.value;
     setText(val);
+    setSelection(null); // any prior selection's offsets are stale the moment the text changes
     onTextChange?.(id, val);
     // Every reschedule closes out the save it's replacing so the toolbar's
     // pending count doesn't grow forever while someone keeps typing.
@@ -128,6 +159,21 @@ export default function TextNoteNode({ id, data, selected }) {
     saveNotePosition(id, { x: params.x, y: params.y }, params.width, params.height);
   }, [id]);
 
+  // Fires on mouse-drag selection AND shift+arrow keyboard selection (the
+  // one native event that covers both) — recomputed from the live text/
+  // offsets on every change rather than trying to patch the previous value.
+  const handleTextSelect = useCallback((e) => {
+    const { selectionStart, selectionEnd } = e.target;
+    setSelection(getSelectionLineContext(text, selectionStart, selectionEnd));
+  }, [text]);
+
+  const handleAskAboutSelection = useCallback((e) => {
+    e.stopPropagation();
+    if (!selection) return;
+    onOpenMuse?.(note, selection);
+    setSelection(null);
+  }, [selection, onOpenMuse, note]);
+
   return (
     <div className={`canvas-note${selected ? ' selected' : ''}`}>
       <NodeResizer minWidth={200} minHeight={140} isVisible={selected} onResizeEnd={handleResizeEnd} />
@@ -175,8 +221,25 @@ export default function TextNoteNode({ id, data, selected }) {
           value={text}
           onChange={handleTextChange}
           onScroll={handleTextareaScroll}
+          onSelect={handleTextSelect}
+          onBlur={() => setSelection(null)}
           placeholder="write…"
         />
+        {/* Genius-style fragment targeting: select a piece of a line, ask the
+            muse specifically about it (SURGEON mode gets an exact target
+            instead of inferring one). Anchored to a corner of the text area
+            rather than tracking the caret position — simple and predictable,
+            no text-mirror-div needed for a first pass. */}
+        {selection && (
+          <button
+            className="canvas-note-ask-selection nodrag"
+            onMouseDown={(e) => e.preventDefault()} // keep the textarea selection from collapsing on click
+            onClick={handleAskAboutSelection}
+            title={`preguntar a la musa sobre: "${selection.text}"`}
+          >
+            ✦ preguntar sobre esto
+          </button>
+        )}
         <div className="canvas-note-syllable-strip nodrag" ref={syllableStripRef}>
           {syllableCounts.map((count, i) => (
             <div className="syllable-badge" key={i}>{count ?? ''}</div>

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
-  ReactFlow, Background, addEdge, useReactFlow, useViewport,
+  ReactFlow, Background, useReactFlow, useViewport,
   applyNodeChanges, applyEdgeChanges, ReactFlowProvider,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
@@ -9,7 +9,11 @@ import ChordProgressionNode from './ChordProgressionNode.jsx';
 import OutputNode from './OutputNode.jsx';
 import VibeComposeNode from './VibeComposeNode.jsx';
 import TempoNode from './TempoNode.jsx';
+import MuseFloatNode from './MuseFloatNode.jsx';
+import InspirationBlackHoleNode from './InspirationBlackHoleNode.jsx';
+import BaulFloatNode from './BaulFloatNode.jsx';
 import NoteSidePanel from './NoteSidePanel.jsx';
+import DebugConsole from './DebugConsole.jsx';
 import { setState } from '../state/store.js';
 import { supabase } from '../utils/supabaseClient.js';
 import { beginSave, endSave, subscribeSaveStatus } from './saveStatus.js';
@@ -19,14 +23,19 @@ import {
   createMainThreadLink, deleteNoteLink, assignProgressionToNote, setProgressionTempo,
   deleteNote, deleteChordProgression,
   loadOutputNodes, createOutputNode, deleteOutputNode, saveOutputPosition, setOutputPluggedNote,
-  loadOutputSelections, setOutputSelection, saveSongTitle, saveSongLyricSettings,
+  saveSongTitle, saveSongLyricSettings,
   loadTempoNodes, createTempoNode, saveTempoBpm, saveTempoPosition, deleteTempoNode,
+  resolveMainThreadPath,
+  loadBaulNodes, createBaulNode, saveBaulNodePosition, deleteBaulNode,
+  loadLyricDna,
 } from './canvasData.js';
 import { DIALECTS } from '../utils/rhyme.js';
+import { loadMuseProfile } from './museData.js';
 
 const NODE_TYPES = {
   textNote: TextNoteNode, chordProgression: ChordProgressionNode,
   outputNode: OutputNode, vibeCompose: VibeComposeNode, tempoNode: TempoNode,
+  museFloat: MuseFloatNode, blackHole: InspirationBlackHoleNode, baulFloat: BaulFloatNode,
 };
 
 // The pills a right-click on empty canvas offers, grouped by what they're
@@ -47,6 +56,12 @@ const NODE_PILL_GROUPS = [
       { type: 'tempo', label: 'Tempo', icon: '◍' },
     ],
   },
+  {
+    label: 'Inspiration',
+    pills: [
+      { type: 'blackhole', label: 'Inspiration Black Hole', icon: '●' },
+    ],
+  },
 ];
 const NODE_PILL_COUNT = NODE_PILL_GROUPS.reduce((sum, g) => sum + g.pills.length, 0);
 
@@ -61,6 +76,7 @@ const DEFAULT_OUTPUT_WIDTH = 320;
 const DEFAULT_OUTPUT_HEIGHT = 240;
 const DEFAULT_TEMPO_WIDTH = 160;
 const DEFAULT_TEMPO_HEIGHT = 120;
+const DEFAULT_BLACKHOLE_SIZE = 140;
 
 // Matches Figma's default grid — fine enough to feel unobtrusive, coarse
 // enough that "almost aligned" nodes stop happening.
@@ -112,6 +128,20 @@ function tempoToFlowNode(tempo, callbacks) {
     width: tempo.canvas_width || DEFAULT_TEMPO_WIDTH,
     height: tempo.canvas_height || DEFAULT_TEMPO_HEIGHT,
     data: { bpm: tempo.bpm, ...callbacks },
+  };
+}
+
+// No content of its own — everything it produces lives on the song
+// (songs.lyric_dna), so its data is just the callbacks, same as a plain
+// tool node, but with a real DB row for position/size like tempo.
+function blackHoleToFlowNode(node, callbacks) {
+  return {
+    id: node.id,
+    type: 'blackHole',
+    position: { x: node.canvas_x || 0, y: node.canvas_y || 0 },
+    width: node.canvas_width || DEFAULT_BLACKHOLE_SIZE,
+    height: node.canvas_height || DEFAULT_BLACKHOLE_SIZE,
+    data: { ...callbacks },
   };
 }
 
@@ -177,10 +207,47 @@ function mainThreadEdges(links) {
   }));
 }
 
+// connectionMode="loose" on the <ReactFlow> below lets a drag start on
+// EITHER handle and land on EITHER handle, so a raw onConnect `connection`
+// object's source/target just mean "node the drag started on" / "node it
+// landed on" — not upstream/downstream. What actually determines that is
+// which HANDLE was used on each end: 'right' is every note's single OUT
+// port; 'left' (a text note's input) and 'output-in' (a Final Song's only
+// handle) are both IN ports. Two OUT ports meeting, or two IN ports
+// meeting, is a real male-female mismatch and gets rejected; one of each,
+// in either drag direction, is a normal connection — this resolves it back
+// to its true upstream → downstream pair before anything downstream
+// touches the database.
+const OUT_HANDLES = new Set(['right']);
+const IN_HANDLES = new Set(['left', 'output-in']);
+
+function resolveNoteLinkDirection(connection) {
+  const sourceIsOut = OUT_HANDLES.has(connection.sourceHandle);
+  const sourceIsIn = IN_HANDLES.has(connection.sourceHandle);
+  const targetIsOut = OUT_HANDLES.has(connection.targetHandle);
+  const targetIsIn = IN_HANDLES.has(connection.targetHandle);
+  if (sourceIsOut && targetIsIn) return { upstreamId: connection.source, downstreamId: connection.target };
+  if (sourceIsIn && targetIsOut) return { upstreamId: connection.target, downstreamId: connection.source };
+  if (sourceIsOut && targetIsOut) return { mismatch: 'out' };
+  if (sourceIsIn && targetIsIn) return { mismatch: 'in' };
+  return {}; // neither handle is part of this family (chord/tempo handles) — not our concern
+}
+
 function summarizeProgression(cp) {
   if (!cp?.progression?.length) return null;
   const chords = cp.progression.map((c) => c.chord).filter(Boolean);
   return chords.length ? chords.join(' · ') : null;
+}
+
+// A connected note's full current text for the muse's song-wide context —
+// every main-thread note is short (a handful of lyric lines), so there's no
+// need for a separate summarization pass (no extra LLM call just to
+// describe a neighbor); the model reads the actual text in-context and
+// works out what it means itself, same as it already does for whichever
+// note it's actively answering about.
+function describeAdjacentNote(note) {
+  if (!note) return null;
+  return { type: note.custom_label || note.type, text: note.lines?.[0]?.text || '' };
 }
 
 // Needs to live inside <ReactFlowProvider> to call useReactFlow/useViewport
@@ -267,11 +334,6 @@ export default function CanvasScreen({ state, onExit }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [selectedNoteId, setSelectedNoteId] = useState(null);
-  // Per-mix fork choices: [{ output_id, source_note_id, note_link_id }, ...].
-  // Kept flat and filtered per-node in renderNodes rather than nested inside
-  // each output's own data, since a single connect/delete action elsewhere
-  // never needs to touch this.
-  const [selections, setSelections] = useState([]);
   // Drives .canvas-flow-dragging (see style.css) — while true, every node
   // except the one being dragged stops taking pointer events, so the
   // browser isn't hover/hit-testing a whole board of irrelevant nodes on
@@ -301,8 +363,11 @@ export default function CanvasScreen({ state, onExit }) {
     clearTimeout(songTitleTimer.current);
     beginSave();
     songTitleTimer.current = setTimeout(async () => {
-      if (song?.id) await saveSongTitle(song.id, val);
-      endSave();
+      try {
+        if (song?.id) await saveSongTitle(song.id, val);
+      } finally {
+        endSave();
+      }
     }, 500);
   }, [song?.id]);
 
@@ -324,13 +389,52 @@ export default function CanvasScreen({ state, onExit }) {
     const dialect = DIALECTS[language][0];
     setLyricLanguage(language);
     setLyricDialect(dialect);
-    if (song?.id) { beginSave(); saveSongLyricSettings(song.id, language, dialect).finally(endSave); }
+    if (song?.id) { beginSave(); Promise.resolve(saveSongLyricSettings(song.id, language, dialect)).finally(endSave); }
   }, [song?.id]);
+
+  // The muse's per-project profile — a single evolving JSON, same
+  // load/update pattern as lyricDna below. Kept in local state so the
+  // background profile refresh (see museProfileUpdater.js) can hand back
+  // the updated profile without needing a reload for the *next* question
+  // to read it.
+  const [museProfile, setMuseProfile] = useState({});
+
+  useEffect(() => {
+    if (!song?.id) { setMuseProfile({}); return; }
+    let cancelled = false;
+    (async () => {
+      const { data } = await loadMuseProfile(song.id);
+      if (cancelled) return;
+      setMuseProfile(data?.muse_profile || {});
+    })();
+    return () => { cancelled = true; };
+  }, [song?.id]);
+
+  const handleMuseProfileUpdated = useCallback((nextProfile) => setMuseProfile(nextProfile), []);
+
+  // The baúl's fused ADN Lírico — deliberately separate from museProfile
+  // above (see baulProcessor.js / schema.sql for why). One evolving object
+  // per song, overwritten wholesale by BaulFloatNode after each
+  // processBaulInput call.
+  const [lyricDna, setLyricDna] = useState(null);
+
+  useEffect(() => {
+    if (!song?.id) { setLyricDna(null); return; }
+    let cancelled = false;
+    (async () => {
+      const { data } = await loadLyricDna(song.id);
+      if (cancelled) return;
+      setLyricDna(data?.lyric_dna || {});
+    })();
+    return () => { cancelled = true; };
+  }, [song?.id]);
+
+  const handleLyricDnaUpdated = useCallback((nextDna) => setLyricDna(nextDna), []);
 
   const handleLyricDialectChange = useCallback((e) => {
     const dialect = e.target.value;
     setLyricDialect(dialect);
-    if (song?.id) { beginSave(); saveSongLyricSettings(song.id, lyricLanguage, dialect).finally(endSave); }
+    if (song?.id) { beginSave(); Promise.resolve(saveSongLyricSettings(song.id, lyricLanguage, dialect)).finally(endSave); }
   }, [song?.id, lyricLanguage]);
 
   const handleNodeDeleted = useCallback((id) => {
@@ -348,6 +452,98 @@ export default function CanvasScreen({ state, onExit }) {
     setEdges((eds) => eds.filter((e) => e.source !== id && e.target !== id));
     setSelectedNoteId((cur) => (cur === id ? null : cur));
   }, []);
+
+  // Clears whichever fragment the user had selected in the note's textarea
+  // (see TextNoteNode's selection handling) once it's either been sent along
+  // with a question or explicitly dismissed — keyed by floatId, same
+  // per-node-id-update pattern as handleBaulStatusChange below.
+  const handleClearMuseTarget = useCallback((floatId) => {
+    setNodes((nds) => nds.map((n) => (n.id === floatId ? { ...n, data: { ...n.data, pendingTargetVerse: null } } : n)));
+  }, []);
+
+  // Opens (or, if one's already open for this note, reuses it — one float
+  // per note, not a pile of duplicates) the muse's floating node, positioned
+  // just to the right of the note it's about. verseText/noteFunction aren't
+  // set here — they're injected live in renderNodes below, same as a chord
+  // progression's bpm, so the float always reads the note's current text
+  // instead of a snapshot from when it opened. initialTargetVerse comes from
+  // the Genius-style fragment selector (TextNoteNode) — null for the plain
+  // "ask the muse" entry point.
+  const handleOpenMuse = useCallback((note, initialTargetVerse = null) => {
+    const floatId = `muse-float-${note.id}`;
+    setNodes((nds) => {
+      if (nds.some((n) => n.id === floatId)) {
+        // Already open — a fresh selection still needs to land on it (the
+        // user picked a new fragment while the float was already sitting
+        // there), everything else about the float stays untouched.
+        if (!initialTargetVerse) return nds;
+        return nds.map((n) => (n.id === floatId ? { ...n, data: { ...n.data, pendingTargetVerse: initialTargetVerse } } : n));
+      }
+      const sourceNode = nds.find((n) => n.id === note.id);
+      const position = sourceNode
+        ? { x: sourceNode.position.x + (sourceNode.width || 280) + 40, y: sourceNode.position.y }
+        : { x: 400, y: 200 };
+      return [...nds, {
+        id: floatId,
+        type: 'museFloat',
+        position,
+        width: 320,
+        height: 340,
+        data: {
+          songId: song?.id,
+          sourceNoteId: note.id,
+          lineId: note.lines?.[0]?.id,
+          userId: state.session?.user?.id,
+          museProfile,
+          onMuseProfileUpdated: handleMuseProfileUpdated,
+          lyricLanguage,
+          lyricDialect,
+          onClose: handleNodeDeleted,
+          pendingTargetVerse: initialTargetVerse,
+          onClearTargetVerse: () => handleClearMuseTarget(floatId),
+        },
+      }];
+    });
+  }, [song?.id, state.session?.user?.id, museProfile, handleMuseProfileUpdated, lyricLanguage, lyricDialect, handleNodeDeleted, handleClearMuseTarget]);
+
+  // The black hole itself needs to show processing/success/error even if
+  // its float panel is closed or off-screen — a status line inside the
+  // panel alone is easy to miss entirely if the user submitted and looked
+  // away. Set directly on the black hole node's own data (not via
+  // renderNodes — this is a one-off "this specific node just changed"
+  // update, same pattern handleTempoBpmChange already uses for bpm).
+  const handleBaulStatusChange = useCallback((blackHoleId, status) => {
+    setNodes((nds) => nds.map((n) => (n.id === blackHoleId ? { ...n, data: { ...n.data, status } } : n)));
+  }, []);
+
+  // Same one-per-source pattern as handleOpenMuse, keyed off the black
+  // hole's own id (there's no separate "source note" here — the black hole
+  // node is itself the entry point).
+  const handleOpenBaul = useCallback((blackHoleId) => {
+    const floatId = `baul-float-${blackHoleId}`;
+    setNodes((nds) => {
+      if (nds.some((n) => n.id === floatId)) return nds;
+      const sourceNode = nds.find((n) => n.id === blackHoleId);
+      const position = sourceNode
+        ? { x: sourceNode.position.x + (sourceNode.width || DEFAULT_BLACKHOLE_SIZE) + 40, y: sourceNode.position.y }
+        : { x: 400, y: 200 };
+      return [...nds, {
+        id: floatId,
+        type: 'baulFloat',
+        position,
+        width: 320,
+        height: 360,
+        data: {
+          songId: song?.id,
+          lyricDna,
+          onLyricDnaUpdated: handleLyricDnaUpdated,
+          onClose: handleNodeDeleted,
+          sourceBlackHoleId: blackHoleId,
+          onStatusChange: handleBaulStatusChange,
+        },
+      }];
+    });
+  }, [song?.id, lyricDna, handleLyricDnaUpdated, handleNodeDeleted, handleBaulStatusChange]);
 
   const handleOpenPanel = useCallback((id) => setSelectedNoteId(id), []);
   const handleClosePanel = useCallback(() => setSelectedNoteId(null), []);
@@ -390,7 +586,10 @@ export default function CanvasScreen({ state, onExit }) {
       : n)));
   }, []);
 
-  const noteCallbacks = { onDeleted: handleNodeDeleted, onOpenPanel: handleOpenPanel, onTextChange: handleNoteTextChange, onTypeChange: handleNoteTypeChange };
+  const noteCallbacks = {
+    onDeleted: handleNodeDeleted, onOpenPanel: handleOpenPanel,
+    onTextChange: handleNoteTextChange, onTypeChange: handleNoteTypeChange, onOpenMuse: handleOpenMuse,
+  };
 
   // Sends a progression's current chords over to the studio's deeper
   // verse/chorus/bridge arrangement view — studio reads only from
@@ -409,19 +608,7 @@ export default function CanvasScreen({ state, onExit }) {
 
   const progressionCallbacks = { onDeleted: handleNodeDeleted, onArrange: handleArrange };
 
-  // A final mix is one linear playthrough — this is how it records which
-  // branch it takes at a specific fork (see resolveMainThreadPath). Local
-  // state is an upsert-by-hand since there's no DB round trip to wait on
-  // before the mix should already reflect the new choice.
-  const handleSelectBranch = useCallback((outputId, sourceNoteId, noteLinkId) => {
-    setOutputSelection(outputId, sourceNoteId, noteLinkId);
-    setSelections((sels) => [
-      ...sels.filter((s) => !(s.output_id === outputId && s.source_note_id === sourceNoteId)),
-      { output_id: outputId, source_note_id: sourceNoteId, note_link_id: noteLinkId },
-    ]);
-  }, []);
-
-  const outputCallbacks = { onDeleted: handleNodeDeleted, onSelectBranch: handleSelectBranch };
+  const outputCallbacks = { onDeleted: handleNodeDeleted };
 
   // Tempo's bpm needs to reach every chord progression currently plugged
   // into it too, not just its own node — otherwise turning the dial only
@@ -438,27 +625,32 @@ export default function CanvasScreen({ state, onExit }) {
       return fedByThisTempo ? { ...n, data: { ...n.data, bpm } } : n;
     }));
     beginSave();
-    saveTempoBpm(tempoId, bpm).finally(endSave);
+    Promise.resolve(saveTempoBpm(tempoId, bpm)).finally(endSave);
   }, []);
 
   const tempoCallbacks = { onDeleted: handleNodeDeleted, onBpmChange: handleTempoBpmChange };
+  const blackHoleCallbacks = { onDeleted: handleNodeDeleted, onOpen: handleOpenBaul };
 
   useEffect(() => {
     if (!song) { onExit(); return; }
     let cancelled = false;
     (async () => {
-      const [{ notes, progressions, links, error }, { outputs, error: outputError }, { data: tempos, error: tempoError }] = await Promise.all([
+      const [
+        { notes, progressions, links, error },
+        { outputs, error: outputError },
+        { data: tempos, error: tempoError },
+        { data: baulNodes, error: baulError },
+      ] = await Promise.all([
         loadCanvasData(song.id),
         loadOutputNodes(song.id),
         loadTempoNodes(song.id),
+        loadBaulNodes(song.id),
       ]);
       if (cancelled) return;
       if (error) { setLoadError(error.message); setLoading(false); return; }
       if (outputError) { setLoadError(outputError.message); setLoading(false); return; }
       if (tempoError) { setLoadError(tempoError.message); setLoading(false); return; }
-      const { selections: loadedSelections, error: selectionsError } = await loadOutputSelections(outputs.map((o) => o.id));
-      if (cancelled) return;
-      if (selectionsError) { setLoadError(selectionsError.message); setLoading(false); return; }
+      if (baulError) { setLoadError(baulError.message); setLoading(false); return; }
       const progressionsById = Object.fromEntries(progressions.map((p) => [p.id, p]));
       const tempoById = Object.fromEntries(tempos.map((t) => [t.id, t]));
       setNodes([
@@ -472,10 +664,10 @@ export default function CanvasScreen({ state, onExit }) {
         })),
         ...outputs.map((o) => outputToFlowNode(o, outputCallbacks)),
         ...tempos.map((t) => tempoToFlowNode(t, tempoCallbacks)),
+        ...(baulNodes || []).map((b) => blackHoleToFlowNode(b, blackHoleCallbacks)),
       ]);
       const plugEdges = outputs.map(outputPlugEdge).filter(Boolean);
       setEdges([...mainThreadEdges(links), ...assignmentEdges(notes), ...tempoAssignmentEdges(progressions), ...plugEdges]);
-      setSelections(loadedSelections);
       setLoading(false);
     })();
     return () => { cancelled = true; };
@@ -506,13 +698,38 @@ export default function CanvasScreen({ state, onExit }) {
       : node.type === 'chordProgression' ? saveProgressionPosition(node.id, position, node.width, node.height)
       : node.type === 'outputNode' ? saveOutputPosition(node.id, position, node.width, node.height)
       : node.type === 'tempoNode' ? saveTempoPosition(node.id, position, node.width, node.height)
+      : node.type === 'blackHole' ? saveBaulNodePosition(node.id, position, node.width, node.height)
       : null;
-    if (save) { beginSave(); save.finally(endSave); }
+    if (save) { beginSave(); Promise.resolve(save).finally(endSave); }
   }, []);
 
-  // One connect gesture, two meanings depending on what's being connected:
-  // chord-progression → text-note assigns it as that note's chords; text-note
-  // → text-note extends the main-thread (the clean-view lyric order).
+  // A rejected connection attempt (two OUT ports or two IN ports — see
+  // resolveNoteLinkDirection above) still draws the edge the user was
+  // dragging — just in red, briefly, with an explanation, instead of
+  // silently doing nothing. Never persisted (no DB call): a plain local
+  // edge that removes itself after the blink finishes.
+  const flashRejectedConnection = useCallback((connection, mismatch) => {
+    const flashId = `rejected-${crypto.randomUUID()}`;
+    setEdges((eds) => [...eds, {
+      ...connection,
+      id: flashId,
+      type: 'default',
+      style: { stroke: '#C24444', strokeWidth: 2 },
+      className: 'edge-rejected',
+      label: `${mismatch} with ${mismatch} not possible`,
+      labelStyle: { fill: '#C24444', fontFamily: 'var(--font-mono, monospace)', fontSize: 11 },
+      labelBgStyle: { fill: '#fff', fillOpacity: 0.9 },
+      data: { kind: 'rejected' },
+    }]);
+    setTimeout(() => setEdges((eds) => eds.filter((e) => e.id !== flashId)), 1000);
+  }, []);
+
+  // One connect gesture, several meanings depending on what's being
+  // connected: chord-progression → text-note assigns it as that note's
+  // chords; tempo-node → chord-progression assigns its bpm; a note ↔
+  // another note or note ↔ Final Song extends the main-thread (the clean-
+  // view lyric order) — resolved to a true upstream/downstream pair first,
+  // see resolveNoteLinkDirection.
   const onConnect = useCallback((connection) => {
     setNodes((nds) => {
       const sourceNode = nds.find((n) => n.id === connection.source);
@@ -559,48 +776,100 @@ export default function CanvasScreen({ state, onExit }) {
           : n);
       }
 
-      if (sourceNode.type === 'textNote' && targetNode.type === 'textNote') {
-        // Two links between the same pair isn't a real fork/merge, just the
-        // same connection twice — guard here so it can't happen from a
-        // stray double-drag, rather than relying on every downstream reader
-        // (the final-mix chain walk) to shrug it off.
-        const alreadyLinked = edgesRef.current.some((e) =>
-          e.data?.kind === 'main-thread' && e.source === sourceNode.id && e.target === targetNode.id
-        );
-        if (!alreadyLinked) {
-          const linkId = crypto.randomUUID();
-          const position = edgesRef.current.filter((e) => e.data?.kind === 'main-thread').length;
-          createMainThreadLink(linkId, song.id, sourceNode.id, targetNode.id, position);
-          setEdges((eds) => addEdge({
-            ...connection, id: linkId, type: 'default',
-            style: { stroke: '#1F6F63', strokeWidth: 1.5, opacity: 0.6 }, data: { kind: 'main-thread', position },
-          }, eds));
+      const noteLinkPair = (
+        (sourceNode.type === 'textNote' && targetNode.type === 'textNote') ||
+        (sourceNode.type === 'textNote' && targetNode.type === 'outputNode') ||
+        (sourceNode.type === 'outputNode' && targetNode.type === 'textNote')
+      );
+      if (noteLinkPair) {
+        const direction = resolveNoteLinkDirection(connection);
+        if (direction.mismatch) {
+          // The only thing actually rejected: two OUT ports or two IN
+          // ports plugged into each other — not "this slot is already
+          // used." A note's IN and OUT are each freely replaceable, same
+          // as re-plugging a chord progression or a tempo node.
+          flashRejectedConnection(connection, direction.mismatch);
+          return nds;
         }
-      }
+        if (direction.upstreamId && direction.downstreamId) {
+          const upstream = nds.find((n) => n.id === direction.upstreamId);
+          const downstream = nds.find((n) => n.id === direction.downstreamId);
+          if (!upstream || !downstream) return nds;
 
-      // Only one note can be plugged into a given final-mix node at a time —
-      // a fresh connection replaces whichever plug edge existed on THIS
-      // output node, same pattern as re-assigning a chord progression to a
-      // note. Other final-mix nodes (there can be several now) keep theirs —
-      // scope the replacement to this target only, not every output edge.
-      if (sourceNode.type === 'textNote' && targetNode.type === 'outputNode') {
-        setOutputPluggedNote(targetNode.id, sourceNode.id);
-        setEdges((eds) => [
-          ...eds.filter((e) => !(e.data?.kind === 'output' && e.target === targetNode.id)),
-          {
-            id: `output-plug-${targetNode.id}`, source: sourceNode.id, target: targetNode.id,
-            sourceHandle: 'right', targetHandle: 'output-in',
-            type: 'default', style: { stroke: '#1D1C1A', strokeWidth: 1.5, opacity: 0.5 }, data: { kind: 'output' },
-          },
-        ]);
-        return nds.map((n) => n.id === targetNode.id
-          ? { ...n, data: { ...n.data, output: { ...n.data.output, plugged_note_id: sourceNode.id } } }
-          : n);
+          const isOutputTarget = downstream.type === 'outputNode';
+          const alreadyLinked = edgesRef.current.some((e) =>
+            e.data?.kind === (isOutputTarget ? 'output' : 'main-thread')
+            && e.source === upstream.id && e.target === downstream.id
+          );
+          if (alreadyLinked) return nds;
+
+          // Reconnecting either end replaces whatever was plugged in
+          // before, silently — an upstream note's OUT and a downstream
+          // note's IN are each a single slot, one per note, regardless of
+          // whether the far end is another note or a Final Song.
+          const staleFromUpstream = edgesRef.current.filter((e) =>
+            (e.data?.kind === 'main-thread' || e.data?.kind === 'output') && e.source === upstream.id
+          );
+          const staleIntoDownstream = edgesRef.current.filter((e) =>
+            e.data?.kind === (isOutputTarget ? 'output' : 'main-thread') && e.target === downstream.id
+          );
+          const stale = [...staleFromUpstream, ...staleIntoDownstream];
+          const staleIds = new Set(stale.map((e) => e.id));
+          // A stale 'output' edge has no note_links row to delete — its
+          // owning output node's plugged_note_id just gets cleared, DB and
+          // local state both. Missing the local half of this (like
+          // onEdgesDelete's 'output' branch does below) is exactly what
+          // left an orphaned Final Song still rendering its old chain
+          // instead of falling back to "plug a note in" — the DB was
+          // right, but nothing ever told that node's own React state.
+          const orphanedOutputIds = [];
+          stale.forEach((e) => {
+            if (e.data?.kind === 'main-thread') {
+              deleteNoteLink(e.id);
+            } else if (e.data?.kind === 'output' && e.target !== downstream.id) {
+              setOutputPluggedNote(e.target, null);
+              orphanedOutputIds.push(e.target);
+            }
+          });
+
+          let nextNds = orphanedOutputIds.length
+            ? nds.map((n) => orphanedOutputIds.includes(n.id)
+              ? { ...n, data: { ...n.data, output: { ...n.data.output, plugged_note_id: null } } }
+              : n)
+            : nds;
+          if (isOutputTarget) {
+            setOutputPluggedNote(downstream.id, upstream.id);
+            setEdges((eds) => [
+              ...eds.filter((e) => !staleIds.has(e.id)),
+              {
+                id: `output-plug-${downstream.id}`, source: upstream.id, target: downstream.id,
+                sourceHandle: 'right', targetHandle: 'output-in',
+                type: 'default', style: { stroke: '#1D1C1A', strokeWidth: 1.5, opacity: 0.5 }, data: { kind: 'output' },
+              },
+            ]);
+            nextNds = nextNds.map((n) => n.id === downstream.id
+              ? { ...n, data: { ...n.data, output: { ...n.data.output, plugged_note_id: upstream.id } } }
+              : n);
+          } else {
+            const linkId = crypto.randomUUID();
+            const position = edgesRef.current.filter((e) => e.data?.kind === 'main-thread').length;
+            createMainThreadLink(linkId, song.id, upstream.id, downstream.id, position);
+            setEdges((eds) => [
+              ...eds.filter((e) => !staleIds.has(e.id)),
+              {
+                id: linkId, source: upstream.id, target: downstream.id,
+                sourceHandle: 'right', targetHandle: 'left',
+                type: 'default', style: { stroke: '#1F6F63', strokeWidth: 1.5, opacity: 0.6 }, data: { kind: 'main-thread', position },
+              },
+            ]);
+          }
+          return nextNds;
+        }
       }
 
       return nds;
     });
-  }, [song?.id]);
+  }, [song?.id, flashRejectedConnection]);
 
   // Fires when a node is removed via the selection + Delete/Backspace gesture
   // (the standard canvas-editor way to delete something) — the in-node ✕
@@ -613,6 +882,7 @@ export default function CanvasScreen({ state, onExit }) {
       else if (node.type === 'chordProgression') deleteChordProgression(node.id);
       else if (node.type === 'outputNode') deleteOutputNode(node.id);
       else if (node.type === 'tempoNode') deleteTempoNode(node.id);
+      else if (node.type === 'blackHole') deleteBaulNode(node.id);
     });
   }, []);
 
@@ -688,13 +958,20 @@ export default function CanvasScreen({ state, onExit }) {
     setNodes((nds) => [...nds, tempoToFlowNode(tempo, tempoCallbacks)]);
   }, [song?.id, handleTempoBpmChange, handleNodeDeleted]);
 
+  const handleAddBlackHole = useCallback(async (position = { x: 120, y: 500 }) => {
+    const { data: node, error } = await createBaulNode(song.id, position);
+    if (error) { setLoadError(error.message); return; }
+    setNodes((nds) => [...nds, blackHoleToFlowNode(node, blackHoleCallbacks)]);
+  }, [song?.id, handleOpenBaul, handleNodeDeleted]);
+
   const handleContextAdd = useCallback((type, position) => {
     if (type === 'note') handleAddNote(position);
     else if (type === 'chord') handleAddProgression(position);
     else if (type === 'output') handleAddOutput(position);
     else if (type === 'vibe') handleAddVibeNode(position);
     else if (type === 'tempo') handleAddTempo(position);
-  }, [handleAddNote, handleAddProgression, handleAddOutput, handleAddVibeNode, handleAddTempo]);
+    else if (type === 'blackhole') handleAddBlackHole(position);
+  }, [handleAddNote, handleAddProgression, handleAddOutput, handleAddVibeNode, handleAddTempo, handleAddBlackHole]);
 
   const onPaneContextMenu = useCallback((e) => {
     e.preventDefault();
@@ -707,6 +984,7 @@ export default function CanvasScreen({ state, onExit }) {
   // every time any unrelated note/link changes.
   const renderNodes = useMemo(() => {
     const textNotes = nodes.filter((n) => n.type === 'textNote').map((n) => n.data.note);
+    const textNotesById = Object.fromEntries(textNotes.map((n) => [n.id, n]));
     // id + position are load-bearing here — resolveMainThreadPath needs id to
     // match a stored selection and position to pick a stable default when
     // there isn't one (see canvasData.js).
@@ -725,9 +1003,6 @@ export default function CanvasScreen({ state, onExit }) {
             notes: textNotes,
             links: mainThreadLinks,
             progressionsById,
-            selections: Object.fromEntries(
-              selections.filter((s) => s.output_id === n.id).map((s) => [s.source_note_id, s.note_link_id])
-            ),
             lyricLanguage,
             lyricDialect,
           },
@@ -736,9 +1011,45 @@ export default function CanvasScreen({ state, onExit }) {
       if (n.type === 'textNote') {
         return { ...n, data: { ...n.data, lyricLanguage, lyricDialect } };
       }
+      if (n.type === 'museFloat') {
+        // Reads the source note's CURRENT text every render, same reasoning
+        // as a chord progression's bpm — a float opened a while ago
+        // shouldn't keep prompting off a stale snapshot of the verse.
+        const sourceNote = textNotesById[n.data.sourceNoteId];
+        // Same main-thread walk the Output node already uses for the full
+        // song — resolveMainThreadPath always resolves the WHOLE chain
+        // (it walks back to the true start first, then forward to the true
+        // end) regardless of which note's id you hand it, so the muse can
+        // answer about any connected note, not just its immediate neighbor.
+        const chain = resolveMainThreadPath(textNotes, mainThreadLinks, n.data.sourceNoteId);
+        const currentIndex = chain.findIndex((entry) => entry.note.id === n.data.sourceNoteId);
+        const songStructure = currentIndex === -1 ? { before: [], after: [] } : {
+          before: chain.slice(0, currentIndex).map((entry) => describeAdjacentNote(entry.note)),
+          after: chain.slice(currentIndex + 1).map((entry) => describeAdjacentNote(entry.note)),
+        };
+        return {
+          ...n,
+          data: {
+            ...n.data,
+            verseText: sourceNote?.lines?.[0]?.text || '',
+            noteFunction: sourceNote?.custom_label || sourceNote?.type || '',
+            songStructure,
+            museProfile,
+            lyricDna,
+            lyricLanguage,
+            lyricDialect,
+          },
+        };
+      }
+      if (n.type === 'baulFloat') {
+        // Same reasoning as museFloat above — reads the CURRENT lyric_dna
+        // every render, so a float left open while another baúl entry
+        // gets processed elsewhere isn't stuck showing a stale ADN.
+        return { ...n, data: { ...n.data, lyricDna } };
+      }
       return n;
     });
-  }, [nodes, edges, selections, lyricLanguage, lyricDialect]);
+  }, [nodes, edges, lyricLanguage, lyricDialect, museProfile, lyricDna]);
 
   const handleSignOut = useCallback(async () => {
     if (!confirm('Sign out?')) return;
@@ -789,6 +1100,7 @@ export default function CanvasScreen({ state, onExit }) {
         </div>
 
         <CanvasContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} onAdd={handleContextAdd} />
+        {import.meta.env.DEV && <DebugConsole />}
 
         {loadError && <div className="canvas-error">{loadError}</div>}
 
@@ -820,9 +1132,8 @@ export default function CanvasScreen({ state, onExit }) {
       {selectedNoteId && (() => {
         const selectedNode = nodes.find((n) => n.id === selectedNoteId);
         if (!selectedNode) return null;
-        const allNoteTexts = nodes
-          .filter((n) => n.type === 'textNote')
-          .map((n) => n.data.note.lines?.[0]?.text || '');
+        const textNoteNodes = nodes.filter((n) => n.type === 'textNote');
+        const allNoteTexts = textNoteNodes.map((n) => n.data.note.lines?.[0]?.text || '');
         return (
           <NoteSidePanel
             note={selectedNode.data.note}
@@ -830,6 +1141,8 @@ export default function CanvasScreen({ state, onExit }) {
             allNoteTexts={allNoteTexts}
             onClose={handleClosePanel}
             onTextUpdated={handleNoteTextExternalUpdate}
+            onOpenMuse={handleOpenMuse}
+            onTypeChange={handleNoteTypeChange}
           />
         );
       })()}

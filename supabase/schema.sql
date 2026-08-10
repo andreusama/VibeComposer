@@ -479,3 +479,156 @@ alter table songs
     (lyric_language = 'es' and lyric_dialect = 'central') or
     (lyric_language = 'ca' and lyric_dialect in ('oriental', 'occidental'))
   );
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Muse — a writing companion, not a spectator: the user asks it for help
+-- continuing, complementing or rhyming a line, and it either asks back for
+-- context it genuinely needs (never idle curiosity) or gives 2-4 concrete
+-- options. Learns a per-project profile, segmented by emotional register
+-- (love/friendship/family/place/other), so it calibrates *what it suggests*
+-- the same way someone who knows the user's taste would.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- Superseded before either ever shipped with real user data — safe to drop
+-- unconditionally rather than migrate column-by-column, since the old
+-- question/answer shape doesn't semantically map onto a conversation turn.
+alter table songs drop column if exists muse_profile;
+drop table if exists muse_entries;
+
+-- One row per turn in an ongoing conversation about one line — not a
+-- question/answer pair, since the muse asking back for context (and the
+-- user replying) can chain across several turns before landing on actual
+-- options. Append-only, grows without limit, NEVER sent to the muse API in
+-- full — muse_profile below is the only thing that is.
+create table muse_entries (
+  id                   uuid primary key default gen_random_uuid(),
+  song_id              uuid not null references songs(id) on delete cascade,
+  line_id              uuid not null references lines(id) on delete cascade,
+  register             text check (register in ('amor', 'amistad', 'familia', 'lugar', 'otro')),
+  role                 text not null check (role in ('user', 'muse')),
+  -- 'ask' = the user's request; 'clarify' = the muse asking back for
+  -- context; 'suggest' = the muse offering concrete options. Null only
+  -- transiently doesn't happen — every row gets one of these on insert.
+  action               text not null check (action in ('ask', 'clarify', 'suggest')),
+  content              text not null,
+  -- Only populated on action='suggest' rows — the actual candidate
+  -- lines/words, kept structured (not flattened into content) so each one
+  -- can be saved as its own apunte independently.
+  options              jsonb,
+  saved_annotation_id  uuid references annotations(id) on delete set null,
+  created_at           timestamptz not null default now()
+);
+
+create index idx_muse_entries_song_register on muse_entries(song_id, register);
+create index idx_muse_entries_line on muse_entries(line_id, created_at);
+
+alter table muse_entries enable row level security;
+
+drop policy if exists muse_entries_owner on muse_entries;
+create policy muse_entries_owner on muse_entries
+  for all using (
+    exists (select 1 from songs s where s.id = muse_entries.song_id and s.user_id = auth.uid())
+  ) with check (
+    exists (select 1 from songs s where s.id = muse_entries.song_id and s.user_id = auth.uid())
+  );
+
+-- Live profile — the only thing ever interpolated into the muse's system
+-- prompt. One row per (song, register); summary is short and gets
+-- OVERWRITTEN on each refresh, never appended to, so a prompt's cost never
+-- grows no matter how many months of answers accumulate behind it.
+create table if not exists muse_profile (
+  song_id             uuid not null references songs(id) on delete cascade,
+  register            text not null check (register in ('amor', 'amistad', 'familia', 'lugar', 'otro')),
+  summary             text not null default '',
+  interaction_count   int not null default 0,
+  last_summarized_at  timestamptz,
+  updated_at          timestamptz not null default now(),
+  primary key (song_id, register)
+);
+
+drop trigger if exists trg_muse_profile_updated_at on muse_profile;
+create trigger trg_muse_profile_updated_at
+  before update on muse_profile
+  for each row execute function set_updated_at();
+
+alter table muse_profile enable row level security;
+
+drop policy if exists muse_profile_owner on muse_profile;
+create policy muse_profile_owner on muse_profile
+  for all using (
+    exists (select 1 from songs s where s.id = muse_profile.song_id and s.user_id = auth.uid())
+  ) with check (
+    exists (select 1 from songs s where s.id = muse_profile.song_id and s.user_id = auth.uid())
+  );
+
+-- Atomic increment-and-return, so two near-simultaneous answers in the same
+-- register can never race each other into an inconsistent count the way a
+-- client-side read-then-write would. security definer + an explicit
+-- ownership check (RLS doesn't apply inside a definer function on its own)
+-- + a pinned search_path (blocks search_path-hijacking of unqualified
+-- names) is the standard safe shape for this kind of function.
+create or replace function muse_increment_interaction(p_song_id uuid, p_register text)
+returns int
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_count int;
+begin
+  if not exists (select 1 from songs where id = p_song_id and user_id = auth.uid()) then
+    raise exception 'not authorized';
+  end if;
+
+  insert into muse_profile (song_id, register, interaction_count)
+  values (p_song_id, p_register, 1)
+  on conflict (song_id, register)
+  do update set interaction_count = muse_profile.interaction_count + 1
+  returning interaction_count into v_count;
+
+  return v_count;
+end;
+$$;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Baúl — the "Inspiration Black Hole" node. A real DB row for position/size,
+-- same shape as tempo_nodes — it has no content columns of its own, since
+-- everything it produces lives in songs.lyric_dna (see below and
+-- src/utils/baulProcessor.js).
+-- ─────────────────────────────────────────────────────────────────────────────
+
+create table if not exists baul_nodes (
+  id            uuid primary key default gen_random_uuid(),
+  song_id       uuid not null references songs(id) on delete cascade,
+  canvas_x      double precision not null default 0,
+  canvas_y      double precision not null default 0,
+  canvas_width  double precision not null default 140,
+  canvas_height double precision not null default 140,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
+);
+
+drop trigger if exists trg_baul_nodes_updated_at on baul_nodes;
+create trigger trg_baul_nodes_updated_at
+  before update on baul_nodes
+  for each row execute function set_updated_at();
+
+create index if not exists idx_baul_nodes_song on baul_nodes(song_id);
+
+alter table baul_nodes enable row level security;
+
+drop policy if exists baul_nodes_owner on baul_nodes;
+create policy baul_nodes_owner on baul_nodes
+  for all using (
+    exists (select 1 from songs s where s.id = baul_nodes.song_id and s.user_id = auth.uid())
+  ) with check (
+    exists (select 1 from songs s where s.id = baul_nodes.song_id and s.user_id = auth.uid())
+  );
+
+-- The fused ADN Lírico itself — deliberately a separate concept from
+-- muse_profile above: muse_profile accumulates from conversations with the
+-- muse, segmented by emotional register; lyric_dna accumulates from raw
+-- material dropped into the baúl (text, transcripts, notebook photos,
+-- documents), one evolving object, no register split. Never appended to —
+-- each processBaulInput call returns the full fused replacement.
+alter table songs add column if not exists lyric_dna jsonb not null default '{}'::jsonb;

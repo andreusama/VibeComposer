@@ -25,7 +25,7 @@ import {
   loadOutputNodes, createOutputNode, deleteOutputNode, saveOutputPosition, setOutputPluggedNote,
   saveSongTitle, saveSongLyricSettings,
   loadTempoNodes, createTempoNode, saveTempoBpm, saveTempoPosition, deleteTempoNode,
-  resolveMainThreadPath,
+  resolveMainThreadPath, summarizeProgression,
   loadBaulNodes, createBaulNode, saveBaulNodePosition, deleteBaulNode,
   loadLyricDna,
 } from './canvasData.js';
@@ -231,12 +231,6 @@ function resolveNoteLinkDirection(connection) {
   if (sourceIsOut && targetIsOut) return { mismatch: 'out' };
   if (sourceIsIn && targetIsIn) return { mismatch: 'in' };
   return {}; // neither handle is part of this family (chord/tempo handles) — not our concern
-}
-
-function summarizeProgression(cp) {
-  if (!cp?.progression?.length) return null;
-  const chords = cp.progression.map((c) => c.chord).filter(Boolean);
-  return chords.length ? chords.join(' · ') : null;
 }
 
 // A connected note's full current text for the muse's song-wide context —

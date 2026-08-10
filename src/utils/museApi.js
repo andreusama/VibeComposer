@@ -412,7 +412,7 @@ function parseWordBank(parsed) {
     };
 }
 
-function parseCompanionResponse(raw) {
+export function parseCompanionResponse(raw) {
     try {
         const cleaned = raw.replace(/```json|```/g, '').trim();
         const parsed = JSON.parse(cleaned);
@@ -458,63 +458,17 @@ function parseCompanionResponse(raw) {
 }
 
 /**
- * Ask the muse for help with one note's line — the core companion
- * exchange. Not idempotent: each call is one turn in an ongoing
- * conversation, so pass the full prior conversation every time.
- * @param {{verseText: string, noteFunction: string, museProfile: object,
- *   lyricDna?: object, userMessage: string,
- *   conversation?: {role: 'user'|'muse', content: string, action_type?: string,
- *   options?: any[]}[], lang?: string, dialect?: string,
- *   songStructure?: {before: {type: string, text: string}[],
- *   after: {type: string, text: string}[]},
- *   targetVerse?: {text: string, before: string, after: string}|null,
- *   debug?: boolean}} args
- * @returns {Promise<{action_type: string, message: string,
- *   suggestions: {text: string, type: string|null, angle: string|null}[],
- *   question: {text: string, options: string[]}|null,
- *   wordBank: {targetRhyme: string, rhymeType: string, wordGroups: object[]}|null,
- *   isRhymeRequest: boolean, rhymeVerified?: boolean, themes: string[],
- *   _debug?: object}>}
+ * Verify (never just trust) a parsed muse response against deterministic
+ * rules, mutating and returning `parsed` in place. Split out of askMuse on
+ * purpose: this is the part actually worth unit-testing without a network
+ * call — every rule here mirrors an instruction given to the model in
+ * buildStaticMuseInstructions, and if one changes, the other needs to too.
+ * @param {object} parsed - the parseCompanionResponse() result to verify
+ * @param {{verseText: string, targetVerse?: {text: string, before: string,
+ *   after: string}|null, lang?: string, dialect?: string}} ctx
+ * @returns {object} the same `parsed` object, filtered in place
  */
-export async function askMuse({
-                                  verseText,
-                                  noteFunction,
-                                  museProfile,
-                                  lyricDna,
-                                  userMessage,
-                                  conversation = [],
-                                  lang = 'es',
-                                  dialect = 'central',
-                                  songStructure,
-                                  targetVerse = null,
-                                  debug = false,
-                              }) {
-    // Built as named strings, not inline in the array below, for two
-    // reasons: calculateContextWeights needs the raw text to measure, and
-    // debug mode wants to show them verbatim — neither should require
-    // re-deriving what was actually sent.
-    const staticText = buildStaticMuseInstructions({lyricDna, museProfile, lang, dialect});
-    const dynamicText = buildDynamicMuseContext({verseText, noteFunction, conversation, lang, dialect, songStructure, targetVerse});
-
-    // Two content blocks, not one string: cache_control can only mark a
-    // block boundary, so the stable instructions (which we want Anthropic to
-    // cache and reuse across every turn of this conversation) and the
-    // per-turn note/conversation data (which must never be cached, since
-    // it's different every time — including songStructure and targetVerse,
-    // which change whenever the user opens the muse on a different note or
-    // selects a different fragment) have to be physically separate blocks.
-    const system = [
-        {type: 'text', text: staticText, cache_control: {type: 'ephemeral'}},
-        {type: 'text', text: dynamicText},
-    ];
-    // 900, not 600: SURGEON/ARCHITECT now over-generate 5-6 {text, type,
-    // angle} suggestions instead of 5-6 bare-ish options, and WORD_BANK's
-    // word_groups run longer than a handful of one-line options ever did.
-    const startedAt = Date.now();
-    const raw = await callClaude(system, userMessage, 900);
-    const latencyMs = Date.now() - startedAt;
-    const parsed = parseCompanionResponse(raw);
-
+export function applyMuseVerification(parsed, {verseText, targetVerse, lang = 'es', dialect = 'central'}) {
     if ((parsed.action_type === 'SURGEON' || parsed.action_type === 'ARCHITECT') && parsed.suggestions.length) {
         // Ground truth for the target line: an explicit user selection beats
         // the model's own echo, since we already know it for certain — the
@@ -618,6 +572,69 @@ export async function askMuse({
         parsed.wordBank.wordGroups = parsed.wordBank.wordGroups.filter((g) => g.words.length || g.shortPhrases.length);
     }
 
+    return parsed;
+}
+
+/**
+ * Ask the muse for help with one note's line — the core companion
+ * exchange. Not idempotent: each call is one turn in an ongoing
+ * conversation, so pass the full prior conversation every time.
+ * @param {{verseText: string, noteFunction: string, museProfile: object,
+ *   lyricDna?: object, userMessage: string,
+ *   conversation?: {role: 'user'|'muse', content: string, action_type?: string,
+ *   options?: any[]}[], lang?: string, dialect?: string,
+ *   songStructure?: {before: {type: string, text: string}[],
+ *   after: {type: string, text: string}[]},
+ *   targetVerse?: {text: string, before: string, after: string}|null,
+ *   debug?: boolean}} args
+ * @returns {Promise<{action_type: string, message: string,
+ *   suggestions: {text: string, type: string|null, angle: string|null}[],
+ *   question: {text: string, options: string[]}|null,
+ *   wordBank: {targetRhyme: string, rhymeType: string, wordGroups: object[]}|null,
+ *   isRhymeRequest: boolean, rhymeVerified?: boolean, themes: string[],
+ *   _debug?: object}>}
+ */
+export async function askMuse({
+                                  verseText,
+                                  noteFunction,
+                                  museProfile,
+                                  lyricDna,
+                                  userMessage,
+                                  conversation = [],
+                                  lang = 'es',
+                                  dialect = 'central',
+                                  songStructure,
+                                  targetVerse = null,
+                                  debug = false,
+                              }) {
+    // Built as named strings, not inline in the array below, for two
+    // reasons: calculateContextWeights needs the raw text to measure, and
+    // debug mode wants to show them verbatim — neither should require
+    // re-deriving what was actually sent.
+    const staticText = buildStaticMuseInstructions({lyricDna, museProfile, lang, dialect});
+    const dynamicText = buildDynamicMuseContext({verseText, noteFunction, conversation, lang, dialect, songStructure, targetVerse});
+
+    // Two content blocks, not one string: cache_control can only mark a
+    // block boundary, so the stable instructions (which we want Anthropic to
+    // cache and reuse across every turn of this conversation) and the
+    // per-turn note/conversation data (which must never be cached, since
+    // it's different every time — including songStructure and targetVerse,
+    // which change whenever the user opens the muse on a different note or
+    // selects a different fragment) have to be physically separate blocks.
+    const system = [
+        {type: 'text', text: staticText, cache_control: {type: 'ephemeral'}},
+        {type: 'text', text: dynamicText},
+    ];
+    // 900, not 600: SURGEON/ARCHITECT now over-generate 5-6 {text, type,
+    // angle} suggestions instead of 5-6 bare-ish options, and WORD_BANK's
+    // word_groups run longer than a handful of one-line options ever did.
+    const startedAt = Date.now();
+    const raw = await callClaude(system, userMessage, 900);
+    const latencyMs = Date.now() - startedAt;
+    const parsed = parseCompanionResponse(raw);
+
+    applyMuseVerification(parsed, {verseText, targetVerse, lang, dialect});
+
     if (debug) {
         parsed._debug = {
             latencyMs,
@@ -639,7 +656,7 @@ export async function askMuse({
 // from whatever's left over if fewer than `limit` distinct types survived
 // the metric/rhyme filters above — never shrinks the result just because
 // one type happened to get filtered out entirely.
-function selectDiverseSuggestions(suggestions, limit) {
+export function selectDiverseSuggestions(suggestions, limit) {
     const seen = new Set();
     const byType = [];
     const rest = [];

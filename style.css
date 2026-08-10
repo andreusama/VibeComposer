@@ -4036,3 +4036,745 @@ body::before {
     .note-variant-actions { flex-direction: row; justify-content: flex-end; }
     .note-variant-actions button { flex: 1; min-height: 32px; }
 }
+
+/* ─── Mobile screen shell (shared) ────────────────────────────────────────────
+   Every mobile screen (SongThreadScreen, MobileProjectsScreen, more to come)
+   mounts via <MobileScreen> (src/mobile/MobileScreen.jsx) rather than
+   redeclaring this. `position: fixed; inset: 0` on purpose, not `height:
+   100%` — #app/body have no fixed height of their own (body only sets
+   min-height, for the desktop screens' normal document scroll), so a
+   percentage height here would just grow to fit all the content instead of
+   the real viewport, which is exactly what let the bottom-anchored tab bar/
+   FAB drift down to the bottom of the *content* instead of the *screen*.
+   Fixed-to-viewport is also what makes the child `overflow-y: auto` region
+   actually scroll internally instead of the whole page scrolling. */
+.mobile-screen {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+}
+
+/* The floating "+" — one shared button (src/mobile/MobileFab.jsx) instead of
+   each screen hardcoding its own; what the tap does differs per screen. */
+.mobile-fab {
+    position: absolute;
+    right: calc(var(--space-5) + env(safe-area-inset-right));
+    bottom: calc(var(--space-5) + env(safe-area-inset-bottom));
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--paper);
+    border: none;
+    font-size: var(--fs-h2);
+    line-height: 1;
+    box-shadow: var(--sh-3);
+    cursor: pointer;
+    z-index: 5;
+}
+.mobile-fab:disabled { opacity: 0.6; cursor: default; }
+/* Set via the <MobileFab aboveTabBar> prop on screens that also mount
+   <MobileTabBar> below it, so it clears the bar instead of sitting on it. */
+.mobile-fab-above-tabbar { bottom: calc(80px + env(safe-area-inset-bottom)); }
+
+/* Top-level nav (src/mobile/MobileTabBar.jsx) — mounted only on screens that
+   sit at the root of a tab (Projects), not on drill-down screens. */
+.mobile-tabbar {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    display: flex;
+    border-top: 1px solid var(--hairline);
+    background: rgba(251, 249, 244, 0.92);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    padding: var(--space-2) 0 calc(var(--space-2) + env(safe-area-inset-bottom));
+}
+
+.mobile-tab {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    font-family: var(--font-sans);
+    font-size: var(--fs-eyebrow);
+    color: var(--graphite-soft);
+}
+.mobile-tab-icon { font-size: var(--fs-h2); line-height: 1; }
+.mobile-tab-active { color: var(--ink); }
+
+/* ─── Song thread (mobile) ────────────────────────────────────────────────────
+   ROADMAP.md Phase 1 — replaces the canvas below MOBILE_BREAKPOINT (main.js).
+   First screen actually built against a real device viewport, not just a
+   resized desktop window, so it's also the first to account for
+   env(safe-area-inset-*) — iPhone notch/home-indicator, Android gesture bar. */
+
+.thread-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: calc(var(--space-3) + env(safe-area-inset-top)) var(--space-4) var(--space-3);
+    border-bottom: 1px solid var(--hairline);
+    background: var(--bg);
+    flex-shrink: 0;
+}
+
+.thread-back {
+    font-family: var(--font-sans);
+    font-size: var(--fs-h2);
+    line-height: 1;
+    background: none;
+    border: none;
+    color: var(--ink);
+    cursor: pointer;
+    padding: var(--space-1) var(--space-1-5);
+}
+
+.thread-title-block { flex: 1; min-width: 0; }
+
+.thread-title {
+    font-family: var(--font-serif);
+    font-weight: 600;
+    font-size: var(--fs-h2);
+    color: var(--ink);
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.thread-title-input {
+    display: block;
+    width: 100%;
+    font-family: var(--font-serif);
+    font-weight: 600;
+    font-size: var(--fs-h2);
+    color: var(--ink);
+    border: none;
+    border-bottom: 1px solid var(--thread);
+    background: none;
+    padding: 0;
+}
+.thread-title-input:focus { outline: none; }
+
+.thread-lang-pill {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    background: none;
+    border: none;
+    padding: 0;
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    color: var(--muted);
+    cursor: pointer;
+}
+.thread-lang-chevron { font-size: var(--fs-eyebrow); }
+
+.thread-menu-btn {
+    flex-shrink: 0;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: var(--bg-deep);
+    border: none;
+    color: var(--ink);
+    font-size: var(--fs-body);
+    line-height: 1;
+    cursor: pointer;
+}
+
+.thread-menu-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 45;
+}
+
+.thread-menu {
+    position: absolute;
+    top: calc(var(--space-3) + env(safe-area-inset-top) + 40px);
+    right: var(--space-4);
+    width: min(260px, calc(100vw - 2 * var(--space-4)));
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    box-shadow: var(--sh-3);
+    overflow: hidden;
+}
+
+.thread-menu-item {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-3);
+    background: none;
+    border: none;
+    border-bottom: 1px solid var(--hairline);
+    text-align: left;
+    font: inherit;
+    cursor: pointer;
+    color: var(--ink);
+}
+.thread-menu-item:last-child { border-bottom: none; }
+.thread-menu-item:disabled { color: var(--graphite-soft); cursor: default; }
+.thread-menu-item:first-child { background: var(--thread-soft); }
+
+.thread-menu-main { flex: 1; min-width: 0; }
+.thread-menu-label { font-family: var(--font-sans); font-weight: 600; font-size: var(--fs-secondary); }
+.thread-menu-sublabel { font-family: var(--font-sans); font-size: var(--fs-eyebrow); color: var(--muted); margin-top: 1px; }
+.thread-menu-icon { margin-left: auto; }
+.thread-menu-danger { color: var(--rose); }
+.thread-menu-danger .thread-menu-label { color: var(--rose); }
+
+.lang-sheet-group { padding-bottom: var(--space-3); }
+.lang-sheet-group-label {
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    padding: var(--space-1) 0;
+}
+.lang-sheet-option {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    background: none;
+    border: none;
+    border-bottom: 1px solid var(--hairline);
+    padding: var(--space-2-5) 0;
+    font-family: var(--font-sans);
+    font-size: var(--fs-body);
+    color: var(--ink);
+    text-align: left;
+    cursor: pointer;
+}
+.lang-sheet-option.active { color: var(--thread); font-weight: 600; }
+.lang-sheet-check { color: var(--thread); }
+
+.thread-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--space-4) var(--space-4) calc(var(--space-8) + env(safe-area-inset-bottom));
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+}
+
+.thread-status {
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    color: var(--muted);
+    text-align: center;
+    padding: var(--space-6) 0;
+}
+.thread-status-error { color: var(--rose); }
+
+.thread-empty {
+    text-align: center;
+    color: var(--muted);
+    font-family: var(--font-sans);
+    padding: var(--space-8) 0;
+}
+
+.thread-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.thread-card {
+    width: 100%;
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-lg);
+    box-shadow: var(--sh-1);
+    padding: var(--space-4);
+    display: block;
+    text-align: left;
+    font: inherit;
+    cursor: pointer;
+}
+
+.thread-card-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2-5);
+    margin-bottom: var(--space-2-5);
+}
+
+.thread-card-type {
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--thread);
+    background: var(--thread-soft);
+    border-radius: var(--radius-pill);
+    padding: 3px 10px;
+}
+
+.thread-card-chords {
+    font-family: var(--font-mono);
+    font-size: var(--fs-utility);
+    letter-spacing: 0.02em;
+    color: var(--chord);
+}
+
+.thread-card-text {
+    font-family: var(--font-body);
+    font-size: var(--fs-body);
+    color: var(--ink);
+    line-height: 1.5;
+    margin: 0 0 var(--space-2-5);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.thread-card-empty { color: var(--faint); font-style: italic; }
+
+.thread-card-foot {
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    color: var(--muted);
+}
+
+.thread-insert {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: var(--space-2) 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.thread-insert:disabled { cursor: default; }
+
+.thread-insert-dot {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    border: 1px dashed var(--graphite-soft);
+    color: var(--graphite-soft);
+    font-family: var(--font-sans);
+    font-size: var(--fs-label);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.15s, border-color 0.15s;
+}
+.thread-insert:hover .thread-insert-dot,
+.thread-insert:focus-visible .thread-insert-dot {
+    color: var(--thread);
+    border-color: var(--thread);
+}
+
+/* ─── Mobile Projects screen ──────────────────────────────────────────────────
+   ROADMAP.md design ref #1, screen 01 — replaces home.js's desktop grid below
+   MOBILE_BREAKPOINT (main.js). Own `mp-` prefix for content that's actually
+   specific to this screen; shell/FAB/tab-bar come from the shared
+   .mobile-screen/.mobile-fab/.mobile-tabbar classes above. */
+
+.mp-header {
+    flex-shrink: 0;
+    padding: calc(var(--space-4) + env(safe-area-inset-top)) var(--space-4) var(--space-3);
+    border-bottom: 1px solid var(--hairline);
+    background: var(--bg);
+}
+
+.mp-title {
+    font-family: var(--font-serif);
+    font-weight: 600;
+    font-size: var(--fs-h1);
+    color: var(--ink);
+    margin: 0 0 var(--space-3);
+}
+
+.mp-search {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    background: var(--bg-deep);
+    border-radius: var(--r-md);
+    padding: var(--space-2-5) var(--space-3);
+}
+.mp-search-icon { color: var(--muted); font-size: var(--fs-utility); }
+.mp-search input {
+    flex: 1;
+    border: none;
+    background: none;
+    font-family: var(--font-sans);
+    font-size: var(--fs-body);
+    color: var(--ink);
+}
+.mp-search input:focus { outline: none; }
+
+.mp-body {
+    flex: 1;
+    overflow-y: auto;
+    padding-bottom: calc(96px + env(safe-area-inset-bottom));
+}
+
+.mp-row {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-4);
+    background: none;
+    border: none;
+    border-bottom: 1px solid var(--hairline);
+    cursor: pointer;
+    text-align: left;
+}
+
+.mp-thumb {
+    flex-shrink: 0;
+    width: 44px;
+    height: 44px;
+    border-radius: var(--r-sm);
+    background: var(--thread-soft);
+    overflow: hidden;
+}
+.mp-thumb-svg { width: 100%; height: 100%; }
+.mp-thumb-svg line { stroke: var(--thread); stroke-width: 3; opacity: 0.5; }
+.mp-thumb-svg circle { fill: var(--thread); opacity: 0.7; }
+
+.mp-row-body { flex: 1; min-width: 0; }
+.mp-row-title {
+    font-family: var(--font-serif);
+    font-weight: 600;
+    font-size: var(--fs-body);
+    color: var(--ink);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.mp-row-meta {
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    color: var(--muted);
+    margin-top: 2px;
+}
+
+.mp-row-chevron { color: var(--graphite-soft); font-size: var(--fs-h2); flex-shrink: 0; }
+
+/* ─── Note editor (mobile, full-screen) ───────────────────────────────────────
+   ROADMAP.md Phase 2 — reached by tapping a song-thread card. Write mode
+   only for now; the text-selection toolbar and rhyme popover (design ref
+   #3, states 2-3) aren't built yet. */
+
+.ne-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: calc(var(--space-3) + env(safe-area-inset-top)) var(--space-4) var(--space-3);
+    border-bottom: 1px solid var(--hairline);
+    flex-shrink: 0;
+}
+.ne-back {
+    font-family: var(--font-sans);
+    font-size: var(--fs-h2);
+    line-height: 1;
+    background: none;
+    border: none;
+    color: var(--ink);
+    cursor: pointer;
+    padding: var(--space-1) var(--space-1-5);
+}
+.ne-custom-label {
+    font-family: var(--font-sans);
+    font-size: var(--fs-label);
+    border: none;
+    border-bottom: 1px solid var(--hairline);
+    background: none;
+    flex: 1;
+    min-width: 0;
+}
+.ne-menu {
+    margin-left: auto;
+    background: none;
+    border: none;
+    color: var(--graphite);
+    font-size: var(--fs-label);
+    cursor: pointer;
+    padding: var(--space-1) var(--space-2);
+}
+.ne-done {
+    background: none;
+    border: none;
+    color: var(--chord);
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: var(--fs-body);
+    cursor: pointer;
+}
+
+.ne-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--space-3) var(--space-4) calc(var(--space-8) + env(safe-area-inset-bottom));
+}
+
+.ne-row {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2-5);
+    transition: opacity 0.15s;
+}
+.ne-row-dimmed { opacity: 0.25; }
+
+.ne-gutter {
+    flex-shrink: 0;
+    width: 22px;
+    padding-top: calc(var(--space-2) + 2px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+}
+.ne-gutter-count {
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    color: var(--graphite-soft);
+}
+.ne-gutter-letter {
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    font-weight: 600;
+    color: var(--thread);
+}
+.ne-gutter-letter.assonant { color: var(--amber); text-transform: lowercase; }
+
+.ne-line-input {
+    flex: 1;
+    min-width: 0;
+    resize: none;
+    border: none;
+    background: none;
+    font-family: var(--font-body);
+    font-size: var(--fs-lyric-lead);
+    line-height: 1.5;
+    color: var(--ink);
+    padding: var(--space-2) 0;
+    overflow: hidden;
+}
+.ne-line-input:focus { outline: none; }
+.ne-line-input::placeholder { color: var(--faint); }
+
+.ne-toolbar {
+    flex-shrink: 0;
+    display: flex;
+    border-top: 1px solid var(--hairline);
+    background: rgba(251, 249, 244, 0.92);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    padding: var(--space-2) 0 calc(var(--space-2) + env(safe-area-inset-bottom));
+}
+.ne-tool {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    background: none;
+    border: none;
+    font-family: var(--font-sans);
+    font-size: var(--fs-eyebrow);
+    color: var(--ink);
+    cursor: pointer;
+}
+.ne-tool:disabled { color: var(--graphite-soft); cursor: default; }
+.ne-tool-icon { font-size: var(--fs-h2); line-height: 1; }
+
+/* ─── Tools sheet (mobile) ────────────────────────────────────────────────────
+   Folds in NoteSidePanel.jsx's variants/notes/history — see ROADMAP.md
+   Phase 2's note on why there's no separate "node detail bottom sheet". */
+
+.ts-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(29, 28, 26, 0.35);
+    z-index: 40;
+    display: flex;
+    align-items: flex-end;
+}
+
+.ts-sheet {
+    width: 100%;
+    max-height: 80vh;
+    background: var(--bg);
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+    box-shadow: var(--sh-3);
+    padding: var(--space-2) var(--space-4) calc(var(--space-4) + env(safe-area-inset-bottom));
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+}
+
+.ts-grabber {
+    width: 36px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--hairline);
+    margin: var(--space-1) auto var(--space-3);
+    flex-shrink: 0;
+}
+
+.ts-list { display: flex; flex-direction: column; }
+
+.ts-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-3) 0;
+    border-bottom: 1px solid var(--hairline);
+    background: none;
+    border-left: none;
+    border-right: none;
+    border-top: none;
+    width: 100%;
+    text-align: left;
+    font: inherit;
+}
+.ts-row-disclosure { cursor: pointer; }
+.ts-row-disclosure:disabled { opacity: 0.5; cursor: default; }
+
+.ts-row-main { flex: 1; min-width: 0; }
+.ts-row-label { font-family: var(--font-sans); font-weight: 600; font-size: var(--fs-body); color: var(--ink); }
+.ts-row-sublabel { font-family: var(--font-sans); font-size: var(--fs-secondary); color: var(--muted); margin-top: 2px; }
+.ts-row-count { font-family: var(--font-mono); font-size: var(--fs-utility); color: var(--muted); margin-left: auto; }
+.ts-chevron { color: var(--graphite-soft); font-size: var(--fs-h2); }
+
+.ts-toggle { position: relative; flex-shrink: 0; }
+.ts-toggle input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.ts-toggle-track {
+    display: block;
+    width: 44px;
+    height: 26px;
+    border-radius: 13px;
+    background: var(--hairline);
+    transition: background-color 0.15s;
+}
+.ts-toggle-thumb {
+    display: block;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: var(--sh-1);
+    margin: 2px;
+    transition: transform 0.15s;
+}
+.ts-toggle input:checked ~ .ts-toggle-track { background: var(--thread); }
+.ts-toggle input:checked ~ .ts-toggle-track .ts-toggle-thumb { transform: translateX(18px); }
+
+.ts-run {
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    font-weight: 600;
+    color: var(--thread);
+    background: var(--thread-soft);
+    border: none;
+    border-radius: var(--radius-pill);
+    padding: var(--space-1-5) var(--space-3);
+    cursor: pointer;
+}
+
+.ts-repeat-results { padding: 0 0 var(--space-3); }
+.ts-repeat-results ul { list-style: none; }
+.ts-repeat-results li { font-family: var(--font-sans); font-size: var(--fs-secondary); color: var(--ink); padding: var(--space-1) 0; }
+
+.ts-empty { font-family: var(--font-sans); font-size: var(--fs-secondary); color: var(--muted); padding: var(--space-3) 0; }
+
+.ts-sub-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding-bottom: var(--space-2);
+    border-bottom: 1px solid var(--hairline);
+    margin-bottom: var(--space-3);
+}
+.ts-sub-head h2 { font-family: var(--font-serif); font-size: var(--fs-h2); font-weight: 600; color: var(--ink); }
+.ts-back {
+    background: none; border: none; cursor: pointer;
+    font-size: var(--fs-h2); color: var(--ink); line-height: 1;
+    padding: 0 var(--space-1);
+}
+
+.ts-tab { display: flex; flex-direction: column; gap: var(--space-3); padding-bottom: var(--space-3); }
+
+.ts-variant-row, .ts-history-row {
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    padding: var(--space-2-5);
+}
+.ts-variant-text {
+    width: 100%;
+    border: none;
+    background: none;
+    font-family: var(--font-body);
+    font-size: var(--fs-body);
+    color: var(--ink);
+    resize: vertical;
+    min-height: 44px;
+}
+.ts-row-actions { display: flex; gap: var(--space-2); justify-content: flex-end; margin-top: var(--space-2); }
+.ts-row-actions button {
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    background: var(--bg-deep);
+    border: none;
+    border-radius: var(--r-sm);
+    padding: var(--space-1-5) var(--space-2-5);
+    cursor: pointer;
+    color: var(--ink);
+}
+
+.ts-add-row { display: flex; gap: var(--space-2); }
+.ts-add-row input, .ts-add-row select {
+    flex: 1;
+    font-family: var(--font-sans);
+    font-size: var(--fs-body);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-sm);
+    padding: var(--space-2);
+    background: var(--surface);
+}
+.ts-add-row button {
+    background: var(--ink);
+    color: var(--paper);
+    border: none;
+    border-radius: var(--r-sm);
+    padding: 0 var(--space-3);
+    cursor: pointer;
+}
+.ts-add-col { display: flex; flex-direction: column; gap: var(--space-2); }
+.ts-add-col textarea {
+    font-family: var(--font-sans);
+    font-size: var(--fs-body);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-sm);
+    padding: var(--space-2);
+    min-height: 60px;
+    background: var(--surface);
+}
+
+.ts-annotation-row { display: flex; gap: var(--space-2); background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--r-md); padding: var(--space-2-5); }
+.ts-annotation-row.resolved { opacity: 0.55; }
+.ts-annotation-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--graphite-soft); flex-shrink: 0; margin-top: 6px; }
+.ts-annotation-dot.duda { background: var(--rose); }
+.ts-annotation-dot.idea { background: var(--amber); }
+.ts-annotation-dot.referencia { background: var(--chord); }
+.ts-annotation-main { flex: 1; min-width: 0; }
+.ts-annotation-category { font-family: var(--font-mono); font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.ts-annotation-body { font-family: var(--font-sans); font-size: var(--fs-body); color: var(--ink); margin-top: 2px; }
+
+.ts-history-text { font-family: var(--font-body); font-size: var(--fs-body); color: var(--ink); }
+.ts-history-meta { display: flex; align-items: center; justify-content: space-between; margin-top: var(--space-2); font-family: var(--font-sans); font-size: var(--fs-eyebrow); color: var(--muted); }

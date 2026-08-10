@@ -290,6 +290,12 @@ function findChainStart(notes, links, fromId) {
   return current;
 }
 
+export function summarizeProgression(cp) {
+  if (!cp?.progression?.length) return null;
+  const chords = cp.progression.map((c) => c.chord).filter(Boolean);
+  return chords.length ? chords.join(' · ') : null;
+}
+
 // A linear walk from the start of the chain to wherever it ends — no fork
 // or merge choices to resolve, since a note only ever has one child.
 export function resolveMainThreadPath(notes, links, startNoteId) {

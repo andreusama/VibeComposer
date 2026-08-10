@@ -25,12 +25,11 @@ import {
   loadOutputNodes, createOutputNode, deleteOutputNode, saveOutputPosition, setOutputPluggedNote,
   saveSongTitle, saveSongLyricSettings,
   loadTempoNodes, createTempoNode, saveTempoBpm, saveTempoPosition, deleteTempoNode,
-  getAdjacentNotes,
+  resolveMainThreadPath,
   loadBaulNodes, createBaulNode, saveBaulNodePosition, deleteBaulNode,
   loadLyricDna,
 } from './canvasData.js';
 import { DIALECTS } from '../utils/rhyme.js';
-import { splitIntoLines } from '../utils/textLines.js';
 import { loadMuseProfile } from './museData.js';
 
 const NODE_TYPES = {
@@ -240,17 +239,15 @@ function summarizeProgression(cp) {
   return chords.length ? chords.join(' · ') : null;
 }
 
-// A cheap digest of a neighboring note for the muse's local narrative
-// context — not a real summary (no extra LLM call just to describe a
-// neighbor), just the one physical line that actually matters for that
-// direction: the previous note's *last* line is what the current note picks
-// up from, the next note's *first* line is what it should be building
-// toward.
-function describeAdjacentNote(note, edge) {
+// A connected note's full current text for the muse's song-wide context —
+// every main-thread note is short (a handful of lyric lines), so there's no
+// need for a separate summarization pass (no extra LLM call just to
+// describe a neighbor); the model reads the actual text in-context and
+// works out what it means itself, same as it already does for whichever
+// note it's actively answering about.
+function describeAdjacentNote(note) {
   if (!note) return null;
-  const lines = splitIntoLines(note.lines?.[0]?.text || '').filter(Boolean);
-  const line = edge === 'previous' ? lines[lines.length - 1] : lines[0];
-  return { type: note.custom_label || note.type, line: line || '' };
+  return { type: note.custom_label || note.type, text: note.lines?.[0]?.text || '' };
 }
 
 // Needs to live inside <ReactFlowProvider> to call useReactFlow/useViewport
@@ -392,14 +389,14 @@ export default function CanvasScreen({ state, onExit }) {
     const dialect = DIALECTS[language][0];
     setLyricLanguage(language);
     setLyricDialect(dialect);
-    if (song?.id) { beginSave(); saveSongLyricSettings(song.id, language, dialect).finally(endSave); }
+    if (song?.id) { beginSave(); Promise.resolve(saveSongLyricSettings(song.id, language, dialect)).finally(endSave); }
   }, [song?.id]);
 
-  // The muse's per-project, per-register profile — a plain {register:
-  // summary} map client-side, built from muse_profile's one-row-per-
-  // register shape. Kept in local state so the background profile refresh
-  // (see museProfileUpdater.js) can hand back one updated register without
-  // needing a reload for the *next* question to read it.
+  // The muse's per-project profile — a single evolving JSON, same
+  // load/update pattern as lyricDna below. Kept in local state so the
+  // background profile refresh (see museProfileUpdater.js) can hand back
+  // the updated profile without needing a reload for the *next* question
+  // to read it.
   const [museProfile, setMuseProfile] = useState({});
 
   useEffect(() => {
@@ -408,14 +405,12 @@ export default function CanvasScreen({ state, onExit }) {
     (async () => {
       const { data } = await loadMuseProfile(song.id);
       if (cancelled) return;
-      setMuseProfile(Object.fromEntries((data || []).map((row) => [row.register, row.summary])));
+      setMuseProfile(data?.muse_profile || {});
     })();
     return () => { cancelled = true; };
   }, [song?.id]);
 
-  const handleMuseProfileUpdated = useCallback(({ register, summary }) => {
-    setMuseProfile((profile) => ({ ...profile, [register]: summary }));
-  }, []);
+  const handleMuseProfileUpdated = useCallback((nextProfile) => setMuseProfile(nextProfile), []);
 
   // The baúl's fused ADN Lírico — deliberately separate from museProfile
   // above (see baulProcessor.js / schema.sql for why). One evolving object
@@ -439,7 +434,7 @@ export default function CanvasScreen({ state, onExit }) {
   const handleLyricDialectChange = useCallback((e) => {
     const dialect = e.target.value;
     setLyricDialect(dialect);
-    if (song?.id) { beginSave(); saveSongLyricSettings(song.id, lyricLanguage, dialect).finally(endSave); }
+    if (song?.id) { beginSave(); Promise.resolve(saveSongLyricSettings(song.id, lyricLanguage, dialect)).finally(endSave); }
   }, [song?.id, lyricLanguage]);
 
   const handleNodeDeleted = useCallback((id) => {
@@ -458,16 +453,32 @@ export default function CanvasScreen({ state, onExit }) {
     setSelectedNoteId((cur) => (cur === id ? null : cur));
   }, []);
 
-  // Opens (or, if one's already open for this note, just leaves alone —
-  // one float per note, not a pile of duplicates) the muse's floating
-  // node, positioned just to the right of the note it's about. verseText/
-  // noteFunction aren't set here — they're injected live in renderNodes
-  // below, same as a chord progression's bpm, so the float always reads
-  // the note's current text instead of a snapshot from when it opened.
-  const handleOpenMuse = useCallback((note) => {
+  // Clears whichever fragment the user had selected in the note's textarea
+  // (see TextNoteNode's selection handling) once it's either been sent along
+  // with a question or explicitly dismissed — keyed by floatId, same
+  // per-node-id-update pattern as handleBaulStatusChange below.
+  const handleClearMuseTarget = useCallback((floatId) => {
+    setNodes((nds) => nds.map((n) => (n.id === floatId ? { ...n, data: { ...n.data, pendingTargetVerse: null } } : n)));
+  }, []);
+
+  // Opens (or, if one's already open for this note, reuses it — one float
+  // per note, not a pile of duplicates) the muse's floating node, positioned
+  // just to the right of the note it's about. verseText/noteFunction aren't
+  // set here — they're injected live in renderNodes below, same as a chord
+  // progression's bpm, so the float always reads the note's current text
+  // instead of a snapshot from when it opened. initialTargetVerse comes from
+  // the Genius-style fragment selector (TextNoteNode) — null for the plain
+  // "ask the muse" entry point.
+  const handleOpenMuse = useCallback((note, initialTargetVerse = null) => {
     const floatId = `muse-float-${note.id}`;
     setNodes((nds) => {
-      if (nds.some((n) => n.id === floatId)) return nds;
+      if (nds.some((n) => n.id === floatId)) {
+        // Already open — a fresh selection still needs to land on it (the
+        // user picked a new fragment while the float was already sitting
+        // there), everything else about the float stays untouched.
+        if (!initialTargetVerse) return nds;
+        return nds.map((n) => (n.id === floatId ? { ...n, data: { ...n.data, pendingTargetVerse: initialTargetVerse } } : n));
+      }
       const sourceNode = nds.find((n) => n.id === note.id);
       const position = sourceNode
         ? { x: sourceNode.position.x + (sourceNode.width || 280) + 40, y: sourceNode.position.y }
@@ -488,10 +499,12 @@ export default function CanvasScreen({ state, onExit }) {
           lyricLanguage,
           lyricDialect,
           onClose: handleNodeDeleted,
+          pendingTargetVerse: initialTargetVerse,
+          onClearTargetVerse: () => handleClearMuseTarget(floatId),
         },
       }];
     });
-  }, [song?.id, state.session?.user?.id, museProfile, handleMuseProfileUpdated, lyricLanguage, lyricDialect, handleNodeDeleted]);
+  }, [song?.id, state.session?.user?.id, museProfile, handleMuseProfileUpdated, lyricLanguage, lyricDialect, handleNodeDeleted, handleClearMuseTarget]);
 
   // The black hole itself needs to show processing/success/error even if
   // its float panel is closed or off-screen — a status line inside the
@@ -612,7 +625,7 @@ export default function CanvasScreen({ state, onExit }) {
       return fedByThisTempo ? { ...n, data: { ...n.data, bpm } } : n;
     }));
     beginSave();
-    saveTempoBpm(tempoId, bpm).finally(endSave);
+    Promise.resolve(saveTempoBpm(tempoId, bpm)).finally(endSave);
   }, []);
 
   const tempoCallbacks = { onDeleted: handleNodeDeleted, onBpmChange: handleTempoBpmChange };
@@ -687,7 +700,7 @@ export default function CanvasScreen({ state, onExit }) {
       : node.type === 'tempoNode' ? saveTempoPosition(node.id, position, node.width, node.height)
       : node.type === 'blackHole' ? saveBaulNodePosition(node.id, position, node.width, node.height)
       : null;
-    if (save) { beginSave(); save.finally(endSave); }
+    if (save) { beginSave(); Promise.resolve(save).finally(endSave); }
   }, []);
 
   // A rejected connection attempt (two OUT ports or two IN ports — see
@@ -1003,18 +1016,24 @@ export default function CanvasScreen({ state, onExit }) {
         // as a chord progression's bpm — a float opened a while ago
         // shouldn't keep prompting off a stale snapshot of the verse.
         const sourceNote = textNotesById[n.data.sourceNoteId];
-        // Same main-thread edges the Output node already walks for the full
-        // song — here we only need the one hop on each side of this note,
-        // not the whole resolved path.
-        const { previous, next } = getAdjacentNotes(textNotes, mainThreadLinks, n.data.sourceNoteId);
+        // Same main-thread walk the Output node already uses for the full
+        // song — resolveMainThreadPath always resolves the WHOLE chain
+        // (it walks back to the true start first, then forward to the true
+        // end) regardless of which note's id you hand it, so the muse can
+        // answer about any connected note, not just its immediate neighbor.
+        const chain = resolveMainThreadPath(textNotes, mainThreadLinks, n.data.sourceNoteId);
+        const currentIndex = chain.findIndex((entry) => entry.note.id === n.data.sourceNoteId);
+        const songStructure = currentIndex === -1 ? { before: [], after: [] } : {
+          before: chain.slice(0, currentIndex).map((entry) => describeAdjacentNote(entry.note)),
+          after: chain.slice(currentIndex + 1).map((entry) => describeAdjacentNote(entry.note)),
+        };
         return {
           ...n,
           data: {
             ...n.data,
             verseText: sourceNote?.lines?.[0]?.text || '',
             noteFunction: sourceNote?.custom_label || sourceNote?.type || '',
-            previousNote: describeAdjacentNote(previous, 'previous'),
-            nextNote: describeAdjacentNote(next, 'next'),
+            songStructure,
             museProfile,
             lyricDna,
             lyricLanguage,

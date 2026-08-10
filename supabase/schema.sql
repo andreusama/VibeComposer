@@ -296,6 +296,11 @@ alter table sections
   add constraint sections_chord_progression_id_fkey
   foreign key (chord_progression_id) references chord_progressions(id) on delete set null;
 
+-- Mobile-only song-thread ordering/grouping — see migration_mobile_thread_index.sql
+-- for the full rationale. Desktop never reads or writes this column.
+alter table sections add column if not exists thread_index integer;
+create index if not exists idx_sections_thread_index on sections(song_id, thread_index);
+
 -- ─── note_links ─────────────────────────────────────────────────────────────────
 -- Generic, extensible connection between two notes. Only 'main-thread' exists
 -- today (marks which notes make up the clean-view lyric, and their order) —

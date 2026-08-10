@@ -4287,6 +4287,71 @@ body::before {
     align-items: center;
 }
 
+.thread-insert {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: var(--space-2) 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.thread-insert:disabled { cursor: default; }
+
+.thread-insert-dot {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    border: 1px dashed var(--graphite-soft);
+    color: var(--graphite-soft);
+    font-family: var(--font-sans);
+    font-size: var(--fs-label);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.15s, border-color 0.15s;
+}
+.thread-insert:hover .thread-insert-dot,
+.thread-insert:focus-visible .thread-insert-dot {
+    color: var(--thread);
+    border-color: var(--thread);
+}
+
+/* A slot with 2+ variants — horizontal scroll-snap carousel, classic
+   iPhone page dots below (current filled, rest hollow). No index/count
+   text anywhere here on purpose — thread_index is internal, not
+   user-facing (confirmed explicitly, not assumed). */
+.thread-slot { width: 100%; }
+.thread-slot-scroll {
+    display: flex;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    overscroll-behavior-x: contain;
+    /* Hides the native scrollbar without disabling scroll — this is a
+       swipeable card stack, not a document that happens to overflow. */
+    scrollbar-width: none;
+}
+.thread-slot-scroll::-webkit-scrollbar { display: none; }
+.thread-slot-page {
+    flex: 0 0 100%;
+    width: 100%;
+    scroll-snap-align: center;
+}
+.thread-slot-dots {
+    display: flex;
+    justify-content: center;
+    gap: 6px;
+    padding-top: var(--space-2);
+}
+.thread-slot-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--hairline);
+    transition: background-color 0.15s;
+}
+.thread-slot-dot.active { background: var(--ink); }
+
 .thread-card {
     width: 100%;
     background: var(--surface);
@@ -4344,35 +4409,6 @@ body::before {
     color: var(--muted);
 }
 
-.thread-insert {
-    background: none;
-    border: none;
-    cursor: pointer;
-    padding: var(--space-2) 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-.thread-insert:disabled { cursor: default; }
-
-.thread-insert-dot {
-    width: 26px;
-    height: 26px;
-    border-radius: 50%;
-    border: 1px dashed var(--graphite-soft);
-    color: var(--graphite-soft);
-    font-family: var(--font-sans);
-    font-size: var(--fs-label);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: color 0.15s, border-color 0.15s;
-}
-.thread-insert:hover .thread-insert-dot,
-.thread-insert:focus-visible .thread-insert-dot {
-    color: var(--thread);
-    border-color: var(--thread);
-}
 
 /* ─── Mobile Projects screen ──────────────────────────────────────────────────
    ROADMAP.md design ref #1, screen 01 — replaces home.js's desktop grid below
@@ -4525,9 +4561,26 @@ body::before {
     display: flex;
     align-items: flex-start;
     gap: var(--space-2-5);
-    transition: opacity 0.15s;
+    border-radius: var(--r-md);
+    padding: 2px var(--space-2);
+    margin: 0 calc(var(--space-2) * -1);
+    transition: opacity 0.15s, background-color 0.15s, box-shadow 0.15s;
 }
 .ne-row-dimmed { opacity: 0.25; }
+
+/* Live the instant the wake-word + comma/colon is typed (see
+   MUSE_COMMAND_RE) — the row visually becomes a message-to-the-muse
+   container instead of a lyric line: amber (the muse's color everywhere
+   else in this app), a real border so it reads as its own vessel, not
+   just tinted text. Auto-grows exactly like every other row (same
+   useLayoutEffect resize), so "ampliable" falls out for free. */
+.ne-row-muse {
+    background: var(--amber-soft);
+    box-shadow: inset 0 0 0 1px var(--amber);
+}
+.ne-row-muse .ne-line-input { color: var(--amber); font-style: italic; }
+.ne-row-muse .ne-line-input::placeholder { color: var(--amber); opacity: 0.6; }
+.ne-gutter-muse-icon { color: var(--amber); font-size: var(--fs-label); }
 
 .ne-gutter {
     flex-shrink: 0;
@@ -4566,31 +4619,6 @@ body::before {
 }
 .ne-line-input:focus { outline: none; }
 .ne-line-input::placeholder { color: var(--faint); }
-
-.ne-toolbar {
-    flex-shrink: 0;
-    display: flex;
-    border-top: 1px solid var(--hairline);
-    background: rgba(251, 249, 244, 0.92);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    padding: var(--space-2) 0 calc(var(--space-2) + env(safe-area-inset-bottom));
-}
-.ne-tool {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 2px;
-    background: none;
-    border: none;
-    font-family: var(--font-sans);
-    font-size: var(--fs-eyebrow);
-    color: var(--ink);
-    cursor: pointer;
-}
-.ne-tool:disabled { color: var(--graphite-soft); cursor: default; }
-.ne-tool-icon { font-size: var(--fs-h2); line-height: 1; }
 
 /* ─── Tools sheet (mobile) ────────────────────────────────────────────────────
    Folds in NoteSidePanel.jsx's variants/notes/history — see ROADMAP.md
@@ -4644,6 +4672,17 @@ body::before {
 }
 .ts-row-disclosure { cursor: pointer; }
 .ts-row-disclosure:disabled { opacity: 0.5; cursor: default; }
+
+/* The one genuinely new row in this sheet — a subtle fill so it reads as
+   deliberate, not an accidental leftover from the rows that got removed. */
+.ts-row-featured {
+    background: var(--thread-soft);
+    border-radius: var(--r-md);
+    padding: var(--space-3);
+    margin-bottom: var(--space-1);
+    border-bottom: none;
+}
+.ts-row-icon { font-size: var(--fs-body); flex-shrink: 0; }
 
 .ts-row-main { flex: 1; min-width: 0; }
 .ts-row-label { font-family: var(--font-sans); font-weight: 600; font-size: var(--fs-body); color: var(--ink); }
@@ -4778,3 +4817,337 @@ body::before {
 
 .ts-history-text { font-family: var(--font-body); font-size: var(--fs-body); color: var(--ink); }
 .ts-history-meta { display: flex; align-items: center; justify-content: space-between; margin-top: var(--space-2); font-family: var(--font-sans); font-size: var(--fs-eyebrow); color: var(--muted); }
+
+/* ─── Mobile muse: selection callout + popover ────────────────────────────────
+   ROADMAP.md Phase 2 — built against explicit mobile-HCI directives: 48dp
+   minimum touch targets with 8px gaps (Fitts's Law), popovers docked in the
+   lower 35-40% of the screen (thumb zone, Hoober 2013), suggestions capped
+   at 3 (Hick-Hyman). `mp-` prefix here means "muse popover", not the old
+   "mobile projects" usage earlier in this file — scoped by context, no
+   actual class collision since those are all `mp-row`/`mp-thumb`/etc. */
+
+.sel-callout {
+    position: fixed;
+    z-index: 55;
+    display: flex;
+    gap: 8px;
+    background: var(--ink);
+    border-radius: var(--r-md);
+    padding: 6px;
+    box-shadow: var(--sh-3);
+}
+.sel-callout-btn {
+    min-height: 48px;
+    min-width: 48px;
+    padding: 0 var(--space-3);
+    background: none;
+    border: none;
+    color: var(--paper);
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+    border-radius: var(--r-sm);
+}
+.sel-callout-btn:active { background: rgba(255, 255, 255, 0.15); }
+
+.mp-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    background: rgba(29, 28, 26, 0.35);
+    display: flex;
+    align-items: flex-end;
+}
+
+/* Docked to the lower portion of the screen on purpose (not centered, not
+   full-height) — the "natural thumb zone" directive. max-height caps it
+   well under the full 80vh a modal sheet (like ToolsSheet) would use;
+   content that needs more room scrolls inside .mp-popover itself. */
+.mp-popover {
+    width: 100%;
+    max-height: 42vh;
+    overflow-y: auto;
+    background: var(--bg);
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+    box-shadow: var(--sh-3);
+    padding: var(--space-3) var(--space-4) calc(var(--space-4) + env(safe-area-inset-bottom));
+}
+
+.mp-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding-bottom: var(--space-2);
+    margin-bottom: var(--space-2);
+    border-bottom: 1px solid var(--hairline);
+}
+.mp-head-target {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--font-body);
+    font-style: italic;
+    font-size: var(--fs-secondary);
+    color: var(--muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.mp-close {
+    min-width: 48px;
+    min-height: 48px;
+    background: none;
+    border: none;
+    color: var(--graphite);
+    font-size: var(--fs-body);
+    cursor: pointer;
+}
+
+.mp-loading { display: flex; justify-content: center; padding: var(--space-6) 0; }
+.mp-spinner {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 2px solid var(--hairline);
+    border-top-color: var(--thread);
+    animation: mp-spin 0.7s linear infinite;
+}
+@keyframes mp-spin { to { transform: rotate(360deg); } }
+.mp-error { color: var(--rose); font-family: var(--font-sans); font-size: var(--fs-secondary); padding: var(--space-3) 0; }
+
+/* SOCRATIC — one question, 2-3 thumb chips (capped at 3 regardless of how
+   many the model returns, per Hick-Hyman: never present more choices than
+   the user can scan at a glance). */
+.mp-question {
+    font-family: var(--font-body);
+    font-size: var(--fs-body);
+    color: var(--ink);
+    margin-bottom: var(--space-3);
+}
+.mp-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.mp-chip {
+    min-height: 48px;
+    padding: 0 var(--space-3-5);
+    background: var(--thread-soft);
+    color: var(--thread);
+    border: none;
+    border-radius: var(--radius-pill);
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: var(--fs-secondary);
+    cursor: pointer;
+}
+
+/* SURGEON/ARCHITECT — up to 3 stacked cards (selectDiverseSuggestions
+   already caps the pool server-side; .slice(0,3) here is a defensive
+   second cap, not the primary one). Swipe-left discards + fetches fresh. */
+.mp-cards { display: flex; flex-direction: column; gap: var(--space-3); }
+.mp-card {
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    padding: var(--space-3);
+    touch-action: pan-y;
+    transition: transform 0.15s, opacity 0.15s;
+}
+.mp-card-type {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--thread);
+    background: var(--thread-soft);
+    border-radius: var(--radius-pill);
+    padding: 2px 8px;
+    margin-bottom: var(--space-1-5);
+}
+.mp-card-text { font-family: var(--font-body); font-size: var(--fs-body); color: var(--ink); line-height: 1.4; }
+.mp-card-actions { display: flex; gap: 8px; margin-top: var(--space-2-5); }
+.mp-card-btn {
+    flex: 1;
+    min-height: 48px;
+    border-radius: var(--r-sm);
+    border: 1px solid var(--hairline);
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: var(--fs-secondary);
+    cursor: pointer;
+}
+.mp-card-btn-primary { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+
+/* WORD_BANK — horizontal-scrolling pill rows, one per syllable-count group.
+   overscroll-behavior-x contains the scroll so it doesn't chain into the
+   popover's own vertical scroll when a row is dragged past its edge. */
+.mp-wordbank { display: flex; flex-direction: column; gap: var(--space-3); }
+.mp-wb-label {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin-bottom: var(--space-1-5);
+}
+.mp-wb-row {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    padding-bottom: 2px;
+}
+.mp-wb-pill {
+    flex-shrink: 0;
+    min-height: 48px;
+    padding: 0 var(--space-3);
+    display: flex;
+    align-items: center;
+    background: var(--amber-soft);
+    color: var(--amber);
+    border: none;
+    border-radius: var(--radius-pill);
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: var(--fs-secondary);
+    white-space: nowrap;
+    cursor: pointer;
+}
+.mp-wb-phrase { background: var(--bg-deep); color: var(--ink); }
+
+/* ─── FAB menu (shared) ────────────────────────────────────────────────────────
+   One FAB that expands into pills instead of a fixed icon bar (note editor)
+   or scattered insert affordances (song thread) — src/mobile/FabMenu.jsx.
+   Positioned absolutely, same containing block as .mobile-fab
+   (.mobile-screen's position:fixed). */
+
+.fab-menu-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 58;
+    background: rgba(29, 28, 26, 0.35);
+}
+
+.fab-menu-btn {
+    position: absolute;
+    right: calc(var(--space-5) + env(safe-area-inset-right));
+    bottom: calc(var(--space-5) + env(safe-area-inset-bottom));
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--paper);
+    border: none;
+    font-size: var(--fs-h2);
+    line-height: 1;
+    box-shadow: var(--sh-3);
+    cursor: pointer;
+    z-index: 62;
+    transition: transform 0.2s;
+}
+/* Same "+" glyph, just rotated — reads as a close "×" without swapping
+   icons or adding a second element to keep in sync. */
+.fab-menu-btn.open { transform: rotate(45deg); }
+
+.fab-menu-pills {
+    position: absolute;
+    right: calc(var(--space-5) + env(safe-area-inset-right));
+    bottom: calc(84px + env(safe-area-inset-bottom));
+    z-index: 61;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: var(--space-3);
+}
+
+.fab-menu-pill {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-height: 48px;
+    padding: 0 var(--space-3-5);
+    border-radius: var(--radius-pill);
+    border: none;
+    background: var(--surface);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: var(--fs-secondary);
+    white-space: nowrap;
+    box-shadow: var(--sh-2);
+    cursor: pointer;
+    animation: fab-pill-in 0.22s ease-out backwards;
+}
+.fab-menu-pill:disabled { opacity: 0.55; cursor: default; }
+
+/* Same dark-void identity as the desktop Baúl/black-hole node
+   (.baul-blackhole's radial gradient, var(--amber) sparkle) — a golden
+   spark on black reads as the same feature wherever it shows up. */
+.fab-menu-pill-dark {
+    background: linear-gradient(180deg, #242320, #0e0d0b);
+    color: #fff;
+}
+.fab-menu-pill-dark .fab-menu-pill-icon { color: var(--amber); }
+
+/* Small colored circle behind a light pill's icon — Tools (indigo/chord,
+   matches the desktop chord-progression identity) and Variant (thread
+   green, matches the main-thread edge color) each get their own accent so
+   the three pills stay visually distinct at a glance, not just by label. */
+.fab-menu-pill-icon-chord,
+.fab-menu-pill-icon-thread {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+}
+.fab-menu-pill-icon-chord { background: var(--chord-soft); color: var(--chord); }
+.fab-menu-pill-icon-thread { background: var(--thread-soft); color: var(--thread); }
+
+@keyframes fab-pill-in {
+    from { opacity: 0; transform: translateY(8px) scale(0.9); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ─── Variant choice sheet ────────────────────────────────────────────────────
+   Reuses the .ts-backdrop/.ts-sheet/.ts-grabber shell (ToolsSheet) — its
+   own two big tappable options underneath. */
+
+.vc-hint {
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    color: var(--muted);
+    margin-bottom: var(--space-3);
+}
+
+.vc-option {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3);
+    margin-bottom: var(--space-2-5);
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    text-align: left;
+    cursor: pointer;
+}
+.vc-option-icon {
+    flex-shrink: 0;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: var(--thread-soft);
+    color: var(--thread);
+    font-size: var(--fs-body);
+}
+.vc-option-body { display: flex; flex-direction: column; }
+.vc-option-title { font-family: var(--font-sans); font-weight: 600; font-size: var(--fs-body); color: var(--ink); }
+.vc-option-sub { font-family: var(--font-sans); font-size: var(--fs-secondary); color: var(--muted); margin-top: 2px; }

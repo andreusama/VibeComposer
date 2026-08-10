@@ -308,7 +308,7 @@ eso bastara.`;
 // Everything that's different on every single call, by definition — never
 // worth caching, so it's kept out of the static block entirely rather than
 // invalidating that block's cache on every turn.
-function buildDynamicMuseContext({verseText, noteFunction, conversation, lang, dialect, songStructure, targetVerse}) {
+function buildDynamicMuseContext({verseText, noteFunction, conversation, lang, dialect, songStructure, targetVerse, forceMode}) {
     // Bounded on purpose: an unbounded transcript would make input tokens
     // (and thus cost/latency) grow with every turn of a long conversation on
     // the same line. Three turns is enough for the model to track what it
@@ -317,6 +317,14 @@ function buildDynamicMuseContext({verseText, noteFunction, conversation, lang, d
     // than that.
     const recentConversation = conversation.slice(-3);
     const targetVerseBlock = describeTargetVerse(targetVerse);
+    // A dedicated UI element (the mobile "Rhyme" pill) already unambiguously
+    // signals which mode this turn needs — no reason to leave that to the
+    // model's own free-text interpretation the way an open-ended message
+    // has to. Placed right before the final reminder so it's the last thing
+    // read, closest to where the model commits to its action_type.
+    const forceModeBlock = forceMode
+        ? `\nINSTRUCCIÓN OBLIGATORIA PARA ESTE TURNO: responde EXCLUSIVAMENTE en modo ${forceMode}, sin excepción, independientemente de cómo interpretarías el mensaje del usuario en otro contexto.\n`
+        : '';
     return `Nota actual (${noteFunction}), línea por línea física — usa estos
 recuentos de sílabas y claves de rima tal cual, no los recalcules
 (consonante = coincide todo desde la vocal tónica; asonante = solo las
@@ -327,7 +335,7 @@ ${targetVerseBlock ? targetVerseBlock + '\n\n' : ''}${describeSongStructure(song
 
 Conversación hasta ahora sobre esta línea:
 ${formatConversation(recentConversation)}
-
+${forceModeBlock}
 Recuerda: responde solo con el JSON descrito arriba, nada más.`;
 }
 
@@ -586,6 +594,7 @@ export function applyMuseVerification(parsed, {verseText, targetVerse, lang = 'e
  *   songStructure?: {before: {type: string, text: string}[],
  *   after: {type: string, text: string}[]},
  *   targetVerse?: {text: string, before: string, after: string}|null,
+ *   forceMode?: 'SURGEON'|'ARCHITECT'|'SOCRATIC'|'WORD_BANK'|null,
  *   debug?: boolean}} args
  * @returns {Promise<{action_type: string, message: string,
  *   suggestions: {text: string, type: string|null, angle: string|null}[],
@@ -605,6 +614,7 @@ export async function askMuse({
                                   dialect = 'central',
                                   songStructure,
                                   targetVerse = null,
+                                  forceMode = null,
                                   debug = false,
                               }) {
     // Built as named strings, not inline in the array below, for two
@@ -612,7 +622,7 @@ export async function askMuse({
     // debug mode wants to show them verbatim — neither should require
     // re-deriving what was actually sent.
     const staticText = buildStaticMuseInstructions({lyricDna, museProfile, lang, dialect});
-    const dynamicText = buildDynamicMuseContext({verseText, noteFunction, conversation, lang, dialect, songStructure, targetVerse});
+    const dynamicText = buildDynamicMuseContext({verseText, noteFunction, conversation, lang, dialect, songStructure, targetVerse, forceMode});
 
     // Two content blocks, not one string: cache_control can only mark a
     // block boundary, so the stable instructions (which we want Anthropic to

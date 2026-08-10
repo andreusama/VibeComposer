@@ -57,18 +57,29 @@ export async function loadCanvasData(songId) {
   return { notes, progressions: progressions || [], links: links || [], error: null };
 }
 
-export async function createNote(songId, { x, y }) {
+// `threadIndex`/`text` are mobile-only extras (see migration_mobile_thread_index.sql)
+// — desktop callers just omit them and get the exact same behavior as
+// before. `text` lets a variant start with a copy of its origin note's
+// text instead of always creating blank.
+export async function createNote(songId, { x, y }, { threadIndex, text = '', type = 'verse', customLabel } = {}) {
   const { data: section, error } = await supabase
     .from('sections')
-    .insert({ song_id: songId, type: 'verse', canvas_x: x, canvas_y: y })
+    .insert({
+      song_id: songId, type, custom_label: customLabel ?? null, canvas_x: x, canvas_y: y,
+      ...(threadIndex != null ? { thread_index: threadIndex } : {}),
+    })
     .select().single();
   if (error) return { error };
 
   const { data: line, error: lineError } = await supabase
-    .from('lines').insert({ section_id: section.id, position: 0, text: '' }).select().single();
+    .from('lines').insert({ section_id: section.id, position: 0, text }).select().single();
   if (lineError) return { error: lineError };
 
   return { note: { ...section, lines: [line] } };
+}
+
+export async function saveNoteThreadIndex(noteId, threadIndex) {
+  return supabase.from('sections').update({ thread_index: threadIndex }).eq('id', noteId);
 }
 
 export async function deleteNote(noteId) {
@@ -358,6 +369,18 @@ export async function promoteVariant(noteId, lineId, variant, currentText) {
   if (delError) return { error: delError };
 
   return supabase.from('lines').update({ text: variant.text }).eq('id', lineId);
+}
+
+// Mobile's Tools drawer only ever wants annotations, never the legacy
+// variants/history that loadNoteDetail bundles alongside them for
+// desktop's NoteSidePanel — a dedicated, lighter query instead of pulling
+// (and silently querying) two tables the mobile UI no longer exposes.
+// Whole-verse comments are annotations with null start/end_offset;
+// selection-anchored comments (not built yet) are the same table with
+// real offsets — both come back from this one call, callers filter by
+// offset presence for whichever they need.
+export async function loadAnnotations(lineId) {
+  return supabase.from('annotations').select('*').eq('line_id', lineId).order('created_at');
 }
 
 export async function addAnnotation(lineId, authorId, body, category) {

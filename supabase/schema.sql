@@ -637,3 +637,39 @@ create policy baul_nodes_owner on baul_nodes
 -- documents), one evolving object, no register split. Never appended to —
 -- each processBaulInput call returns the full fused replacement.
 alter table songs add column if not exists lyric_dna jsonb not null default '{}'::jsonb;
+
+-- Append-only log of individual baúl absorptions — deliberately separate
+-- from lyric_dna above (which stays a single fused, never-appended-to
+-- blob). This table exists ONLY to power the dev-only Muse Eye panel's
+-- "baúl pipeline" tab (raw input -> what Claude extracted from THAT
+-- specific input -> tags), i.e. per-entry provenance. Nothing in the real
+-- product reads this — the "black box" decision (BaulFloatNode never shows
+-- WHAT was absorbed, only THAT it was) stands for every real user-facing
+-- surface; this table is the one deliberate, dev-only exception to it.
+create table if not exists baul_entries (
+  id                 uuid primary key default gen_random_uuid(),
+  song_id            uuid not null references songs(id) on delete cascade,
+  input_type         text not null check (input_type in ('text', 'audio_transcript', 'notebook_image', 'document')),
+  raw_preview        text not null default '',
+  generated_summary  text not null default '',
+  tags               text[] not null default '{}',
+  -- Real per-call telemetry, same spirit as askMuse's _debug.latencyMs —
+  -- the extraction system prompt itself is a fixed constant (see
+  -- baulProcessor.js's BAUL_SYSTEM_PROMPT), so it's shown once in the UI
+  -- rather than duplicated per row; latency is the one thing that's
+  -- actually per-call and worth persisting.
+  latency_ms         integer,
+  created_at         timestamptz not null default now()
+);
+
+create index if not exists idx_baul_entries_song on baul_entries(song_id, created_at desc);
+
+alter table baul_entries enable row level security;
+
+drop policy if exists baul_entries_owner on baul_entries;
+create policy baul_entries_owner on baul_entries
+  for all using (
+    exists (select 1 from songs s where s.id = baul_entries.song_id and s.user_id = auth.uid())
+  ) with check (
+    exists (select 1 from songs s where s.id = baul_entries.song_id and s.user_id = auth.uid())
+  );

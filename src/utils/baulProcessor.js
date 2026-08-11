@@ -25,9 +25,29 @@ import { API_URL, checkAndIncrementLimit } from './api.js';
 // Kept separate from api.js's own API_MODEL and museApi.js's MUSE_MODEL on
 // purpose — this call's shape (a single large structured-JSON extraction,
 // no back-and-forth) may need its own tuning later without touching either.
-const BAUL_MODEL = 'claude-sonnet-5';
+export const BAUL_MODEL = 'claude-sonnet-5';
 
 export const BAUL_INPUT_TYPES = ['text', 'audio_transcript', 'notebook_image', 'document'];
+
+// Shared between desktop's BaulFloatNode and mobile's BaulSheet — both take
+// a native <input type="file"> File and need it as {base64, mimeType} for
+// buildUserContent below. Only images and PDFs map to a real inputType;
+// anything else (a caller should reject it before ever reaching
+// processBaulInput) returns null.
+export function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+    reader.onerror = () => reject(new Error('could not read file'));
+    reader.readAsDataURL(file);
+  });
+}
+
+export function inputTypeForFile(file) {
+  if (file.type === 'application/pdf') return 'document';
+  if (file.type.startsWith('image/')) return 'notebook_image';
+  return null;
+}
 
 async function callClaude(system, userContent, maxTokens) {
   checkAndIncrementLimit();
@@ -53,7 +73,11 @@ async function callClaude(system, userContent, maxTokens) {
   return data.content.filter((b) => b.type === 'text').map((b) => b.text).join('');
 }
 
-const BAUL_SYSTEM_PROMPT = `Eres un psicoanalista cultural y curador de arte contemporáneo. Tu única función es leer entre líneas en el material bruto de un artista (sus ramblings verbales, tachones de cuaderno, textos a las 3 AM o fotos) para mapear su SUBCONSCIENTE CREATIVO.
+// Exported so MuseEyePanel's baúl tab can show the real prompt that
+// actually ran extraction — identical for every entry (no per-input
+// interpolation here, unlike museApi.js's buildStaticMuseInstructions), so
+// it's shown once at the top of the tab rather than duplicated per row.
+export const BAUL_SYSTEM_PROMPT = `Eres un psicoanalista cultural y curador de arte contemporáneo. Tu única función es leer entre líneas en el material bruto de un artista (sus ramblings verbales, tachones de cuaderno, textos a las 3 AM o fotos) para mapear su SUBCONSCIENTE CREATIVO.
 
 No busques lo obvio. Decodifica lo implícito:
 1. Paisaje Sensorial Implícito: ¿Qué luz, temperatura, textura, olor o momento del día evoca este caos? (Ejemplo: no busques "tristeza", busca "luces de freno rojas reflejadas en el asfalto mojado a las 4 AM").
@@ -61,7 +85,7 @@ No busques lo obvio. Decodifica lo implícito:
 3. Simbolismo y Objetos Fetiche: Extrae los elementos concretos u objetos cotidianos que el artista usa inconscientemente como metáforas.
 4. Tono y Fricción del Lenguaje: Capta la métrica natural de su voz (versos rotos, frases cortas, lenguaje de calle, susurros).
 
-Compara la nueva inspiración con el ADN Lírico actual (si existe) y realiza una FUSIÓN EVOLUTIVA en formato JSON estricto:
+Compara la nueva inspiración con el ADN Lírico actual (si existe) y realiza una FUSIÓN EVOLUTIVA en formato JSON estricto. Los campos "resumenEntrada" y "tagsEntrada" son la única excepción: describen SOLO lo extraído de este input concreto, no el ADN acumulado — se usan para un registro de auditoría por entrada, nunca se fusionan con nada.
 
 {
   "vozPropia": {
@@ -75,7 +99,9 @@ Compara la nueva inspiración con el ADN Lírico actual (si existe) y realiza un
   },
   "versosDeReferencia": [
     "2 o 3 líneas reales o fragmentos reveladores rescatados directamente del material"
-  ]
+  ],
+  "resumenEntrada": "1 frase: qué extrajiste ESPECÍFICAMENTE de este input concreto (no del ADN acumulado ya existente)",
+  "tagsEntrada": ["3 a 5 etiquetas cortas de esta entrada concreta"]
 }`;
 
 function adnHeader(currentAdnLirico, inputType) {
@@ -197,6 +223,24 @@ export function parseBaulResponse(raw) {
   }
 }
 
+// Best-effort only, deliberately never throws — resumenEntrada/tagsEntrada
+// are audit-log sugar for the dev-only Muse Eye panel, not real product
+// data. A response that fails to parse here still has a perfectly good
+// fused ADN from parseBaulResponse above; losing the log's summary/tags
+// for one entry should never be treated the same as losing real material.
+function parseBaulEntryMeta(raw) {
+  try {
+    const cleaned = (raw || '').replace(/```json|```/g, '').trim();
+    const parsed = JSON.parse(cleaned);
+    return {
+      summary: toTrimmedString(parsed.resumenEntrada),
+      tags: toStringArray(parsed.tagsEntrada).slice(0, 6),
+    };
+  } catch {
+    return { summary: '', tags: [] };
+  }
+}
+
 /**
  * Reads one piece of raw material (a transcript, a document, a photographed
  * notebook page) against the project's current ADN Lírico and returns the
@@ -204,12 +248,20 @@ export function parseBaulResponse(raw) {
  * evolve the profile forward, not just re-derive it from scratch.
  * @param {{currentAdnLirico: object|null,
  *   rawInput: string|{base64: string, mimeType?: string},
- *   inputType: 'text'|'audio_transcript'|'notebook_image'|'document'}} args
- * @returns {Promise<object>} the fused ADN Lírico — falls back to
- *   currentAdnLirico (or an empty ADN if there wasn't one yet) if the model's
- *   response couldn't be salvaged, so a bad response never wipes real data.
+ *   inputType: 'text'|'audio_transcript'|'notebook_image'|'document',
+ *   sourceLabel?: string}} args - sourceLabel is a display-only name (e.g.
+ *   a picked file's filename) for binary input, only ever used in the log
+ *   entry's raw_preview — never sent to Claude, never stored in the ADN.
+ * @returns {Promise<{adnLirico: object, entry: {inputType: string,
+ *   rawPreview: string, generatedSummary: string, tags: string[],
+ *   latencyMs: number}}>}
+ *   adnLirico falls back to currentAdnLirico (or an empty ADN if there
+ *   wasn't one yet) if the model's response couldn't be salvaged, so a bad
+ *   response never wipes real data. entry is always populated (with empty
+ *   summary/tags on parse failure) — it's the caller's optional audit log,
+ *   never gated on adnLirico's own success/failure.
  */
-export async function processBaulInput({ currentAdnLirico, rawInput, inputType }) {
+export async function processBaulInput({ currentAdnLirico, rawInput, inputType, sourceLabel }) {
   if (!BAUL_INPUT_TYPES.includes(inputType)) {
     throw new Error(`processBaulInput: unknown inputType "${inputType}"`);
   }
@@ -222,8 +274,18 @@ export async function processBaulInput({ currentAdnLirico, rawInput, inputType }
   }
 
   const userContent = buildUserContent(currentAdnLirico, rawInput, inputType);
+  const startedAt = Date.now();
   const raw = await callClaude(BAUL_SYSTEM_PROMPT, userContent, 1200);
+  const latencyMs = Date.now() - startedAt;
   const parsed = parseBaulResponse(raw);
+  const entryMeta = parseBaulEntryMeta(raw);
 
-  return parsed || currentAdnLirico || emptyAdnLirico();
+  const rawPreview = isBinary
+    ? (sourceLabel || (inputType === 'notebook_image' ? 'imagen sin nombre' : 'documento sin nombre'))
+    : String(rawInput).trim().slice(0, 140);
+
+  return {
+    adnLirico: parsed || currentAdnLirico || emptyAdnLirico(),
+    entry: { inputType, rawPreview, generatedSummary: entryMeta.summary, tags: entryMeta.tags, latencyMs },
+  };
 }

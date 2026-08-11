@@ -3784,112 +3784,292 @@ body::before {
     color: var(--thread);
 }
 
-/* ─── Muse debug panel — dev-only observability (see the 🔧 toggle in
-   MuseFloatNode.jsx). Deliberately plain/utilitarian, not styled to blend
-   in with the rest of the card, so it always reads as "developer tooling,"
-   never as part of the actual product surface. ──────────────────────────── */
+/* ─── Muse Eye panel — dev-only observability (src/canvas/MuseEyePanel.jsx,
+   the 🔧 toggle in MuseFloatNode.jsx). Complete rewrite, replacing the old
+   .muse-debug-* panel — "instrument of control" (Bloomberg Terminal /
+   mission-control) rather than a bright game-HUD bar. Own near-black scale
+   scoped under .muse-eye-panel only, reusing --chord/--thread/--amber for
+   the 3 real weight categories + the 4 mode colors (SURGEON gets one new
+   scoped warn/orange, distinct from --rose which stays reserved for actual
+   errors elsewhere in the app). Deliberately never blends into the node
+   card around it — always reads as instrumentation, not product. ───────── */
 
-.muse-debug-panel {
+.muse-eye-panel {
+    --eye-bg: #0a0a0b;
+    --eye-panel-2: #17171a;
+    --eye-line: #232326;
+    --eye-line-soft: #1b1b1e;
+    --eye-text: #d4d4d8;
+    --eye-text-dim: #86868f;
+    --eye-text-faint: #4b4b52;
+    --eye-warn: #c2673f;
+    --eye-ok: #4d9a72;
     margin-top: var(--space-3);
-    padding: var(--space-2-5);
-    background: var(--paper-deep);
-    border: 1px dashed var(--graphite-soft);
+    background: var(--eye-bg);
+    border: 1px solid var(--eye-line);
     border-radius: var(--r-md);
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-}
-
-.muse-debug-bar {
-    display: flex;
-    width: 100%;
-    height: 8px;
-    border-radius: 999px;
     overflow: hidden;
-    background: var(--hairline);
-}
-.muse-debug-bar-segment { height: 100%; }
-
-.muse-debug-legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-2) var(--space-3);
-}
-.muse-debug-legend-item {
-    display: flex;
-    align-items: center;
-    gap: var(--space-1);
-    font-family: var(--font-mono);
-    font-size: 10px;
-    color: var(--graphite);
-}
-.muse-debug-legend-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    flex-shrink: 0;
-}
-
-.muse-debug-metrics {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-1-5);
-}
-.muse-debug-metric {
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-    padding: var(--space-1) var(--space-1-5);
-    background: #fff;
-    border: 1px solid var(--hairline);
-    border-radius: var(--r-sm);
-    min-width: 64px;
-}
-.muse-debug-metric-label {
-    font-family: var(--font-mono);
-    font-size: 8.5px;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    color: var(--graphite-soft);
-}
-.muse-debug-metric-value {
-    font-family: var(--font-mono);
     font-size: 11px;
-    color: var(--ink);
+    color: var(--eye-text);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
 }
+.muse-eye-panel * { box-sizing: border-box; }
 
-.muse-debug-tabs {
-    display: flex;
-    gap: var(--space-1);
-    border-bottom: 1px solid var(--hairline);
-}
-.muse-debug-tab {
-    font-family: var(--font-mono);
-    font-size: 10px;
-    color: var(--graphite-soft);
-    background: none;
-    border: none;
-    border-bottom: 2px solid transparent;
-    padding: var(--space-1) var(--space-1-5);
-    cursor: pointer;
-}
-.muse-debug-tab:hover { color: var(--ink); }
-.muse-debug-tab.active { color: var(--ink); border-bottom-color: var(--amber); }
+/* Two families, never mixed on the same element: eye-badge-* sets `color`
+   (used where the element has visible text/an icon glyph — the mode badge,
+   the pipeline type icon), eye-fill-* sets `background` (bare swatches —
+   bar segments, legend/readout dots, no text content). */
+.eye-badge-chord { color: var(--chord); }
+.eye-badge-thread { color: var(--thread); }
+.eye-badge-amber { color: var(--amber); }
+.eye-badge-warn { color: var(--eye-warn); }
+.eye-status-row { display: flex; flex-wrap: wrap; gap: 6px; padding-bottom: 6px; }
+.eye-badge { font-family: var(--font-mono); font-size: 9.5px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--eye-line); color: var(--eye-text-dim); background: var(--eye-panel-2); }
+.eye-badge-graphite { color: var(--eye-text-dim); }
+.eye-fill-chord { background: var(--chord); }
+.eye-fill-thread { background: var(--thread); }
+.eye-fill-amber { background: var(--amber); }
+.eye-fill-warn { background: var(--eye-warn); }
+.eye-fill-graphite { background: var(--eye-text-dim); }
 
-.muse-debug-code {
-    max-height: 220px;
-    overflow: auto;
-    margin: 0;
-    padding: var(--space-2);
-    background: var(--ink);
-    color: #E8E4D8;
-    border-radius: var(--r-sm);
-    font-family: var(--font-mono);
-    font-size: 10.5px;
-    line-height: 1.5;
-    white-space: pre-wrap;
-    word-break: break-word;
+.eye-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 9px 12px; border-bottom: 1px solid var(--eye-line);
+    background: linear-gradient(180deg, #131316, #0e0e10);
 }
+.eye-head-left { display: flex; align-items: center; gap: 7px; }
+.eye-dot-wrap {
+    width: 14px; height: 14px; border-radius: 50%;
+    border: 1.5px solid var(--eye-text-dim);
+    display: flex; align-items: center; justify-content: center;
+}
+.eye-dot-pulse { width: 4px; height: 4px; border-radius: 50%; background: var(--eye-ok); animation: eye-pulse 2.4s ease-in-out infinite; }
+@keyframes eye-pulse { 0%, 100% { opacity: 0.5; transform: scale(1); } 50% { opacity: 1; transform: scale(1.3); } }
+.eye-title { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--eye-text); }
+.eye-head-right { display: flex; align-items: center; gap: 10px; font-family: var(--font-mono); font-size: 10px; color: var(--eye-text-faint); }
+.eye-head-right b { color: var(--eye-text-dim); font-weight: 600; }
+
+.eye-readout { padding: 12px; border-bottom: 1px solid var(--eye-line-soft); }
+.eye-readout-bar { display: flex; height: 2px; border-radius: 1px; overflow: hidden; background: var(--eye-line); margin-bottom: 10px; }
+.eye-readout-seg { height: 100%; }
+.eye-readout-rows { display: flex; flex-direction: column; gap: 5px; }
+.eye-readout-row { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+.eye-readout-dot { width: 5px; height: 5px; border-radius: 1px; flex-shrink: 0; }
+.eye-readout-label { color: var(--eye-text-dim); flex: 1; }
+.eye-readout-val { font-family: var(--font-mono); font-size: 10.5px; color: var(--eye-text-faint); }
+.eye-readout-val b { color: var(--eye-text); font-weight: 500; }
+
+.eye-metrics { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid var(--eye-line-soft); }
+.eye-metric { padding: 9px 10px; border-right: 1px solid var(--eye-line-soft); min-width: 0; }
+.eye-metric:last-child { border-right: none; }
+.eye-metric-label { font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--eye-text-faint); margin-bottom: 3px; }
+.eye-metric-value { font-family: var(--font-mono); font-size: 12px; color: var(--eye-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.eye-status-ok { color: var(--eye-ok); }
+.eye-status-warn { color: var(--eye-warn); }
+
+.eye-tabs { display: flex; border-bottom: 1px solid var(--eye-line); }
+.eye-tab {
+    flex: 1; text-align: center; padding: 8px 4px; font-family: var(--font-mono); font-size: 9.5px;
+    letter-spacing: 0.04em; text-transform: uppercase; color: var(--eye-text-faint); cursor: pointer;
+    background: none; border: none; border-bottom: 1.5px solid transparent;
+}
+.eye-tab.active { color: var(--eye-text); border-bottom-color: var(--chord); }
+.eye-tab-count { font-size: 8.5px; color: var(--eye-text-faint); margin-left: 3px; }
+
+.eye-code {
+    font-family: var(--font-mono); font-size: 10.8px; line-height: 1.65; color: var(--eye-text-dim);
+    padding: 12px; margin: 0; white-space: pre-wrap; max-height: 220px; overflow-y: auto;
+}
+.eye-code-k { color: #7c93d8; }
+.eye-code-s { color: var(--amber); }
+
+.eye-musa-active-row { display: flex; align-items: center; gap: 9px; padding: 12px; border-bottom: 1px solid var(--eye-line-soft); flex-wrap: wrap; }
+.eye-active-badge {
+    display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;
+    letter-spacing: 0.04em; text-transform: uppercase; padding: 4px 10px; border-radius: 4px; border: 1px solid currentColor; background: color-mix(in srgb, currentColor 10%, transparent);
+}
+.eye-musa-active-desc { font-size: 10.5px; color: var(--eye-text-faint); }
+
+.eye-mode-legend { display: flex; flex-direction: column; border-bottom: 1px solid var(--eye-line-soft); }
+.eye-legend-row { display: flex; align-items: center; gap: 9px; padding: 7px 12px; border-top: 1px solid var(--eye-line-soft); }
+.eye-legend-row:first-child { border-top: none; }
+.eye-legend-row.current { background: var(--eye-panel-2); }
+.eye-legend-dot { width: 7px; height: 7px; border-radius: 2px; flex-shrink: 0; }
+.eye-legend-name { font-family: var(--font-mono); font-size: 10.5px; color: var(--eye-text); width: 64px; flex-shrink: 0; }
+.eye-legend-desc { font-size: 10.5px; color: var(--eye-text-faint); flex: 1; }
+.eye-legend-tag { font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--eye-text); background: var(--eye-line); padding: 2px 5px; border-radius: 3px; }
+
+.eye-ctx { padding: 12px; border-bottom: 1px solid var(--eye-line-soft); }
+.eye-ctx-label { font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--eye-text-faint); margin: 10px 0 7px; }
+.eye-ctx-label:first-child { margin-top: 0; }
+.eye-ctx-label-n { color: var(--amber); }
+.eye-ctx-line { display: flex; align-items: baseline; gap: 8px; padding: 3px 0; font-size: 11px; }
+.eye-ctx-line .eye-ctx-tag { font-family: var(--font-mono); font-size: 9px; color: var(--eye-text-faint); width: 26px; flex-shrink: 0; }
+.eye-ctx-line.n .eye-ctx-tag { color: var(--amber); }
+.eye-ctx-line .eye-ctx-txt { color: var(--eye-text-dim); flex: 1; }
+.eye-ctx-line.n .eye-ctx-txt { color: var(--eye-text); font-weight: 500; }
+.eye-ctx-line .eye-ctx-meta { font-family: var(--font-mono); font-size: 9.5px; color: var(--eye-text-faint); flex-shrink: 0; }
+
+.eye-output { padding: 0 12px 12px; }
+.eye-output-label { font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--eye-text-faint); margin: 10px 0 7px; }
+.eye-suggestion { display: flex; align-items: flex-start; gap: 8px; padding: 6px 0; font-size: 11px; color: var(--eye-text-dim); border-top: 1px solid var(--eye-line-soft); }
+.eye-suggestion:first-child { border-top: none; }
+.eye-suggestion .eye-idx { font-family: var(--font-mono); color: var(--eye-text-faint); flex-shrink: 0; }
+
+.eye-funnel { padding: 10px 12px; border-top: 1px solid var(--eye-line-soft); }
+.eye-funnel-title { font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--eye-text-faint); margin-bottom: 6px; }
+.eye-funnel-row { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 10.5px; color: var(--eye-text-dim); padding: 2px 0; }
+.eye-funnel-count { color: var(--amber); font-weight: 600; }
+
+.eye-empty, .eye-empty-sm { color: var(--eye-text-faint); font-size: 10.5px; }
+.eye-pipe-empty { padding: 12px; }
+
+.eye-pipeline { max-height: 260px; overflow-y: auto; }
+.eye-pipe-refresh-row { display: flex; justify-content: flex-end; padding: 6px 12px 0; }
+.eye-pipe-refresh { font-family: var(--font-mono); font-size: 9.5px; color: var(--eye-text-faint); background: none; border: 1px solid var(--eye-line); border-radius: 3px; padding: 2px 7px; cursor: pointer; }
+.eye-pipe-refresh:hover { color: var(--eye-text); border-color: var(--eye-text-faint); }
+.eye-pipe-row { border-bottom: 1px solid var(--eye-line-soft); }
+.eye-pipe-head { width: 100%; display: flex; align-items: center; gap: 8px; padding: 9px 12px; cursor: pointer; background: none; border: none; text-align: left; color: inherit; }
+.eye-pipe-head:hover { background: var(--eye-panel-2); }
+.eye-pipe-type { width: 18px; height: 18px; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 9px; flex-shrink: 0; background: color-mix(in srgb, currentColor 12%, transparent); }
+.eye-pipe-preview { flex: 1; font-size: 11px; color: var(--eye-text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.eye-pipe-chev { color: var(--eye-text-faint); font-size: 9px; transition: transform 0.15s ease; }
+.eye-pipe-row.open .eye-pipe-chev { transform: rotate(90deg); }
+.eye-pipe-body { padding: 0 12px 12px; }
+.eye-pipe-stage { display: flex; gap: 8px; padding: 7px 0; border-top: 1px solid var(--eye-line-soft); }
+.eye-pipe-stage:first-child { border-top: none; }
+.eye-pipe-stage-label { font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--eye-text-faint); width: 52px; flex-shrink: 0; padding-top: 1px; }
+.eye-pipe-stage-content { flex: 1; font-size: 11px; color: var(--eye-text-dim); line-height: 1.5; }
+.eye-pipe-stage-content.raw { font-family: var(--font-mono); font-size: 10.5px; }
+.eye-pipe-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 2px; }
+.eye-pipe-tag { font-family: var(--font-mono); font-size: 9.5px; padding: 2px 7px; border-radius: 3px; background: var(--eye-panel-2); border: 1px solid var(--eye-line); color: var(--eye-text-dim); }
+
+.eye-foot { padding: 7px 12px; font-family: var(--font-mono); font-size: 9px; color: var(--eye-text-faint); display: flex; justify-content: space-between; gap: 8px; }
+.eye-foot span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.eye-comment { padding: 10px 12px; border-top: 1px solid var(--eye-line-soft); display: flex; flex-direction: column; gap: 6px; }
+.eye-comment-nested { padding: 8px 0 0; margin-top: 4px; }
+.eye-comment-label { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--eye-text-faint); }
+.eye-comment-saved { color: var(--eye-ok); text-transform: none; letter-spacing: normal; font-size: 9.5px; }
+.eye-comment-input {
+    width: 100%; background: var(--eye-bg); border: 1px solid var(--eye-line); border-radius: var(--r-sm);
+    padding: 7px 9px; font-family: var(--font-sans); font-size: 11px; color: var(--eye-text); resize: vertical;
+}
+.eye-comment-input:focus { outline: none; border-color: var(--amber); }
+.eye-comment-actions { display: flex; gap: 6px; }
+.eye-comment-save {
+    font-family: var(--font-mono); font-size: 10px; color: var(--eye-bg); background: var(--amber);
+    border: none; border-radius: var(--r-sm); padding: 4px 10px; cursor: pointer; font-weight: 600;
+}
+.eye-comment-save:disabled { opacity: 0.35; cursor: default; }
+.eye-comment-delete {
+    font-family: var(--font-mono); font-size: 10px; color: var(--eye-text-faint); background: none;
+    border: 1px solid var(--eye-line); border-radius: var(--r-sm); padding: 4px 10px; cursor: pointer;
+}
+.eye-comment-delete:hover { color: var(--eye-warn); border-color: var(--eye-warn); }
+
+/* MuseEyePanel rendered standalone (MuseEyeScreen, not inside a canvas
+   node) — same card, just not floating inside a draggable node anymore. */
+.muse-eye-panel-standalone { margin-top: 0; max-width: 480px; }
+
+/* ─── Muse Eye screen — full-page real-data history viewer
+   (src/canvas/MuseEyeScreen.jsx), reached from the projects screen's 👁
+   button. Same --eye-* design language as the inline panel above (that's
+   the whole point — one consistent instrument look, not a second one). ── */
+
+.muse-eye-screen {
+    --eye-bg: #0a0a0b;
+    --eye-panel-2: #17171a;
+    --eye-line: #232326;
+    --eye-line-soft: #1b1b1e;
+    --eye-text: #d4d4d8;
+    --eye-text-dim: #86868f;
+    --eye-text-faint: #4b4b52;
+    --eye-warn: #c2673f;
+    --eye-ok: #4d9a72;
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    background: var(--eye-bg);
+    color: var(--eye-text);
+    font-family: var(--font-sans);
+    overflow-y: auto;
+}
+.muse-eye-screen * { box-sizing: border-box; }
+
+.eyescr-topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: var(--space-3); padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--eye-line);
+    background: linear-gradient(180deg, #131316, #0e0e10);
+    position: sticky; top: 0; z-index: 1;
+}
+.eyescr-brand { display: flex; align-items: center; gap: var(--space-3); }
+.eyescr-brand h1 { font-size: var(--fs-utility); font-weight: 600; margin: 0; color: var(--eye-text); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.08em; }
+.eyescr-brand p { font-size: var(--fs-micro); color: var(--eye-text-faint); margin: 2px 0 0; font-family: var(--font-mono); }
+.eyescr-back {
+    width: 30px; height: 30px; border-radius: 50%;
+    background: none; border: 1px solid var(--eye-line); color: var(--eye-text-dim);
+    font-size: 18px; cursor: pointer; line-height: 1;
+}
+.eyescr-back:hover { color: var(--eye-text); border-color: var(--eye-text-faint); }
+.eyescr-clear {
+    font-family: var(--font-mono); font-size: 10px; color: var(--eye-text-faint);
+    background: none; border: 1px solid var(--eye-line); border-radius: var(--r-sm);
+    padding: 4px 10px; cursor: pointer;
+}
+.eyescr-clear:hover { color: var(--eye-text); border-color: var(--eye-text-faint); }
+
+.eyescr-topbar-actions { display: flex; align-items: center; gap: var(--space-2); }
+.eyescr-new-mock {
+    font-family: var(--font-mono); font-size: 10px; color: var(--amber);
+    background: color-mix(in srgb, var(--amber) 10%, transparent); border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent);
+    border-radius: var(--r-sm); padding: 4px 10px; cursor: pointer;
+}
+.eyescr-new-mock:hover { background: color-mix(in srgb, var(--amber) 18%, transparent); }
+.eyescr-new-mock:disabled { opacity: 0.5; cursor: default; }
+
+.eyescr-empty { padding: var(--space-8); text-align: center; color: var(--eye-text-faint); font-size: var(--fs-secondary); }
+.eyescr-empty-hint { font-size: var(--fs-micro); max-width: 440px; margin: var(--space-2) auto 0; line-height: 1.6; }
+
+.eyescr-body { display: grid; grid-template-columns: 280px 1fr; gap: var(--space-3); padding: var(--space-3) var(--space-4); align-items: start; }
+@media (max-width: 800px) { .eyescr-body { grid-template-columns: 1fr; } }
+
+.eyescr-list { display: flex; flex-direction: column; gap: 4px; max-height: calc(100vh - 100px); overflow-y: auto; }
+.eyescr-list-item {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+    background: var(--eye-panel-2); border: 1px solid var(--eye-line); border-radius: var(--r-sm);
+    padding: var(--space-2); cursor: pointer; text-align: left; color: var(--eye-text-dim);
+}
+.eyescr-list-item.active { border-color: var(--amber); background: color-mix(in srgb, var(--amber) 8%, var(--eye-panel-2)); }
+.eyescr-list-mode { font-family: var(--font-mono); font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--amber); }
+.eyescr-list-song { font-size: 11px; color: var(--eye-text); }
+.eyescr-list-time { font-family: var(--font-mono); font-size: 9.5px; color: var(--eye-text-faint); }
+
+.eyescr-detail { min-width: 0; }
+
+.eyescr-view-tabs { display: flex; gap: var(--space-1); padding: 0 var(--space-4); border-bottom: 1px solid var(--eye-line); }
+.eyescr-view-tab {
+    font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--eye-text-faint); background: none; border: none; border-bottom: 2px solid transparent;
+    padding: var(--space-2) var(--space-1); cursor: pointer;
+}
+.eyescr-view-tab.active { color: var(--eye-text); border-bottom-color: var(--amber); }
+.eyescr-view-tab-count { color: var(--eye-text-faint); }
+.eyescr-view-body { padding: var(--space-3) var(--space-4); }
+
+.eyescr-complaints-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-3); }
+.eyescr-complaints-count { font-family: var(--font-mono); font-size: 11px; color: var(--eye-text-faint); }
+.eyescr-complaints-list { display: flex; flex-direction: column; gap: var(--space-2); max-width: 720px; }
+.eyescr-complaint-card { background: var(--eye-panel-2); border: 1px solid var(--eye-line); border-radius: var(--r-md); padding: var(--space-3); }
+.eyescr-complaint-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.eyescr-complaint-mode { font-family: var(--font-mono); font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--amber); }
+.eyescr-complaint-where { font-size: 11px; color: var(--eye-text-dim); }
+.eyescr-complaint-time { font-family: var(--font-mono); font-size: 9.5px; color: var(--eye-text-faint); margin-left: auto; }
+.eyescr-complaint-delete { background: none; border: none; color: var(--eye-text-faint); cursor: pointer; font-size: 12px; padding: 0; }
+.eyescr-complaint-delete:hover { color: var(--eye-warn); }
+.eyescr-complaint-excerpt { font-size: 11px; color: var(--eye-text-faint); font-style: italic; margin: 0 0 6px; }
+.eyescr-complaint-comment { font-size: 12.5px; color: var(--eye-text); line-height: 1.5; margin: 0; white-space: pre-wrap; }
 
 /* ─── Debug console — global overlay, opened with ` (backtick), the "open a
    dev console" muscle memory games and dev tools have already trained
@@ -3941,6 +4121,20 @@ body::before {
     cursor: pointer;
 }
 .debug-console-clear:hover { color: #fff; border-color: rgba(255, 255, 255, 0.4); }
+
+.debug-console-head-actions { display: flex; align-items: center; gap: var(--space-1-5); }
+
+.debug-console-lab {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--amber);
+    background: none;
+    border: 1px solid rgba(184, 132, 42, 0.4);
+    border-radius: var(--r-sm);
+    padding: 2px 8px;
+    cursor: pointer;
+}
+.debug-console-lab:hover { background: rgba(184, 132, 42, 0.15); }
 
 .debug-console-body {
     flex: 1;
@@ -4162,6 +4356,11 @@ body::before {
 .thread-lang-pill {
     display: flex;
     align-items: center;
+    gap: 4px;
+}
+.thread-lang-btn {
+    display: flex;
+    align-items: center;
     gap: 2px;
     background: none;
     border: none;
@@ -4171,7 +4370,7 @@ body::before {
     color: var(--muted);
     cursor: pointer;
 }
-.thread-lang-chevron { font-size: var(--fs-eyebrow); }
+.thread-lang-chevron { font-size: var(--fs-eyebrow); color: var(--muted); }
 
 .thread-menu-btn {
     flex-shrink: 0;
@@ -4390,18 +4589,55 @@ body::before {
     color: var(--chord);
 }
 
+/* Only ever holds the empty-state placeholder now — real content renders
+   through .thread-card-preview below instead, so nothing here needs
+   clamping. */
 .thread-card-text {
     font-family: var(--font-body);
     font-size: var(--fs-body);
     color: var(--ink);
-    line-height: 1.5;
     margin: 0 0 var(--space-2-5);
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
 }
 .thread-card-empty { color: var(--faint); font-style: italic; }
+
+/* Each real verse line is its own block-level .ln (see SongThreadCard) —
+   the fix for the old version fusing two different lines into one run-on
+   sentence, since HTML collapses embedded \n to plain whitespace by
+   default and the old single-<p>-with-line-clamp truncation cut by
+   wrapped-character-width, not by the lyric's actual line breaks.
+   --tc-line-h is a custom property specifically so the 3-line cutoff
+   stays proportional if the font-size ever changes here — max-height is
+   computed from it, not hardcoded, per the design ref's own note about
+   why a bare 78px would need manual recalculation later. */
+.thread-card-preview {
+    --tc-line-h: 23.925px; /* 16.5px * 1.45 */
+    position: relative;
+    font-family: var(--font-body);
+    font-size: 16.5px;
+    line-height: 1.45;
+    color: var(--ink);
+    max-height: calc(3 * var(--tc-line-h));
+    overflow: hidden;
+    margin-bottom: var(--space-1-5);
+}
+.thread-card-preview .ln { display: block; }
+/* The "how much more is there" signal — a fade, not "…", so the card is
+   honest about there being more content without guessing at how much from
+   a truncation mark alone. Only present when a line is actually cut off. */
+.thread-card-preview-fade::after {
+    content: '';
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    height: 18px;
+    background: linear-gradient(to bottom, rgba(255, 255, 255, 0), var(--surface));
+    pointer-events: none;
+}
+.thread-card-more {
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    color: var(--graphite-soft);
+    margin-bottom: var(--space-2-5);
+}
 
 .thread-card-foot {
     font-family: var(--font-sans);
@@ -4566,6 +4802,12 @@ body::before {
     margin: 0 calc(var(--space-2) * -1);
     transition: opacity 0.15s, background-color 0.15s, box-shadow 0.15s;
 }
+/* The gap between rows lives here, not in .ne-line-input's own padding —
+   each line reads as its own paragraph-like block (Apple Notes' rhythm:
+   a blank-line-sized gap between entries, not just generous leading
+   inside one), and using a sibling margin instead of padding means the
+   very last row doesn't carry a dangling gap before the toolbar. */
+.ne-row + .ne-row { margin-top: 22px; }
 .ne-row-dimmed { opacity: 0.25; }
 
 /* Live the instant the wake-word + comma/colon is typed (see
@@ -4611,10 +4853,17 @@ body::before {
     border: none;
     background: none;
     font-family: var(--font-body);
-    font-size: var(--fs-lyric-lead);
-    line-height: 1.5;
+    /* 17px — iOS Dynamic Type's default body size, not this app's own
+       --fs-lyric-lead (18px) — a deliberate platform-convention match, not
+       a token substitution. */
+    font-size: 17px;
+    /* Tighter than the 1.5 used elsewhere on purpose — Notes' internal
+       leading (within one wrapped entry) is closer than a "composition
+       editor" default; the paragraph-like separation between different
+       lines comes from .ne-row + .ne-row's margin above, not from this. */
+    line-height: 1.29;
     color: var(--ink);
-    padding: var(--space-2) 0;
+    padding: 4px 0;
     overflow: hidden;
 }
 .ne-line-input:focus { outline: none; }
@@ -4728,6 +4977,13 @@ body::before {
 .ts-repeat-results { padding: 0 0 var(--space-3); }
 .ts-repeat-results ul { list-style: none; }
 .ts-repeat-results li { font-family: var(--font-sans); font-size: var(--fs-secondary); color: var(--ink); padding: var(--space-1) 0; }
+
+.ts-repeat-scope-hint {
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    color: var(--muted);
+    margin-bottom: var(--space-3);
+}
 
 .ts-empty { font-family: var(--font-sans); font-size: var(--fs-secondary); color: var(--muted); padding: var(--space-3) 0; }
 
@@ -5151,3 +5407,309 @@ body::before {
 .vc-option-body { display: flex; flex-direction: column; }
 .vc-option-title { font-family: var(--font-sans); font-weight: 600; font-size: var(--fs-body); color: var(--ink); }
 .vc-option-sub { font-family: var(--font-sans); font-size: var(--fs-secondary); color: var(--muted); margin-top: 2px; }
+
+/* ─── Baúl sheet (mobile) ──────────────────────────────────────────────────────
+   ROADMAP.md Phase 3, design ref 2026-08-11 — "tap to attach" instead of
+   desktop's draggable BaulFloatNode, same processBaulInput/saveLyricDna
+   calls underneath (see src/mobile/BaulSheet.jsx). The mockup's own --gold
+   token is just this app's existing --amber under another name — reused,
+   not duplicated. */
+
+.baul-sheet-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 58;
+    background: rgba(29, 28, 26, 0.35);
+    display: flex;
+    align-items: flex-end;
+}
+
+.baul-sheet {
+    position: relative;
+    width: 100%;
+    max-height: 88vh;
+    overflow-y: auto;
+    background: var(--paper);
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+    box-shadow: var(--sh-3);
+}
+
+.baul-sheet-body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: var(--space-2) var(--space-4) calc(var(--space-6) + env(safe-area-inset-bottom));
+    text-align: center;
+    transition: opacity 0.15s;
+}
+.baul-sheet-body-dimmed { opacity: 0.4; }
+
+/* Same dark-void identity as desktop's .baul-blackhole (radial gradient,
+   amber sparkle) — a dome shape here instead of a circle, matching the
+   design ref, but unmistakably the same feature. */
+.baul-hero {
+    width: 104px;
+    height: 92px;
+    background: radial-gradient(circle at 36% 28%, #2e2c27, #17160f 72%);
+    border-radius: 52px 52px 14px 14px;
+    box-shadow: var(--sh-3);
+    margin-bottom: var(--space-3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.baul-hero-spark { color: var(--amber); font-size: 20px; }
+
+.attach-title { font-family: var(--font-serif); font-weight: 600; font-size: var(--fs-h2); color: var(--ink); margin-bottom: var(--space-1); }
+.attach-sub { font-family: var(--font-sans); font-size: var(--fs-secondary); color: var(--muted); max-width: 280px; line-height: 1.5; margin-bottom: var(--space-4); }
+.baul-saved-hint { font-family: var(--font-sans); font-size: var(--fs-secondary); color: var(--thread); font-weight: 600; margin-bottom: var(--space-3); }
+.baul-error { font-family: var(--font-sans); font-size: var(--fs-secondary); color: var(--rose); margin-bottom: var(--space-3); }
+
+.attach-option {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-3-5);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    margin-bottom: var(--space-2-5);
+    background: var(--surface);
+    text-align: left;
+    cursor: pointer;
+}
+.attach-option:disabled { opacity: 0.5; cursor: default; }
+.attach-option .tt { font-family: var(--font-sans); font-size: var(--fs-body); font-weight: 500; color: var(--ink); flex: 1; }
+.aic {
+    width: 34px;
+    height: 34px;
+    border-radius: var(--r-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: var(--fs-utility);
+}
+.aic-thread { background: var(--thread-soft); color: var(--thread); }
+.aic-chord { background: var(--chord-soft); color: var(--chord); }
+.aic-amber { background: var(--amber-soft); color: var(--amber); }
+.aic-graphite { background: var(--bg-deep); color: var(--graphite); }
+
+.baul-file-input { display: none; }
+
+.divider-row { display: flex; align-items: center; gap: var(--space-2-5); width: 100%; margin: var(--space-3) 0 var(--space-2-5); }
+.divider-row .line { flex: 1; height: 1px; background: var(--hairline); }
+.divider-row .label { font-family: var(--font-mono); font-size: var(--fs-micro); color: var(--graphite-soft); letter-spacing: 0.05em; text-transform: uppercase; }
+
+.clear-option {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-3-5);
+    border: 1px solid #e9c9c4;
+    border-radius: var(--r-md);
+    background: var(--rose-soft);
+    text-align: left;
+    cursor: pointer;
+}
+.clear-option:disabled { opacity: 0.5; cursor: default; }
+.clear-option .aic { background: var(--surface); }
+.clear-icon { color: var(--rose); font-size: var(--fs-utility); }
+.clear-option-body { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.clear-option .tt { font-family: var(--font-sans); font-size: var(--fs-body); font-weight: 600; color: var(--rose); }
+.clear-option .ss { font-family: var(--font-sans); font-size: var(--fs-eyebrow); color: var(--rose); opacity: 0.8; margin-top: 1px; }
+
+/* Floats above the (now-dimmed) main sheet body rather than replacing it —
+   matches the design ref's "two separate native-style cards" pattern. */
+.confirm-sheet {
+    position: absolute;
+    left: var(--space-3);
+    right: var(--space-3);
+    bottom: calc(var(--space-4) + env(safe-area-inset-bottom));
+    z-index: 5;
+}
+.confirm-card {
+    background: rgba(251, 249, 244, 0.96);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-radius: var(--r-lg);
+    overflow: hidden;
+    margin-bottom: var(--space-2-5);
+    box-shadow: var(--sh-3);
+}
+.confirm-text { padding: var(--space-4) var(--space-4) var(--space-3-5); text-align: center; border-bottom: 1px solid var(--hairline); }
+.confirm-text .tt { font-family: var(--font-serif); font-weight: 600; font-size: var(--fs-body); color: var(--ink); margin-bottom: var(--space-1); }
+.confirm-text .ss { font-family: var(--font-sans); font-size: var(--fs-secondary); color: var(--graphite); line-height: 1.5; }
+.confirm-btn {
+    width: 100%;
+    text-align: center;
+    padding: var(--space-3-5);
+    font-family: var(--font-sans);
+    font-size: var(--fs-lyric-lead);
+    background: none;
+    border: none;
+    cursor: pointer;
+}
+.confirm-btn.destructive { color: var(--rose); font-weight: 600; }
+.confirm-btn:disabled { opacity: 0.5; cursor: default; }
+.confirm-cancel {
+    width: 100%;
+    background: rgba(251, 249, 244, 0.96);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: none;
+    border-radius: var(--r-lg);
+    text-align: center;
+    padding: var(--space-3-5);
+    font-family: var(--font-sans);
+    font-size: var(--fs-lyric-lead);
+    font-weight: 600;
+    color: var(--chord);
+    cursor: pointer;
+    box-shadow: var(--sh-2);
+}
+
+.baul-note-back { align-self: flex-start; margin-bottom: var(--space-2); }
+.baul-note-input {
+    width: 100%;
+    min-height: 100px;
+    font-family: var(--font-body);
+    font-size: var(--fs-body);
+    color: var(--ink);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    padding: var(--space-3);
+    margin-bottom: var(--space-3);
+    background: var(--surface);
+    resize: vertical;
+}
+.baul-note-submit {
+    width: 100%;
+    min-height: 48px;
+    background: var(--ink);
+    color: var(--paper);
+    border: none;
+    border-radius: var(--r-md);
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: var(--fs-body);
+    cursor: pointer;
+}
+.baul-note-submit:disabled { opacity: 0.5; cursor: default; }
+
+/* ─── Tempo pulse (mobile, shared) ────────────────────────────────────────────
+   src/mobile/TempoPulse.jsx — same component in the song-thread header
+   (next to the language pill) and the note editor header. The dot's
+   animation-duration is set inline per instance (60000/bpm ms) — this
+   file only defines the pulse itself, not its rate. */
+.tempo-pulse {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-left: var(--space-2);
+    font-family: var(--font-mono);
+    font-size: var(--fs-eyebrow);
+    color: var(--amber);
+    vertical-align: middle;
+}
+/* Only the song-thread header's copy is a real <button> (onClick wired) —
+   plain background/border reset so it doesn't look like a form control,
+   just a slightly-larger tap target around the same dot+number. */
+.tempo-pulse-btn { background: none; border: none; padding: 2px; cursor: pointer; }
+.tempo-pulse-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--amber);
+    animation: tempo-pulse-beat 500ms ease-in-out infinite;
+}
+@keyframes tempo-pulse-beat {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.35; transform: scale(0.7); }
+}
+
+.tempo-sheet-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: var(--space-2);
+    margin-bottom: var(--space-4);
+}
+.tempo-sheet-input {
+    width: 100px;
+    font-family: var(--font-serif);
+    font-size: var(--fs-display);
+    font-weight: 600;
+    color: var(--ink);
+    text-align: right;
+    border: none;
+    border-bottom: 2px solid var(--hairline);
+    background: none;
+}
+.tempo-sheet-input:focus { outline: none; border-color: var(--amber); }
+.tempo-sheet-unit {
+    font-family: var(--font-mono);
+    font-size: var(--fs-label);
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+.tempo-sheet-save {
+    width: 100%;
+    min-height: 48px;
+    background: var(--ink);
+    color: var(--paper);
+    border: none;
+    border-radius: var(--r-md);
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: var(--fs-body);
+    cursor: pointer;
+}
+.tempo-sheet-save:disabled { opacity: 0.5; cursor: default; }
+
+/* ─── Mock playground — dev-only, mock-song-only (src/canvas/MockPlayground.jsx)
+   Direct read/write on lyric_dna + muse_profile, the two things a mock song
+   can't get any other way without burning a real API call. Same --eye-*
+   dark-instrument language as MuseEyePanel/MuseEyeScreen, floating
+   bottom-right so it never collides with DebugConsole (bottom, full-width). */
+.mockpg-toggle {
+    position: fixed; right: var(--space-3); bottom: var(--space-3); z-index: 1500;
+    font-family: var(--font-mono); font-size: 11px; color: var(--amber);
+    background: #0a0a0b; border: 1px solid color-mix(in srgb, var(--amber) 45%, transparent);
+    border-radius: var(--radius-pill); padding: 6px 14px; cursor: pointer;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+.mockpg-toggle:hover { background: color-mix(in srgb, var(--amber) 12%, #0a0a0b); }
+
+.mockpg-panel {
+    --eye-bg: #0a0a0b; --eye-panel-2: #17171a; --eye-line: #232326; --eye-line-soft: #1b1b1e;
+    --eye-text: #d4d4d8; --eye-text-dim: #86868f; --eye-text-faint: #4b4b52; --eye-ok: #4d9a72; --eye-warn: #c2673f;
+    position: fixed; right: var(--space-3); bottom: var(--space-3); z-index: 1500;
+    width: 340px; max-height: 70vh; overflow-y: auto;
+    background: var(--eye-bg); color: var(--eye-text); border: 1px solid var(--eye-line);
+    border-radius: var(--r-md); box-shadow: 0 12px 36px rgba(0, 0, 0, 0.4);
+    font-family: var(--font-sans); padding: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2-5);
+}
+.mockpg-panel.dragging { user-select: none; }
+.mockpg-head { display: flex; align-items: center; justify-content: space-between; cursor: grab; }
+.mockpg-panel.dragging .mockpg-head { cursor: grabbing; }
+.mockpg-title { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--amber); }
+.mockpg-close { background: none; border: none; color: var(--eye-text-faint); cursor: pointer; font-size: 13px; }
+.mockpg-close:hover { color: var(--eye-text); }
+.mockpg-summary { font-size: 10.5px; color: var(--eye-text-faint); line-height: 1.5; }
+.mockpg-field { display: flex; flex-direction: column; gap: 4px; }
+.mockpg-field-label { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--eye-text-dim); }
+.mockpg-saved { color: var(--eye-ok); text-transform: none; letter-spacing: normal; }
+.mockpg-textarea {
+    width: 100%; background: var(--eye-panel-2); border: 1px solid var(--eye-line); border-radius: var(--r-sm);
+    padding: 7px 9px; font-family: var(--font-mono); font-size: 10.5px; line-height: 1.5; color: var(--eye-text); resize: vertical;
+}
+.mockpg-textarea:focus { outline: none; border-color: var(--amber); }
+.mockpg-error { font-size: 10.5px; color: var(--eye-warn); }
+.mockpg-save {
+    align-self: flex-start; font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+    color: var(--eye-bg); background: var(--amber); border: none; border-radius: var(--r-sm); padding: 5px 11px; cursor: pointer;
+}
+

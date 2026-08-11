@@ -4,14 +4,26 @@ import { loadMuseConversation, saveMuseTurn, markMuseOptionSaved } from './museD
 import { askMuse } from '../utils/museApi.js';
 import { recordMuseTurnAndMaybeUpdateProfile } from './museProfileUpdater.js';
 import { addAnnotation } from './canvasData.js';
-import MuseDebugPanel from './MuseDebugPanel.jsx';
-import { logDebugEvent } from './debugLog.js';
+import MuseEyePanel from './MuseEyePanel.jsx';
 
 // Display-only labels — purely cosmetic, don't affect anything the model
-// reads (see museApi.js's MUSE_TYPES/MUSE_ANGLES).
-const TYPE_LABELS = { CONTINUITY: 'continuidad', CONTRAST: 'contraste', RESOLUTION: 'resolución' };
-const ANGLE_LABELS = { raw: 'cruda', atmospheric: 'atmosférica', abstract: 'abstracta' };
-const MODE_LABELS = { SURGEON: 'cirujano', ARCHITECT: 'arquitecto', SOCRATIC: 'socrática', WORD_BANK: 'banco de palabras' };
+// reads (see museApi.js's MUSE_TYPES/MUSE_ANGLES). Keyed by lang since the
+// muse's own voice now follows lyricLanguage (see buildStaticMuseInstructions'
+// "esto NO es solo para los versos" rule) — these chrome labels shouldn't be
+// the one thing on screen still stuck in Spanish when a Catalan song is open.
+// Only es/ca are real supported languages (see museApi.js's phonetic rules).
+const TYPE_LABELS = {
+  es: { CONTINUITY: 'continuidad', CONTRAST: 'contraste', RESOLUTION: 'resolución' },
+  ca: { CONTINUITY: 'continuïtat', CONTRAST: 'contrast', RESOLUTION: 'resolució' },
+};
+const ANGLE_LABELS = {
+  es: { raw: 'cruda', atmospheric: 'atmosférica', abstract: 'abstracta' },
+  ca: { raw: 'crua', atmospheric: 'atmosfèrica', abstract: 'abstracta' },
+};
+const MODE_LABELS = {
+  es: { SURGEON: 'cirujano', ARCHITECT: 'arquitecto', SOCRATIC: 'socrática', WORD_BANK: 'banco de palabras' },
+  ca: { SURGEON: 'cirurgià', ARCHITECT: 'arquitecte', SOCRATIC: 'socràtica', WORD_BANK: 'banc de paraules' },
+};
 
 // The muse used to permanently occupy a tab in the note's side panel —
 // always docked, always taking up space, whether or not you were using it.
@@ -24,7 +36,7 @@ export default function MuseFloatNode({ id, data, selected }) {
   const {
     songId, lineId, verseText, noteFunction, museProfile, onMuseProfileUpdated,
     lyricLanguage, lyricDialect, userId, onClose, songStructure, lyricDna,
-    pendingTargetVerse, onClearTargetVerse,
+    pendingTargetVerse, onClearTargetVerse, songTitle,
   } = data;
 
   const [conversation, setConversation] = useState([]);
@@ -33,9 +45,10 @@ export default function MuseFloatNode({ id, data, selected }) {
   const [asking, setAsking] = useState(false);
   const [error, setError] = useState(null);
   const [savedOptions, setSavedOptions] = useState(new Set());
-  // Dev-only observability toggle — never rendered in production builds,
-  // so there's no way an end user stumbles into raw prompt text or char
-  // counts. debugInfo holds the _debug object from the most recent call.
+  // Dev-only toggle for whether THIS node's inline panel is visible —
+  // every real call is captured to the debug log regardless (see askMuse
+  // in museApi.js), this only controls local clutter. debugInfo holds the
+  // _debug object from the most recent call, for that inline rendering.
   const [debugMode, setDebugMode] = useState(false);
   const [debugInfo, setDebugInfo] = useState(null);
   // Points at whichever conversation entry is currently last, so a fresh
@@ -73,13 +86,13 @@ export default function MuseFloatNode({ id, data, selected }) {
         lang: lyricLanguage, dialect: lyricDialect,
         songStructure,
         targetVerse: pendingTargetVerse || null,
+        // debugMode only controls whether the inline panel renders for
+        // THIS node — askMuse itself always logs every real call to the
+        // debug log in dev, regardless of this toggle.
         debug: debugMode,
+        meta: { songId, songTitle, nodeLabel: noteFunction },
       });
       setDebugInfo(response._debug || null);
-      // Only ever set when debugMode was on for this call — pushing to the
-      // global log is what lets DebugConsole show history across multiple
-      // calls/floats, not just whatever the last inline panel captured.
-      if (response._debug) logDebugEvent('muse', response._debug);
       const { data: rows, error: saveError } = await saveMuseTurn(songId, lineId, response.themes, message, response);
       if (saveError) { setError(saveError.message); return; }
       setConversation((c) => [...c, ...rows]);
@@ -122,6 +135,9 @@ export default function MuseFloatNode({ id, data, selected }) {
 
   const lastEntry = conversation[conversation.length - 1];
   const isPendingQuestion = lastEntry?.role === 'muse' && lastEntry.action === 'SOCRATIC';
+  const modeLabels = MODE_LABELS[lyricLanguage] || MODE_LABELS.es;
+  const typeLabels = TYPE_LABELS[lyricLanguage] || TYPE_LABELS.es;
+  const angleLabels = ANGLE_LABELS[lyricLanguage] || ANGLE_LABELS.es;
 
   return (
     <div className={`muse-float${selected ? ' selected' : ''}`}>
@@ -167,7 +183,7 @@ export default function MuseFloatNode({ id, data, selected }) {
               }
               return (
                 <div ref={isLast ? lastEntryRef : null} className="muse-turn muse-turn-muse" key={entry.id}>
-                  <div className="muse-mode-label">{MODE_LABELS[entry.action] || entry.action}</div>
+                  <div className="muse-mode-label">{modeLabels[entry.action] || entry.action}</div>
                   <p className={entry.action === 'SOCRATIC' ? 'muse-question' : 'muse-answer'}>{entry.content}</p>
 
                   {(entry.action === 'SURGEON' || entry.action === 'ARCHITECT') && entry.options?.length > 0 && (
@@ -177,8 +193,8 @@ export default function MuseFloatNode({ id, data, selected }) {
                         return (
                           <div className="muse-option-row" key={j}>
                             <div className="muse-option-main">
-                              {opt.type && <span className="muse-option-type">{TYPE_LABELS[opt.type] || opt.type}</span>}
-                              {opt.angle && <span className="muse-option-angle">{ANGLE_LABELS[opt.angle] || opt.angle}</span>}
+                              {opt.type && <span className="muse-option-type">{typeLabels[opt.type] || opt.type}</span>}
+                              {opt.angle && <span className="muse-option-angle">{angleLabels[opt.angle] || opt.angle}</span>}
                               <span className="muse-option-text">{opt.text}</span>
                             </div>
                             <button
@@ -247,7 +263,9 @@ export default function MuseFloatNode({ id, data, selected }) {
               );
             })}
           </div>
-          {debugMode && <MuseDebugPanel debug={debugInfo} />}
+          {debugMode && (
+            <MuseEyePanel debug={debugInfo} songId={songId} songTitle={songTitle} nodeLabel={noteFunction} />
+          )}
         </div>
 
         <div className="muse-float-composer nodrag">

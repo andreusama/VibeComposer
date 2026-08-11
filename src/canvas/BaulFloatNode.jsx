@@ -1,22 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
 import { NodeResizer } from '@xyflow/react';
-import { processBaulInput } from '../utils/baulProcessor.js';
-import { saveLyricDna } from './canvasData.js';
-
-function readFileAsBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
-    reader.onerror = () => reject(new Error('could not read file'));
-    reader.readAsDataURL(file);
-  });
-}
-
-function inputTypeForFile(file) {
-  if (file.type === 'application/pdf') return 'document';
-  if (file.type.startsWith('image/')) return 'notebook_image';
-  return null;
-}
+import { processBaulInput, readFileAsBase64, inputTypeForFile } from '../utils/baulProcessor.js';
+import { saveLyricDna, insertBaulEntry } from './canvasData.js';
 
 // The input panel for the baúl / lyric_dna pipeline — opened from the
 // Inspiration Black Hole node. Same floating-node pattern as the muse
@@ -67,16 +52,21 @@ export default function BaulFloatNode({ id, data, selected }) {
         inputType = 'text';
       }
 
-      const nextDna = await processBaulInput({ currentAdnLirico: lyricDna, rawInput, inputType });
-      const { error: saveError } = await saveLyricDna(songId, nextDna);
+      const { adnLirico, entry } = await processBaulInput({
+        currentAdnLirico: lyricDna, rawInput, inputType, sourceLabel: file?.name,
+      });
+      const { error: saveError } = await saveLyricDna(songId, adnLirico);
       if (saveError) {
         setError(saveError.message);
         onStatusChange?.(sourceBlackHoleId, 'error');
         setTimeout(() => onStatusChange?.(sourceBlackHoleId, undefined), 2000);
         return;
       }
+      // Best-effort, never blocks the real save — see canvasData.js's
+      // insertBaulEntry comment (dev-only audit log, not real product data).
+      insertBaulEntry(songId, entry).catch(() => {});
 
-      onLyricDnaUpdated?.(nextDna);
+      onLyricDnaUpdated?.(adnLirico);
       setText('');
       setFile(null);
       setJustSaved(true);

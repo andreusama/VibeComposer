@@ -225,6 +225,30 @@ export async function loadLyricDna(songId) {
   return supabase.from('songs').select('lyric_dna').eq('id', songId).single();
 }
 
+// ─── Baúl entry log — dev-only audit trail, see schema.sql's baul_entries
+// comment. Never read by anything user-facing; only MuseEyePanel's baúl
+// tab. Best-effort by design: callers should never let a logging failure
+// block the real absorb/save flow (see BaulFloatNode/BaulSheet's .catch).
+
+export async function insertBaulEntry(songId, { inputType, rawPreview, generatedSummary, tags, latencyMs }) {
+  return supabase.from('baul_entries').insert({
+    song_id: songId, input_type: inputType, raw_preview: rawPreview,
+    generated_summary: generatedSummary, tags, latency_ms: latencyMs ?? null,
+  });
+}
+
+export async function loadBaulEntries(songId, limit = 50) {
+  return supabase.from('baul_entries').select('*').eq('song_id', songId)
+    .order('created_at', { ascending: false }).limit(limit);
+}
+
+// Mirrors handleClear's intent ("the muse forgets them too") — clearing
+// the baúl should clear its log too, or the debug panel would keep
+// showing a pipeline history for material that's supposedly forgotten.
+export async function clearBaulEntries(songId) {
+  return supabase.from('baul_entries').delete().eq('song_id', songId);
+}
+
 // ─── Output nodes ───────────────────────────────────────────────────────────
 // A song can hold several — variants/mixes of the same song ("radio edit",
 // "acoustic") — each a sink a note plugs into to render its own final

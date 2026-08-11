@@ -14,6 +14,7 @@ import InspirationBlackHoleNode from './InspirationBlackHoleNode.jsx';
 import BaulFloatNode from './BaulFloatNode.jsx';
 import NoteSidePanel from './NoteSidePanel.jsx';
 import DebugConsole from './DebugConsole.jsx';
+import MockPlayground, { isMockSong } from './MockPlayground.jsx';
 import { setState } from '../state/store.js';
 import { supabase } from '../utils/supabaseClient.js';
 import { beginSave, endSave, subscribeSaveStatus } from './saveStatus.js';
@@ -1032,6 +1033,7 @@ export default function CanvasScreen({ state, onExit }) {
             lyricDna,
             lyricLanguage,
             lyricDialect,
+            songTitle,
           },
         };
       }
@@ -1095,6 +1097,16 @@ export default function CanvasScreen({ state, onExit }) {
 
         <CanvasContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} onAdd={handleContextAdd} />
         {import.meta.env.DEV && <DebugConsole />}
+        {import.meta.env.DEV && isMockSong(song) && (
+          <MockPlayground
+            songId={song.id}
+            lyricDna={lyricDna}
+            onLyricDnaUpdated={setLyricDna}
+            museProfile={museProfile}
+            onMuseProfileUpdated={setMuseProfile}
+            noteCount={nodes.filter((n) => n.type === 'textNote').length}
+          />
+        )}
 
         {loadError && <div className="canvas-error">{loadError}</div>}
 

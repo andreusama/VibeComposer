@@ -4,6 +4,7 @@ import { subscribe, getState, setState } from './state/store.js';
 import CanvasScreen from './canvas/CanvasScreen.jsx';
 import SongThreadScreen from './canvas/SongThreadScreen.jsx';
 import MobileProjectsScreen from './screens/MobileProjectsScreen.jsx';
+import MuseEyeScreen from './canvas/MuseEyeScreen.jsx';
 import * as LoadingScreen     from './screens/loading.js';
 import * as StudioScreen      from './screens/studio.js';
 import * as AuthScreen        from './screens/auth.js';
@@ -66,6 +67,18 @@ function render(state) {
     reactRoot.render(createElement(ScreenComponent, {
       state,
       justEntered,
+      onExit: () => setState({ screen: 'home' }),
+    }));
+    return;
+  }
+
+  // Full-page real-data debug viewer — dev-only, gated here too (not just
+  // at its home-screen entry point) so poking state.screen from outside
+  // this app can't reach it in a production build.
+  if (screenKey === 'museeye') {
+    if (!import.meta.env.DEV) { setState({ screen: 'home' }); return; }
+    if (!reactRoot) reactRoot = createRoot(app);
+    reactRoot.render(createElement(MuseEyeScreen, {
       onExit: () => setState({ screen: 'home' }),
     }));
     return;

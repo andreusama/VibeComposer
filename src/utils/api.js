@@ -49,6 +49,15 @@ export async function composeProgression(vibeProfile) {
 const DAILY_LIMIT = 100;
 const TODAY = new Date().toDateString();
 
+// Read-only — MuseEyePanel's header shows this so debugging doesn't blindly
+// eat into the same daily budget as real chord-generation/muse usage in
+// production (they share one counter, see checkAndIncrementLimit below).
+export function getUsageRemaining() {
+  const stored = JSON.parse(localStorage.getItem('vc_usage') || '{}');
+  const count = stored.date === TODAY ? stored.count : 0;
+  return { used: count, remaining: Math.max(0, DAILY_LIMIT - count), limit: DAILY_LIMIT };
+}
+
 export function checkAndIncrementLimit() {
   const stored = JSON.parse(localStorage.getItem('vc_usage') || '{}');
   

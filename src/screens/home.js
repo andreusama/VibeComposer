@@ -1,6 +1,6 @@
 import { setState } from '../state/store.js';
-import { supabase } from '../utils/supabaseClient.js';
-import { loadProjectSummaries, computePreviewLayout, createProject as createProjectRow } from './projectsData.js';
+import {supabase} from '../utils/supabaseClient.js';
+import {loadProjectSummaries, computePreviewLayout, createProject as createProjectRow} from './projectsData.js';
 
 // ─── Render ────────────────────────────────────────────────────────────────────
 
@@ -9,6 +9,7 @@ export function render(state) {
 
   return `
     <div class="header">
+      ${import.meta.env.DEV ? `<button class="icon-btn" id="btn-muse-eye" title="Muse Eye — real debug history">👁</button>` : ''}
       <h1>vibe composer</h1>
       <span class="tagline">your projects</span>
       <button class="header-action ghost-btn" id="btn-sign-out">sign out</button>
@@ -78,6 +79,10 @@ export async function attach(state, justEntered) {
   document.getElementById('btn-sign-out').addEventListener('click', async () => {
     await supabase.auth.signOut();
     setState({ session: null, songs: [], activeSong: null, screen: 'home' });
+  });
+
+  document.getElementById('btn-muse-eye')?.addEventListener('click', () => {
+    setState({ screen: 'museeye' });
   });
 
   document.getElementById('btn-new-project').addEventListener('click', () => createProject(state));

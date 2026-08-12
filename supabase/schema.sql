@@ -698,3 +698,83 @@ create policy baul_entries_owner on baul_entries
   ) with check (
     exists (select 1 from songs s where s.id = baul_entries.song_id and s.user_id = auth.uid())
   );
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- line_audio — voice memos anchored to a specific physical verse line
+-- (hummed melodies, rhythmic phrasing, vocal hooks recorded via the mobile
+-- long-press gesture, see src/mobile/AudioRecorderSheet.jsx).
+--
+-- NOTE the anchor is (section_id, line_index), not a `lines` row — unlike
+-- what the table name might suggest, `lines` holds exactly ONE row per
+-- section (see canvasData.js: `insert({ section_id, position: 0, text })`,
+-- always position 0), the whole block's text as one string with embedded
+-- \n's; individual physical lines only exist as a client-side split
+-- (NoteEditorScreen's `splitIntoLines`), so there's no stable per-line row
+-- to reference. line_index is the line's position in that split at record
+-- time — the exact same "position drifts if lines are inserted/deleted
+-- above it" tradeoff `annotations.start_offset/end_offset` already accepts
+-- for the same underlying reason, not a new gap this table introduces.
+--
+-- The blob itself lives in Storage (bucket below); this row is just the
+-- pointer + metadata.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+create table if not exists line_audio (
+  id                uuid primary key default gen_random_uuid(),
+  section_id        uuid not null references sections(id) on delete cascade,
+  song_id           uuid not null references songs(id) on delete cascade,
+  line_index        integer not null,
+  storage_path      text not null,
+  duration_seconds  numeric,
+  created_by        uuid references auth.users(id),
+  created_at        timestamptz not null default now()
+);
+
+create index if not exists idx_line_audio_section on line_audio(section_id, line_index);
+
+alter table line_audio enable row level security;
+
+drop policy if exists line_audio_owner on line_audio;
+create policy line_audio_owner on line_audio
+  for all using (
+    exists (select 1 from sections sec join songs s on s.id = sec.song_id where sec.id = line_audio.section_id and s.user_id = auth.uid())
+  ) with check (
+    exists (select 1 from sections sec join songs s on s.id = sec.song_id where sec.id = line_audio.section_id and s.user_id = auth.uid())
+  );
+
+-- Storage bucket for the actual audio bytes — not publicly readable, access
+-- goes entirely through the RLS policies below (path convention:
+-- {song_id}/{section_id}/{filename}, matching line_audio.storage_path).
+insert into storage.buckets (id, name, public)
+values ('voice-memos', 'voice-memos', false)
+on conflict (id) do nothing;
+
+drop policy if exists voice_memos_owner_select on storage.objects;
+create policy voice_memos_owner_select on storage.objects
+  for select using (
+    bucket_id = 'voice-memos'
+    and exists (
+      select 1 from songs s
+      where s.id::text = (storage.foldername(name))[1] and s.user_id = auth.uid()
+    )
+  );
+
+drop policy if exists voice_memos_owner_insert on storage.objects;
+create policy voice_memos_owner_insert on storage.objects
+  for insert with check (
+    bucket_id = 'voice-memos'
+    and exists (
+      select 1 from songs s
+      where s.id::text = (storage.foldername(name))[1] and s.user_id = auth.uid()
+    )
+  );
+
+drop policy if exists voice_memos_owner_delete on storage.objects;
+create policy voice_memos_owner_delete on storage.objects
+  for delete using (
+    bucket_id = 'voice-memos'
+    and exists (
+      select 1 from songs s
+      where s.id::text = (storage.foldername(name))[1] and s.user_id = auth.uid()
+    )
+  );

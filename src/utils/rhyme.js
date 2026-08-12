@@ -263,6 +263,20 @@ export function classifyStanzaRhymes(lines, lang = 'es', dialect = 'central') {
   }));
 }
 
+// Content-driven Socratic trigger (deliberately NOT a "user paused typing"
+// timer — the writer needs room to think in silence, that's a real product
+// call, not an oversight). A line "breaks" the stanza's established scheme
+// when sibling lines already form a real rhyme group — classifyStanzaRhymes
+// only assigns a type once 2+ lines share a key, so any OTHER line with a
+// non-null type already proves a scheme exists — but this line joined none
+// of them. Pure and local: no API call, just whether to show the gutter
+// nudge; the actual SOCRATIC call only fires if the user taps it.
+export function detectRhymeFriction(rhymeLines, index) {
+  const entry = rhymeLines[index];
+  if (!entry || !entry.line?.trim() || entry.type) return false;
+  return rhymeLines.some((other, i) => i !== index && other.type);
+}
+
 // Lightweight heuristic, not a full echo/Leonine classification (see
 // rhyme strategy notes) — flags a word that shares a rhyme key with
 // another word in the same line, including the line's own end word.

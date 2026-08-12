@@ -412,8 +412,14 @@ export function applyMuseVerification(parsed, {
             );
         }
 
+        // Cap raised from 3 to 6 (the model already generates 5-6 raw
+        // candidates per call, see the SURGEON/ARCHITECT prompt above) so
+        // mobile's swipe deck gets a real local pool — the first 3 are
+        // shown, the rest sit client-side as swipe-left replacements with
+        // no network round-trip. Desktop's MuseFloatNode still renders only
+        // 3 (its own render loop slices), so this is a no-op for it.
         const beforeFinal = parsed.suggestions.map((s) => s.text);
-        parsed.suggestions = selectDiverseSuggestions(parsed.suggestions, 3);
+        parsed.suggestions = selectDiverseSuggestions(parsed.suggestions, 6);
         pushTraceStep(trace, 'after diversity selection (final)', beforeFinal, parsed.suggestions.map((s) => s.text));
     }
 

@@ -203,7 +203,11 @@ export default function MuseFloatNode({ id, data, selected }) {
 
                   {(entry.mode === 'SURGEON' || entry.mode === 'ARCHITECT') && entry.options?.length > 0 && (
                     <div className="muse-options">
-                      {entry.options.map((opt, j) => {
+                      {/* Server-side pool is up to 6 now (see museApi.js) so
+                          mobile's swipe deck has local regeneration
+                          candidates — desktop keeps its original 3-card
+                          display by slicing here. */}
+                      {entry.options.slice(0, 3).map((opt, j) => {
                         const saved = savedOptions.has(`${entry.id}:${j}`);
                         return (
                           <div className="muse-option-row" key={j}>

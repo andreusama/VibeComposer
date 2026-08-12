@@ -778,3 +778,53 @@ create policy voice_memos_owner_delete on storage.objects
       where s.id::text = (storage.foldername(name))[1] and s.user_id = auth.uid()
     )
   );
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- lexicon — the Cultural Resonance Engine's deterministic rhyme source. NOT
+-- user data: one global, shared reference table (no song_id/user_id — every
+-- row here is real-world Spanish vocabulary, not anything a user wrote), so
+-- its RLS shape is deliberately the opposite of every other table in this
+-- schema: public READ (any signed-in client can query rhyme candidates),
+-- but NO public write policy at all — inserts only ever happen via
+-- scripts/seed-lexicon-kaikki.ts using the Supabase service-role key (which
+-- bypasses RLS entirely), never through the app's anon key. That's the
+-- whole reason RLS is even worth enabling here: it's a write-lock, not an
+-- ownership boundary.
+--
+-- rhyme_key is the word's stressed-vowel-onward tail (see rhyme.js's
+-- getWordRhymeKey — consonant key), computed with the SAME algorithm the
+-- live app uses to check rhymes, so a lexicon match is guaranteed to also
+-- pass the app's own wordMatchesRhyme check, not just approximately agree
+-- with it. charisma_score (1-10) is a heuristic "how evocative/poetic does
+-- this word read" proxy derived from word shape + corpus frequency at seed
+-- time (see the seed script's own comment) — NOT a linguistically
+-- validated rating; short, ultra-common function words score low, longer
+-- rarer content words score higher. Good enough to bias SELECTs toward
+-- more interesting candidates, not a claim of poetic authority.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+create table if not exists lexicon (
+  id               bigint generated always as identity primary key,
+  word             text not null,
+  lang_code        varchar(5) not null default 'es',
+  syllables        int not null,
+  stress_type      text check (stress_type in ('aguda', 'llana', 'esdrujula')),
+  rhyme_key        varchar(20) not null,
+  charisma_score   int not null default 5 check (charisma_score between 1 and 10),
+  freq_rank        int,
+  tags             text[] not null default '{}',
+  created_at       timestamptz not null default now(),
+  unique (word, lang_code)
+);
+
+-- The Cultural Resonance Engine's one real query: "give me high-charisma
+-- words matching this rhyme_key, for this language" — this index is what
+-- makes that a real indexed lookup instead of a sequential scan over
+-- however many tens of thousands of rows the seed script imports.
+create index if not exists idx_lexicon_rhyme on lexicon(lang_code, rhyme_key, charisma_score desc);
+
+alter table lexicon enable row level security;
+
+drop policy if exists lexicon_public_read on lexicon;
+create policy lexicon_public_read on lexicon
+  for select using (true);

@@ -67,6 +67,11 @@ export default function MuseFloatNode({ id, data, selected }) {
   // long thread — re-pointed every render via the ref callback below, not
   // tracked as its own state.
   const lastEntryRef = useRef(null);
+  // session_angles_history — rhyme words and cultural frames the Cultural
+  // Resonance Engine has already surfaced while THIS node has been open
+  // (see museApi.js's buildCulturalResonance), so it never hands back the
+  // same mandatory word or refrán/tropo twice across the conversation.
+  const angleHistoryRef = useRef({ words: [], frames: [] });
 
   useEffect(() => {
     let cancelled = false;
@@ -106,7 +111,18 @@ export default function MuseFloatNode({ id, data, selected }) {
         // debug log in dev, regardless of this toggle.
         debug: debugMode,
         meta: { songId, songTitle, nodeLabel: noteFunction },
+        excludeRhymeWords: angleHistoryRef.current.words,
+        excludeCulturalFrames: angleHistoryRef.current.frames,
       });
+      if (response.culturalResonance?.enabled) {
+        const { mandatoryWord, culturalFrame } = response.culturalResonance;
+        if (mandatoryWord && !angleHistoryRef.current.words.includes(mandatoryWord)) {
+          angleHistoryRef.current.words.push(mandatoryWord);
+        }
+        if (culturalFrame && !angleHistoryRef.current.frames.includes(culturalFrame)) {
+          angleHistoryRef.current.frames.push(culturalFrame);
+        }
+      }
       setDebugInfo(response._debug || null);
       const { data: rows, error: saveError } = await saveMuseTurn(songId, sourceNoteId, message, response);
       if (saveError) { setError(saveError.message); return; }

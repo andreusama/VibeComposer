@@ -26,17 +26,42 @@ export const LANG_RULES = {
   },
 };
 
+// The UNION of both languages' accented VOWELS — á is Spanish-only
+// (Catalan has no á), which is why it can't be left out even though this
+// whole set reads Catalan-shaped otherwise. This used to be hand-copied as
+// a regex literal in FOUR separate places across syllables.js/rhyme.js,
+// and á had silently gone missing from every one of them — corrupting
+// syllable/hiatus/stress/rhyme detection for any Spanish word that has one
+// (está, árbol, días, rápido, ...), since it got stripped as if the letter
+// didn't exist. Single shared source of truth now, so that class of bug
+// can't recur — see rhyme.js's VOWEL_RUN_RE/VOWEL_RE for reuse. ñ/ç are
+// NOT vowels, so they're added separately in ACCENT_LETTERS below, not
+// folded into this set.
+export const ACCENT_VOWELS = 'àáèéíïòóúü';
+export const ACCENT_LETTERS = ACCENT_VOWELS + 'ñç';
+
 export function stripToLetters(word) {
-  return word.toLowerCase().replace(/[^a-zàèéíïòóúüñç']/gi, '');
+  return word.toLowerCase().replace(new RegExp(`[^a-z${ACCENT_LETTERS}']`, 'gi'), '');
 }
 
+const VOWEL_RUN_RE = new RegExp(`[aeiou${ACCENT_VOWELS}]+`, 'g');
+const vowelCharRe = () => new RegExp(`[aeiou${ACCENT_VOWELS}]`);
+
 // 'y' is a vowel (sounds like "i") only at the end of a word, after another
-// vowel (hoy, rey, muy, ley) — elsewhere it's a consonant (ya, yo, ayuda).
+// vowel (hoy, rey, muy, ley) — elsewhere it's a consonant (ya, yo, ayuda) and
+// must be LEFT ALONE, not deleted: a consonant naturally isn't matched by
+// the vowel-run regexes downstream, so keeping it is what correctly keeps
+// two separate vowel runs separate. Deleting it (the previous behavior)
+// silently fused them into one — "rayo" became "rao", merging its two
+// vowel runs into a false diphthong and computing the exact same rhyme_key
+// as "cacao"/"bacalao"/"sarao", none of which actually rhyme with it.
+// Affects any word with a mid-word consonantal y: mayo, rayo, playa,
+// ayuda, apoyo, hoyo, proyecto, desayuno, ensayo, arroyo, yema, cayado...
 export function normalizeY(word) {
-  if (word.endsWith('y') && word.length > 1 && /[aeiouàèéíïòóúü]/.test(word[word.length - 2])) {
+  if (word.endsWith('y') && word.length > 1 && vowelCharRe().test(word[word.length - 2])) {
     return word.slice(0, -1) + 'i';
   }
-  return word.replace(/y/g, '');
+  return word;
 }
 
 export function silenceGuQu(word) {
@@ -54,7 +79,7 @@ export function countWordSyllables(rawWord, lang = 'es') {
   word = normalizeY(word);
   word = silenceGuQu(word);
 
-  const runs = word.match(/[aeiouàèéíïòóúü]+/g);
+  const runs = word.match(VOWEL_RUN_RE);
   if (!runs) return 0;
 
   let syllables = 0;
@@ -87,7 +112,7 @@ export function countLineSyllables(line, lang = 'es') {
   let total = 0;
   let prevEndedInVowelNoPunct = false;
 
-  const vowelRe = /[aeiouàèéíïòóúüy]/i;
+  const vowelRe = new RegExp(`[aeiouy${ACCENT_VOWELS}]`, 'i');
 
   for (const token of tokens) {
     const clean = stripToLetters(token);

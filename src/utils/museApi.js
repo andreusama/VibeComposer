@@ -21,6 +21,7 @@ import {splitIntoLines} from './textLines.js';
 import {countLineSyllables} from './syllables.js';
 import {significantWords} from './repeatedWords.js';
 import {logDebugEvent} from './debugLog.js';
+import {queryRhymeCandidates} from './lexicon.js';
 
 export const MUSE_MODEL = 'claude-sonnet-5';
 
@@ -191,6 +192,25 @@ DESPUÉS de este bloque (de más cercano a más lejano):
 ${afterText}`;
 }
 
+// Cultural Resonance Engine's Step 4 (LLM Assembly) — renders whatever
+// buildCulturalResonance (below) produced into the prompt. Explicitly
+// scoped to ARCHITECT/WORD_BANK: since the model — not this code — makes
+// the final mode call on an unforced turn, the instruction itself tells it
+// to disregard this block entirely if SURGEON is the right answer, rather
+// than relying only on the forceMode==='SURGEON' skip upstream.
+export function describeCulturalResonance(resonance) {
+    if (!resonance) return '';
+    if (!resonance.enabled) {
+        return `\n(Motor de resonancia cultural: no se encontraron rimas de alto carisma en el léxico para "${resonance.concept}" — genera con tu criterio habitual, sin palabra obligatoria.)\n`;
+    }
+    const frameLine = resonance.culturalFrame
+        ? `- Marco cultural sugerido: "${resonance.culturalFrame}"${resonance.tropo ? ` (${resonance.tropo})` : ''}\n`
+        : '';
+    return `\nMOTOR DE RESONANCIA CULTURAL — aplica ÚNICAMENTE si tu respuesta es ARCHITECT o WORD_BANK; si el modo correcto para este turno es SURGEON, ignora este bloque por completo:
+- Palabra obligatoria a incorporar en la línea que generes: "${resonance.mandatoryWord}" (ya verificada como rima real de "${resonance.concept}" — no la cuestiones ni la sustituyas)
+${frameLine}Construye la línea con naturalidad alrededor de esa palabra y ese marco — no fuerces la referencia si choca con la voz del artista definida arriba; la voz siempre gana.\n`;
+}
+
 export function buildDynamicMuseContext({
                                             verseText,
                                             noteFunction,
@@ -199,7 +219,8 @@ export function buildDynamicMuseContext({
                                             dialect,
                                             songStructure,
                                             targetVerse,
-                                            forceMode
+                                            forceMode,
+                                            culturalResonance = null,
                                         }) {
     const recentConversation = conversation.slice(-3);
     const targetVerseBlock = describeTargetVerse(targetVerse);
@@ -213,7 +234,7 @@ ${targetVerseBlock ? targetVerseBlock + '\n\n' : ''}${describeSongStructure(song
 
 Conversación hasta ahora sobre esta línea:
 ${formatConversation(recentConversation)}
-${forceModeBlock}
+${forceModeBlock}${describeCulturalResonance(culturalResonance)}
 Recuerda: responde solo con el JSON descrito arriba, nada más.`;
 }
 
@@ -519,8 +540,18 @@ export async function askMuse({
                                   debug = false,
                                   meta = {},
                                   staticSystemOverride = null,
+                                  // session_angles_history — words/frames the CALLER already surfaced
+                                  // for this concept earlier in the session (tracked client-side, see
+                                  // MusePopover.jsx/MuseFloatNode.jsx), so a regenerate never hands
+                                  // back a duplicate rhyme word or refrán/tropo.
+                                  excludeRhymeWords = [],
+                                  excludeCulturalFrames = [],
                               }) {
     const staticSystem = staticSystemOverride ?? buildStaticMuseInstructions({lyricDna, blockProfile, lang, dialect});
+    const culturalResonance = await buildCulturalResonance({
+        verseText, targetVerse, lang, dialect, forceMode,
+        excludeWords: excludeRhymeWords, excludeFrames: excludeCulturalFrames,
+    });
     const dynamicContext = buildDynamicMuseContext({
         verseText,
         noteFunction,
@@ -530,6 +561,7 @@ export async function askMuse({
         songStructure,
         targetVerse,
         forceMode,
+        culturalResonance,
     });
 
     const userPrompt = userMessage
@@ -540,6 +572,12 @@ export async function askMuse({
     const raw = await callClaude(staticSystem, userPrompt, 1000);
     const latencyMs = Date.now() - startedAt;
     const parsed = parseCompanionResponse(raw);
+
+    // Exposed regardless of DEV/production — session_angles_history lives
+    // in the CALLER (MusePopover.jsx/MuseFloatNode.jsx), not here, and it
+    // needs this on every real turn to know what word/frame to exclude on
+    // the next regenerate, not just when a debug panel happens to be open.
+    parsed.culturalResonance = culturalResonance;
 
     // Only collected in dev builds — see below, nothing here runs for real
     // users in production.
@@ -632,4 +670,92 @@ Genera el resumen actualizado.`;
         console.error('Error al actualizar el perfil local del bloque:', e);
         return currentSummary;
     }
+}
+
+// ─── Cultural Resonance Engine — cultural-frame extraction ─────────────────
+// Step 3 of the pipeline (see buildCulturalResonance below): a short,
+// separate LLM call that finds the cultural trope/aesthetic frame a key
+// concept evokes (e.g. "caballo" → "el caballo del malo," derrota y mala
+// suerte) — deliberately NOT folded into the main ARCHITECT/WORD_BANK call,
+// because its result (the Cultural Frame) is an INPUT to that call, per the
+// pipeline's own ordering: DB rhyme query → cultural extraction → LLM
+// assembly. This is the one part of the engine that's genuinely
+// LLM-driven, not deterministic — unlike the rhyme word itself (always
+// from lexicon.js's SQL query, never invented here), a cultural
+// association is inherently an interpretive, not a lookup, task.
+//
+// excludeFrames is this turn's session_angles_history — tropes already
+// surfaced for THIS concept earlier in the session, so a regenerate never
+// hands back the same refrán/archetype twice.
+export async function extractCulturalFrame({concept, lang = 'es', excludeFrames = []}) {
+    if (!concept) return null;
+
+    const system = `Eres un experto en refranes, tropos culturales y arquetipos estéticos
+hispanohablantes. Dado un concepto clave de una letra de canción, identifica UNA asociación
+cultural concreta y evocadora — un refrán, un tropo popular, o un arquetipo estético/de género
+musical — que ese concepto evoque. No la desarrolles en verso, solo nómbrala.
+Responde EXCLUSIVAMENTE con JSON: {"frame": "nombre corto del tropo/arquetipo", "tropo": "en qué consiste, muy brevemente"}.
+Sin markdown, sin explicación fuera del JSON.`;
+
+    const excludeText = excludeFrames.length
+        ? `\n\nYa se han usado estos tropos para "${concept}" en esta sesión — NO los repitas, encuentra uno distinto:\n${excludeFrames.map((f) => `- ${f}`).join('\n')}`
+        : '';
+    const userPrompt = `Concepto clave: "${concept}"${excludeText}`;
+
+    try {
+        const raw = await callClaude(system, userPrompt, 200);
+        const parsed = JSON.parse(raw.trim());
+        if (!parsed.frame) return null;
+        return {frame: parsed.frame, tropo: parsed.tropo || ''};
+    } catch (e) {
+        // Cultural framing is an enhancement, not a requirement — a failed
+        // extraction just means the main call proceeds without one (same
+        // "graceful degrade" the DB-side fallback uses for zero rhyme
+        // matches), not a broken turn.
+        console.error('Error al extraer el marco cultural:', e);
+        return null;
+    }
+}
+
+// Orchestrates the full pipeline for one turn: DB Query → Cultural
+// Extraction, producing the material Step 4 (LLM Assembly) injects into
+// the main call — see the block built in buildDynamicMuseContext. Never
+// called for SURGEON (forceMode === 'SURGEON' skips it entirely, per the
+// engine's own rule of staying purely metric there); for an
+// unforced/model-decided turn we still can't know in advance whether the
+// model will land on SURGEON, so the injected prompt block itself also
+// tells the model to ignore this material if it does.
+//
+// The "key concept" is simply the target line's own last significant
+// word — matches every example in the spec (caballo/haunted/cierge are
+// each literally the line's ending word, not a separately abstracted
+// theme), and it's also exactly the word whose rhyme_key we need to query
+// anyway, so one word serves both roles.
+export async function buildCulturalResonance({verseText, targetVerse, lang, dialect, forceMode, excludeWords = [], excludeFrames = []}) {
+    if (forceMode === 'SURGEON') return null;
+
+    const targetLine = targetVerse
+        ? `${targetVerse.before}${targetVerse.text}${targetVerse.after}`
+        : splitIntoLines(verseText).filter(Boolean).pop();
+    if (!targetLine) return null;
+
+    const key = getLineRhymeKey(targetLine, lang, dialect);
+    if (!key) return null;
+
+    const words = significantWords(targetLine);
+    const concept = words[words.length - 1];
+    if (!concept) return null;
+
+    const {data: candidates} = await queryRhymeCandidates({rhymeKey: key.consonant, lang, exclude: excludeWords});
+    if (!candidates.length) return {enabled: false, degraded: true, concept};
+
+    const frameResult = await extractCulturalFrame({concept, lang, excludeFrames});
+    return {
+        enabled: true,
+        concept,
+        mandatoryWord: candidates[0].word,
+        candidateWords: candidates.map((c) => c.word),
+        culturalFrame: frameResult?.frame || null,
+        tropo: frameResult?.tropo || null,
+    };
 }

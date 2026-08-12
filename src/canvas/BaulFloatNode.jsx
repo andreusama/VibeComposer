@@ -8,8 +8,9 @@ import { saveLyricDna, insertBaulEntry } from './canvasData.js';
 // (draggable, closable, lives on the canvas rather than docked), but its
 // own thing: no conversation, just "dump material in, see the fused ADN
 // come back out." lyric_dna is intentionally NOT the same store as
-// museProfile (see baulProcessor.js / schema.sql) — this only ever reads
-// and writes songs.lyric_dna.
+// muse_profile (see baulProcessor.js / schema.sql) — this only ever reads
+// and writes songs.lyric_dna. lyric_dna is also the sole "vibe" source
+// now — there's no separate song-level summary field anywhere.
 export default function BaulFloatNode({ id, data, selected }) {
   const { songId, lyricDna, onLyricDnaUpdated, onClose, sourceBlackHoleId, onStatusChange } = data;
 

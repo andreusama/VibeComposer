@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { NodeResizer } from '@xyflow/react';
-import { loadMuseConversation, saveMuseTurn, markMuseOptionSaved } from './museData.js';
+import { loadMuseConversation, saveMuseTurn, markMuseOptionSaved, loadMuseProfile } from './museData.js';
 import { askMuse } from '../utils/museApi.js';
 import { recordMuseTurnAndMaybeUpdateProfile } from './museProfileUpdater.js';
 import { addAnnotation } from './canvasData.js';
@@ -34,7 +34,12 @@ const MODE_LABELS = {
 // know or care whether this is open.
 export default function MuseFloatNode({ id, data, selected }) {
   const {
-    songId, lineId, verseText, noteFunction, museProfile, onMuseProfileUpdated,
+    // sourceNoteId IS the block's section_id ("a note IS a sections row") —
+    // everything about the muse's own conversation/profile is keyed by it.
+    // lineId is a genuinely different, real physical line id, kept only
+    // for addAnnotation below (the annotations feature is unrelated and
+    // still line-scoped on purpose).
+    songId, sourceNoteId, lineId, verseText, noteFunction,
     lyricLanguage, lyricDialect, userId, onClose, songStructure, lyricDna,
     pendingTargetVerse, onClearTargetVerse, songTitle,
   } = data;
@@ -45,6 +50,12 @@ export default function MuseFloatNode({ id, data, selected }) {
   const [asking, setAsking] = useState(false);
   const [error, setError] = useState(null);
   const [savedOptions, setSavedOptions] = useState(new Set());
+  // LOCAL profile — what THIS block (verse/chorus/etc.) is about, not the
+  // whole song. Loaded once per sourceNoteId (this node's own concern) and
+  // kept fresh locally after every refresh, same as conversation below.
+  // The whole-song context comes from songStructure/describeSongStructure
+  // instead — real raw text, no separate song-level profile to load here.
+  const [blockProfile, setBlockProfile] = useState('');
   // Dev-only toggle for whether THIS node's inline panel is visible —
   // every real call is captured to the debug log regardless (see askMuse
   // in museApi.js), this only controls local clutter. debugInfo holds the
@@ -60,13 +71,17 @@ export default function MuseFloatNode({ id, data, selected }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { data: rows, error: loadError } = await loadMuseConversation(lineId);
+      const [{ data: rows, error: loadError }, { data: profileRow }] = await Promise.all([
+        loadMuseConversation(sourceNoteId),
+        loadMuseProfile(sourceNoteId),
+      ]);
       if (cancelled) return;
       if (!loadError) setConversation(rows || []);
+      setBlockProfile(profileRow?.summary || '');
       setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [lineId]);
+  }, [sourceNoteId]);
 
   useEffect(() => {
     if (conversation.length > 0) {
@@ -81,8 +96,8 @@ export default function MuseFloatNode({ id, data, selected }) {
     setError(null);
     try {
       const response = await askMuse({
-        verseText, noteFunction, museProfile, lyricDna, userMessage: message,
-        conversation: conversation.map((e) => ({ role: e.role, content: e.content, action_type: e.action, options: e.options })),
+        verseText, noteFunction, blockProfile, lyricDna, userMessage: message,
+        conversation: conversation.map((e) => ({ role: e.role, content: e.content, action_type: e.mode, options: e.options })),
         lang: lyricLanguage, dialect: lyricDialect,
         songStructure,
         targetVerse: pendingTargetVerse || null,
@@ -93,7 +108,7 @@ export default function MuseFloatNode({ id, data, selected }) {
         meta: { songId, songTitle, nodeLabel: noteFunction },
       });
       setDebugInfo(response._debug || null);
-      const { data: rows, error: saveError } = await saveMuseTurn(songId, lineId, response.themes, message, response);
+      const { data: rows, error: saveError } = await saveMuseTurn(songId, sourceNoteId, message, response);
       if (saveError) { setError(saveError.message); return; }
       setConversation((c) => [...c, ...rows]);
       setDraft('');
@@ -103,14 +118,14 @@ export default function MuseFloatNode({ id, data, selected }) {
 
       // Fire-and-forget — a slow or failed background profile refresh
       // should never hold up the turn that was just saved.
-      recordMuseTurnAndMaybeUpdateProfile({ songId, existingProfile: museProfile })
-        .then((result) => { if (result) onMuseProfileUpdated?.(result); });
+      recordMuseTurnAndMaybeUpdateProfile({ songId, sectionId: sourceNoteId, existingBlockProfile: blockProfile })
+        .then((result) => { if (result != null) setBlockProfile(result); });
     } catch (err) {
       setError(err.message === 'LIMIT_REACHED' ? 'daily AI limit reached — try again tomorrow' : err.message);
     } finally {
       setAsking(false);
     }
-  }, [asking, verseText, noteFunction, museProfile, lyricDna, conversation, lyricLanguage, lyricDialect, songId, lineId, onMuseProfileUpdated, songStructure, pendingTargetVerse, onClearTargetVerse, debugMode]);
+  }, [asking, verseText, noteFunction, blockProfile, lyricDna, conversation, lyricLanguage, lyricDialect, songId, sourceNoteId, songStructure, pendingTargetVerse, onClearTargetVerse, debugMode]);
 
   const handleSend = useCallback(() => send(draft), [send, draft]);
 
@@ -134,7 +149,7 @@ export default function MuseFloatNode({ id, data, selected }) {
   }, [userId, lineId]);
 
   const lastEntry = conversation[conversation.length - 1];
-  const isPendingQuestion = lastEntry?.role === 'muse' && lastEntry.action === 'SOCRATIC';
+  const isPendingQuestion = lastEntry?.role === 'muse' && lastEntry.mode === 'SOCRATIC';
   const modeLabels = MODE_LABELS[lyricLanguage] || MODE_LABELS.es;
   const typeLabels = TYPE_LABELS[lyricLanguage] || TYPE_LABELS.es;
   const angleLabels = ANGLE_LABELS[lyricLanguage] || ANGLE_LABELS.es;
@@ -183,10 +198,10 @@ export default function MuseFloatNode({ id, data, selected }) {
               }
               return (
                 <div ref={isLast ? lastEntryRef : null} className="muse-turn muse-turn-muse" key={entry.id}>
-                  <div className="muse-mode-label">{modeLabels[entry.action] || entry.action}</div>
-                  <p className={entry.action === 'SOCRATIC' ? 'muse-question' : 'muse-answer'}>{entry.content}</p>
+                  <div className="muse-mode-label">{modeLabels[entry.mode] || entry.mode}</div>
+                  <p className={entry.mode === 'SOCRATIC' ? 'muse-question' : 'muse-answer'}>{entry.content}</p>
 
-                  {(entry.action === 'SURGEON' || entry.action === 'ARCHITECT') && entry.options?.length > 0 && (
+                  {(entry.mode === 'SURGEON' || entry.mode === 'ARCHITECT') && entry.options?.length > 0 && (
                     <div className="muse-options">
                       {entry.options.map((opt, j) => {
                         const saved = savedOptions.has(`${entry.id}:${j}`);
@@ -210,7 +225,7 @@ export default function MuseFloatNode({ id, data, selected }) {
                     </div>
                   )}
 
-                  {entry.action === 'SOCRATIC' && entry.options?.length > 0 && (
+                  {entry.mode === 'SOCRATIC' && entry.options?.length > 0 && (
                     <div className="muse-chip-row">
                       {entry.options.map((chip, j) => (
                         <button key={j} className="muse-chip nodrag" onClick={() => send(chip)} disabled={asking}>
@@ -220,7 +235,7 @@ export default function MuseFloatNode({ id, data, selected }) {
                     </div>
                   )}
 
-                  {entry.action === 'WORD_BANK' && entry.options?.wordGroups?.length > 0 && (
+                  {entry.mode === 'WORD_BANK' && entry.options?.wordGroups?.length > 0 && (
                     <div className="muse-word-bank">
                       {entry.options.wordGroups.map((group, gi) => (
                         <div className="muse-word-group" key={gi}>

@@ -500,21 +500,35 @@ alter table songs
 alter table songs drop column if exists muse_profile;
 drop table if exists muse_entries;
 
--- One row per turn in an ongoing conversation about one line — not a
--- question/answer pair, since the muse asking back for context (and the
--- user replying) can chain across several turns before landing on actual
--- options. Append-only, grows without limit, NEVER sent to the muse API in
--- full — muse_profile below is the only thing that is.
+-- One row per turn in an ongoing conversation about one BLOCK (a note —
+-- see "A 'note' IS a sections row" below; typically one verse/chorus/etc,
+-- 1-8 lines) — not a question/answer pair, since the muse asking back for
+-- context (and the user replying) can chain across several turns before
+-- landing on actual options. Append-only, grows without limit, NEVER sent
+-- to the muse API in full — muse_profile below is the only thing that is.
+-- Keyed by section_id, not line_id: a block can hold several physical
+-- lines, and the conversation is about the block as a whole, not any one
+-- of them — line_id was only ever a fragile stand-in for "this note" (its
+-- identity broke if the first line got deleted/reordered).
 create table muse_entries (
   id                   uuid primary key default gen_random_uuid(),
   song_id              uuid not null references songs(id) on delete cascade,
-  line_id              uuid not null references lines(id) on delete cascade,
-  register             text check (register in ('amor', 'amistad', 'familia', 'lugar', 'otro')),
+  section_id           uuid not null references sections(id) on delete cascade,
   role                 text not null check (role in ('user', 'muse')),
   -- 'ask' = the user's request; 'clarify' = the muse asking back for
   -- context; 'suggest' = the muse offering concrete options. Null only
   -- transiently doesn't happen — every row gets one of these on insert.
   action               text not null check (action in ('ask', 'clarify', 'suggest')),
+  -- The muse's actual mode (SURGEON/ARCHITECT/SOCRATIC/WORD_BANK) for
+  -- 'muse' rows, null for 'user' rows. Separate from `action` on purpose:
+  -- `action` is the coarse ask/clarify/suggest bucket, but the UI needs
+  -- the specific mode both to label the turn correctly and to know which
+  -- shape `options` is in (a flat suggestions array for SURGEON/ARCHITECT
+  -- vs a {wordGroups} object for WORD_BANK) — SOCRATIC and WORD_BANK both
+  -- collapse to very different `action` values ('clarify' vs 'suggest'),
+  -- and SURGEON/ARCHITECT collapse to the SAME `action` ('suggest') as
+  -- each other and as WORD_BANK, so `action` alone can't drive rendering.
+  mode                 text check (mode in ('SURGEON', 'ARCHITECT', 'SOCRATIC', 'WORD_BANK')),
   content              text not null,
   -- Only populated on action='suggest' rows — the actual candidate
   -- lines/words, kept structured (not flattened into content) so each one
@@ -524,8 +538,7 @@ create table muse_entries (
   created_at           timestamptz not null default now()
 );
 
-create index idx_muse_entries_song_register on muse_entries(song_id, register);
-create index idx_muse_entries_line on muse_entries(line_id, created_at);
+create index idx_muse_entries_section on muse_entries(section_id, created_at);
 
 alter table muse_entries enable row level security;
 
@@ -537,19 +550,31 @@ create policy muse_entries_owner on muse_entries
     exists (select 1 from songs s where s.id = muse_entries.song_id and s.user_id = auth.uid())
   );
 
--- Live profile — the only thing ever interpolated into the muse's system
--- prompt. One row per (song, register); summary is short and gets
--- OVERWRITTEN on each refresh, never appended to, so a prompt's cost never
--- grows no matter how many months of answers accumulate behind it.
+-- Live LOCAL profile — what this one BLOCK is about, not the whole song
+-- (different blocks can be about completely different things). One row
+-- per section; summary is short and gets OVERWRITTEN on each refresh,
+-- never appended to, so a prompt's cost never grows no matter how many
+-- months of answers accumulate behind it.
+--
+-- Deliberately no GLOBAL/song-level counterpart: the muse already gets the
+-- full raw song text every turn via describeSongStructure in
+-- buildDynamicMuseContext (museApi.js) — real, uncompressed, always
+-- current. An extra AI-summarized "song_summary" on top of that was pure
+-- redundancy (an LLM's cached, lossy interpretation of text the model
+-- already reads in full every call) and got removed. "Vibe" — is the
+-- artist literal or metaphorical/abstract, what's the atmosphere — is left
+-- entirely to lyric_dna (the Baúl) and the muse's own live reading of the
+-- raw text, not a separate stored field.
 create table if not exists muse_profile (
+  section_id          uuid primary key references sections(id) on delete cascade,
   song_id             uuid not null references songs(id) on delete cascade,
-  register            text not null check (register in ('amor', 'amistad', 'familia', 'lugar', 'otro')),
   summary             text not null default '',
   interaction_count   int not null default 0,
   last_summarized_at  timestamptz,
-  updated_at          timestamptz not null default now(),
-  primary key (song_id, register)
+  updated_at          timestamptz not null default now()
 );
+
+create index idx_muse_profile_song on muse_profile(song_id);
 
 drop trigger if exists trg_muse_profile_updated_at on muse_profile;
 create trigger trg_muse_profile_updated_at
@@ -566,13 +591,13 @@ create policy muse_profile_owner on muse_profile
     exists (select 1 from songs s where s.id = muse_profile.song_id and s.user_id = auth.uid())
   );
 
--- Atomic increment-and-return, so two near-simultaneous answers in the same
--- register can never race each other into an inconsistent count the way a
+-- Atomic increment-and-return, so two near-simultaneous answers on the same
+-- block can never race each other into an inconsistent count the way a
 -- client-side read-then-write would. security definer + an explicit
 -- ownership check (RLS doesn't apply inside a definer function on its own)
 -- + a pinned search_path (blocks search_path-hijacking of unqualified
 -- names) is the standard safe shape for this kind of function.
-create or replace function muse_increment_interaction(p_song_id uuid, p_register text)
+create or replace function muse_increment_interaction(p_section_id uuid, p_song_id uuid)
 returns int
 language plpgsql
 security definer
@@ -585,9 +610,9 @@ begin
     raise exception 'not authorized';
   end if;
 
-  insert into muse_profile (song_id, register, interaction_count)
-  values (p_song_id, p_register, 1)
-  on conflict (song_id, register)
+  insert into muse_profile (section_id, song_id, interaction_count)
+  values (p_section_id, p_song_id, 1)
+  on conflict (section_id)
   do update set interaction_count = muse_profile.interaction_count + 1
   returning interaction_count into v_count;
 

@@ -1,10 +1,12 @@
 // ─── Muse — Claude calls ────────────────────────────────────────────────────
 // Two isolated things live here on purpose: the companion conversation
-// (askMuse) and periodically summarizing what's been learned into the
-// project's single evolving profile (summarizeMuseProfile). They share only
-// the low-level callClaude() helper — nothing about adjusting N or the
-// summary prompt should ever require touching the conversation path, or
-// vice versa.
+// (askMuse) and periodically summarizing what's been learned into a
+// block's own LOCAL profile (summarizeBlockProfile). There's no song-level
+// summary — the whole song's context is the real raw text
+// (describeSongStructure, sent fresh every turn), not something cached and
+// re-derived by a second AI call. They share only the low-level
+// callClaude() helper — nothing about adjusting N or the summary prompt
+// should ever require touching the conversation path, or vice versa.
 //
 // The muse is a co-writer sitting next to the composer, not a spectator —
 // four explicit modes (SURGEON/ARCHITECT/SOCRATIC/WORD_BANK) instead of one
@@ -81,7 +83,7 @@ Cuando actúes en modo SURGEON sobre este fragmento, "targetLineText" en tu
 respuesta debe ser exactamente esa línea completa, copiada tal cual.`;
 }
 
-export function buildStaticMuseInstructions({lyricDna, museProfile, lang = 'es', dialect = 'central'}) {
+export function buildStaticMuseInstructions({lyricDna, blockProfile, lang = 'es', dialect = 'central'}) {
     return `Eres "La Musa", un co-writer experto y colega de estudio sentado al lado
 del compositor en la mesa de mezclas. Tu función es asistir con material bruto
 e ingeniería poética. Cero juicio, cero adulación ("slop"), cero sermones o
@@ -111,11 +113,16 @@ actitud o léxico del artista (ej. palabras geográficas o descontextualizadas c
 Prioriza siempre asonancias naturales, frases cortas o verbos antes que forzar
 sustantivos extraños por el mero hecho de conseguir una rima consonante.
 
-=== 3. UNIVERSO DE LA CANCIÓN (muse_profile — QUÉ) ===
-La temática, conceptos e imágenes de ESTA canción:
-${JSON.stringify(museProfile || {})}
+=== 3. ESTE BLOQUE CONCRETO (perfil LOCAL — QUÉ) ===
+De qué trata este bloque (verso/estribillo/etc., no la canción entera) en concreto,
+aprendido de conversaciones anteriores sobre él:
+${blockProfile || '(todavía no hay resumen local para este bloque)'}
 
-El estilo (2) dicta CÓMO se habla; la temática (3) dicta QUÉ se dice.
+El estilo (2) dicta CÓMO se habla; este perfil local (3) dicta de QUÉ trata ESTE bloque
+en concreto. Para el contexto de la canción entera — su historia, sus otros bloques, y si
+el conjunto es literal o metafórico/abstracto — usa el texto real y completo que recibes
+en cada turno bajo "contexto global de la canción" (más abajo): decide el VIBE a partir de
+ESE texto directamente, no archives ni des por sentada una interpretación previa de él.
 
 === 4. MODOS DE ACTUACIÓN (elige ÚNICAMENTE UNO) ===
 
@@ -156,21 +163,31 @@ SI action_type == "WORD_BANK":
 {"action_type": "WORD_BANK", "target_rhyme": "palabra de ejemplo que ancla la rima", "rhyme_type": "consonante"|"asonante", "word_groups": [{"syllables": 2, "words": ["palabra1", "palabra2"]}, {"syllables": 3, "words": ["palabra3"]}, {"short_phrases": ["frase corta 1", "frase corta 2"]}], "themes": ["..."]}`;
 }
 
+// The GLOBAL layer (see buildStaticMuseInstructions' section 3) — real,
+// complete, uncompressed text of every block connected to the main
+// thread, every single turn. Deliberately NOT summarized: an earlier
+// version tried caching an AI-generated "song_summary" alongside this and
+// it was pure redundancy (a lossy, potentially-stale interpretation of
+// text the model already reads in full right here). Literal-vs-metaphorical
+// and "the vibe" are for the model to read directly off this text, not a
+// separately stored field.
 function describeSongStructure(songStructure) {
     const {before = [], after = []} = songStructure || {};
     const describe = (n) => `${n.type}: "${(n.text || '(vacía)').replace(/\n/g, ' / ')}"`;
     const beforeText = before.length
         ? before.map(describe).join('\n')
-        : 'sin notas anteriores conectadas en el hilo principal';
+        : 'sin bloques anteriores conectados en el hilo principal';
     const afterText = after.length
         ? after.map(describe).join('\n')
-        : 'sin notas siguientes conectadas en el hilo principal';
-    return `Estructura completa de la canción conectada al hilo principal, en orden:
+        : 'sin bloques siguientes conectados en el hilo principal';
+    return `CONTEXTO GLOBAL DE LA CANCIÓN — texto real y completo de cada bloque conectado
+al hilo principal, en orden (no un resumen: úsalo para entender la historia, la dinámica y
+si el conjunto es literal o metafórico/abstracto):
 
-ANTES de esta nota (de más lejana a más cercana):
+ANTES de este bloque (de más lejano a más cercano):
 ${beforeText}
 
-DESPUÉS de esta nota (de más cercana a más lejana):
+DESPUÉS de este bloque (de más cercano a más lejano):
 ${afterText}`;
 }
 
@@ -333,6 +350,17 @@ export function selectDiverseSuggestions(suggestions, limit = 3) {
     return selected;
 }
 
+// Records a trace step with BOTH the survivor count and the specific items
+// that got rejected this step (before-minus-after) — the Lab's pipeline
+// view shows the rejected list directly, not just a shrinking number, so
+// "why did this get cut" never requires re-running the call to find out.
+function pushTraceStep(trace, stage, beforeItems, afterItems) {
+    if (!trace) return;
+    const afterSet = new Set(afterItems);
+    const rejected = beforeItems.filter((item) => !afterSet.has(item));
+    trace.push({stage, count: afterItems.length, rejected});
+}
+
 export function applyMuseVerification(parsed, {
     verseText,
     targetVerse,
@@ -340,21 +368,23 @@ export function applyMuseVerification(parsed, {
     dialect = 'central'
 }, trace = null) {
     if ((parsed.action_type === 'SURGEON' || parsed.action_type === 'ARCHITECT') && parsed.suggestions.length) {
-        trace?.push({stage: 'model proposed', count: parsed.suggestions.length});
+        trace?.push({stage: 'model proposed', count: parsed.suggestions.length, rejected: []});
         const targetLine = targetVerse ? `${targetVerse.before}${targetVerse.text}${targetVerse.after}` : parsed.targetLineText;
 
+        const beforeMetric = parsed.suggestions.map((s) => s.text);
         if (targetLine) {
             const targetSyllables = countLineSyllables(targetLine, lang);
             if (targetSyllables > 0) {
                 const verifiedByMetric = parsed.suggestions.filter((s) => {
                     const optSyllables = countLineSyllables(s.text, lang);
-                    return Math.abs(optSyllables - targetSyllables) <= 1;
+                    return Math.abs(optSyllables - targetSyllables) <= 2;
                 });
                 if (verifiedByMetric.length > 0) parsed.suggestions = verifiedByMetric;
             }
         }
-        trace?.push({stage: 'after metric filter (±1 syllable)', count: parsed.suggestions.length});
+        pushTraceStep(trace, 'after metric filter (±2 syllables)', beforeMetric, parsed.suggestions.map((s) => s.text));
 
+        const beforeRepeat = parsed.suggestions.map((s) => s.text);
         const wordCounts = new Map();
         splitIntoLines(verseText)
             .filter((l) => l && l !== targetLine?.trim())
@@ -365,33 +395,39 @@ export function applyMuseVerification(parsed, {
             const original = parsed.suggestions.filter((s) => !significantWords(s.text).some((w) => existingWords.has(w)));
             if (original.length > 0) parsed.suggestions = original;
         }
-        trace?.push({stage: 'after word-repeat filter', count: parsed.suggestions.length});
+        pushTraceStep(trace, 'after word-repeat filter', beforeRepeat, parsed.suggestions.map((s) => s.text));
 
         if (parsed.isRhymeRequest && parsed.rhymeTargetWord && parsed.suggestions.length) {
+            const beforeRhyme = parsed.suggestions.map((s) => s.text);
             const targetKey = getWordRhymeKey(parsed.rhymeTargetWord, lang, dialect);
             if (targetKey) {
                 const verified = parsed.suggestions.filter((s) => wordMatchesRhyme(s.text, targetKey, lang, dialect));
                 parsed.suggestions = verified;
                 parsed.rhymeVerified = verified.length > 0;
             }
-            trace?.push({
-                stage: `after rhyme filter (${parsed.rhymeVerified ? 'verified' : 'unverified — kept anyway'})`,
-                count: parsed.suggestions.length
-            });
+            pushTraceStep(
+                trace,
+                `after rhyme filter (${parsed.rhymeVerified ? 'verified' : 'unverified — kept anyway'})`,
+                beforeRhyme, parsed.suggestions.map((s) => s.text)
+            );
         }
 
+        const beforeFinal = parsed.suggestions.map((s) => s.text);
         parsed.suggestions = selectDiverseSuggestions(parsed.suggestions, 3);
-        trace?.push({stage: 'after diversity selection (final)', count: parsed.suggestions.length});
+        pushTraceStep(trace, 'after diversity selection (final)', beforeFinal, parsed.suggestions.map((s) => s.text));
     }
 
     if (parsed.action_type === 'WORD_BANK' && parsed.wordBank) {
-        const wordBankCount = (wb) => wb.wordGroups.reduce((n, g) => n + g.words.length + g.shortPhrases.length, 0);
-        trace?.push({stage: 'model proposed', count: wordBankCount(parsed.wordBank)});
+        const wordBankItems = (wb) => wb.wordGroups.flatMap((g) => [...g.words, ...(g.shortPhrases || [])]);
+        const wordBankCount = (wb) => wordBankItems(wb).length;
+        const proposedCount = wordBankCount(parsed.wordBank);
+        trace?.push({stage: 'model proposed', count: proposedCount, rejected: []});
 
         // Same word-repetition rule as SURGEON/ARCHITECT above: a rhyme
         // bank that hands back a word already sitting in the note isn't
         // offering anything new. minLength 2, not the usual 3 — rhyme
         // words legitimately run shorter than a full line's vocabulary.
+        const beforeRepeat = wordBankItems(parsed.wordBank);
         const existingWords = new Set(significantWords(verseText, 2));
         if (existingWords.size) {
             const isFresh = (w) => !significantWords(w, 2).some((tok) => existingWords.has(tok));
@@ -401,12 +437,13 @@ export function applyMuseVerification(parsed, {
                 shortPhrases: g.shortPhrases.filter(isFresh),
             }));
         }
-        trace?.push({stage: 'after word-repeat filter', count: wordBankCount(parsed.wordBank)});
+        pushTraceStep(trace, 'after word-repeat filter', beforeRepeat, wordBankItems(parsed.wordBank));
 
         // No safety valve here on purpose, unlike the metric/rhyme filters
         // above — a word bank whose entries don't actually rhyme is worse
         // than a short, honest one. If nothing survives, the result is
         // genuinely empty; that's the correct outcome, not a bug.
+        const beforeRhyme = wordBankItems(parsed.wordBank);
         if (parsed.wordBank.targetRhyme) {
             const targetKey = getWordRhymeKey(parsed.wordBank.targetRhyme, lang, dialect);
             if (targetKey) {
@@ -417,7 +454,7 @@ export function applyMuseVerification(parsed, {
         }
 
         parsed.wordBank.wordGroups = parsed.wordBank.wordGroups.filter((g) => g.words.length || g.shortPhrases.length);
-        trace?.push({stage: 'after rhyme filter (final)', count: wordBankCount(parsed.wordBank)});
+        pushTraceStep(trace, 'after rhyme filter (final)', beforeRhyme, wordBankItems(parsed.wordBank));
     }
 
     return parsed;
@@ -455,6 +492,11 @@ function buildLineContextForDebug(verseText, lang, dialect, songStructure) {
  * @param {{songId?: string, songTitle?: string, nodeLabel?: string}} [args.meta] -
  *   optional context attached to the debug-log entry (MuseEyeScreen's
  *   history list/footer). Purely descriptive, never sent to Claude.
+ * @param {string} [args.staticSystemOverride] - dev-only escape hatch for
+ *   the Muse Lab's A/B prompt testing: when given, this literal text is
+ *   sent as the static system block INSTEAD of buildStaticMuseInstructions'
+ *   output (lyricDna/blockProfile are ignored in that case). Never set by
+ *   any real product call path — only the lab's "Prompt B" flow uses it.
  */
 export async function askMuse({
                                   verseText,
@@ -462,7 +504,7 @@ export async function askMuse({
                                   userMessage,
                                   conversation = [],
                                   lyricDna = {},
-                                  museProfile = {},
+                                  blockProfile = '',
                                   lang = 'es',
                                   dialect = 'central',
                                   songStructure = {},
@@ -470,8 +512,9 @@ export async function askMuse({
                                   forceMode = null,
                                   debug = false,
                                   meta = {},
+                                  staticSystemOverride = null,
                               }) {
-    const staticSystem = buildStaticMuseInstructions({lyricDna, museProfile, lang, dialect});
+    const staticSystem = staticSystemOverride ?? buildStaticMuseInstructions({lyricDna, blockProfile, lang, dialect});
     const dynamicContext = buildDynamicMuseContext({
         verseText,
         noteFunction,
@@ -523,6 +566,15 @@ export async function askMuse({
             rawDynamicContext: dynamicContext,
             rawUserMessage: userMessage || '',
             verificationTrace,
+            // First trace entry is always "model proposed", last is always
+            // the final survivor count — a plain number here (not smuggled
+            // onto the trace array as an extra property) so it survives
+            // JSON.stringify when the Lab persists a run to localStorage.
+            survivalRate: verificationTrace?.length
+                ? (verificationTrace[0].count > 0
+                    ? Math.round((verificationTrace[verificationTrace.length - 1].count / verificationTrace[0].count) * 100)
+                    : 0)
+                : null,
             actionType: parsed.action_type,
             parsedOutput: {suggestions: parsed.suggestions, question: parsed.question, wordBank: parsed.wordBank},
             lineContext: buildLineContextForDebug(verseText, lang, dialect, songStructure),
@@ -537,27 +589,41 @@ export async function askMuse({
     return parsed;
 }
 
-export async function summarizeMuseProfile({currentProfile = {}, conversation = [], lang = 'es'}) {
-    if (!conversation.length) return currentProfile;
+/**
+ * Refreshes ONE block's LOCAL profile — a short prose summary of what THIS
+ * block (verse/chorus/etc.) is about, not the whole song. Plain text, not
+ * JSON: nothing downstream needs structured fields, and short prose is
+ * exactly what gets interpolated back into the next call's system prompt
+ * (see buildStaticMuseInstructions' section 3). There is no song-level
+ * counterpart to this — the whole song's context is the real raw text
+ * (describeSongStructure, above), read fresh every turn, not a cached
+ * summary rolled up from these.
+ * @param {{currentSummary?: string, userMessages: string[], lang?: string}} args
+ * @returns {Promise<string>} the updated summary — falls back to
+ *   currentSummary on any failure, never throws.
+ */
+export async function summarizeBlockProfile({currentSummary = '', userMessages = [], lang = 'es'}) {
+    if (!userMessages.length) return currentSummary;
 
-    const system = `Eres un asistente analítico que mantiene actualizado el perfil temático de una canción (museProfile).
-Dada la conversación reciente entre el compositor y su co-writer, extrae y actualiza en formato JSON los conceptos, imágenes, emociones e historia clave aprendidos.
-Devuelve EXCLUSIVAMENTE un objeto JSON válido.`;
+    const system = `Eres un asistente analítico que mantiene actualizado un resumen breve de qué trata UN BLOQUE
+concreto (un verso, estribillo, etc.) de una canción, a partir de lo que el compositor le ha
+pedido a su musa sobre él.
+Responde EXCLUSIVAMENTE con el resumen actualizado en prosa (2-4 frases), en ${lang}, sin JSON,
+sin markdown, sin explicación fuera del resumen mismo.`;
 
-    const userPrompt = `Perfil actual:
-${JSON.stringify(currentProfile, null, 2)}
+    const userPrompt = `Resumen actual de este bloque:
+${currentSummary || '(todavía no hay resumen)'}
 
-Conversación reciente:
-${formatConversation(conversation)}
+Lo que el compositor ha pedido recientemente sobre este bloque:
+${userMessages.map((m, i) => `${i + 1}. "${m}"`).join('\n')}
 
-Genera el nuevo objeto JSON museProfile actualizado.`;
+Genera el resumen actualizado.`;
 
     try {
-        const raw = await callClaude(system, userPrompt, 500);
-        const cleaned = raw.replace(/```json|```/g, '').trim();
-        return JSON.parse(cleaned);
+        const raw = await callClaude(system, userPrompt, 300);
+        return raw.trim() || currentSummary;
     } catch (e) {
-        console.error('Error al actualizar museProfile:', e);
-        return currentProfile;
+        console.error('Error al actualizar el perfil local del bloque:', e);
+        return currentSummary;
     }
 }

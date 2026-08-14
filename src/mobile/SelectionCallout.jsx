@@ -3,7 +3,7 @@
 // act on it. Positioned in fixed/viewport coordinates from the selection's
 // own DOMRect (captured in LineRow), clamped so it never runs off the right
 // edge on a narrow phone.
-export default function SelectionCallout({ rect, onRhyme, onAskMuse, onConcept }) {
+export default function SelectionCallout({ rect, onRhyme, onAskMuse, onConcept, onGenealogy }) {
   if (!rect) return null;
   const style = {
     top: rect.bottom + 8,
@@ -26,6 +26,13 @@ export default function SelectionCallout({ rect, onRhyme, onAskMuse, onConcept }
           being reachable by phrasing a free-text ask just right. */}
       <button className="sel-callout-btn" onMouseDown={(e) => e.preventDefault()} onClick={onConcept}>
         ✧ Concept
+      </button>
+      {/* "Genealogía de la imagen" — its own dedicated doorway (explicitly
+          requested separate from Concept/SOCRATIC): real universal-culture
+          references (literature, myth, art, film) for a word/idea, not
+          rhyme-adjacent vocabulary. See museApi.js's getImageGenealogy. */}
+      <button className="sel-callout-btn" onMouseDown={(e) => e.preventDefault()} onClick={onGenealogy}>
+        🏛 Genealogía
       </button>
       <button className="sel-callout-btn" onMouseDown={(e) => e.preventDefault()} onClick={onAskMuse}>
         ✦ Ask muse

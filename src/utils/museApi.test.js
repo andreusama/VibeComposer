@@ -28,7 +28,7 @@ import {
   calculateContextWeights, MUSE_ACTION_TYPES, MUSE_TYPES, MUSE_ANGLES,
   buildCulturalResonance, describeCulturalResonance, extractCulturalFrame,
   buildWordBankFromLexicon, filterWordBankByConcept, getCulturalProvocation,
-  proposeConceptWords, guessConceptFromLine,
+  proposeConceptWords, guessConceptFromLine, getImageGenealogy,
 } from './museApi.js';
 import { queryRhymeCandidates, queryWordBank, verifyWordsInLexicon } from './lexicon.js';
 
@@ -555,6 +555,19 @@ describe('proposeConceptWords', () => {
     const result = await proposeConceptWords({ concept: 'volar' });
     expect(result).toEqual([]);
   });
+
+  // Reported live: a real Claude response wrapped its JSON in a ```json
+  // fence despite the "sin markdown" instruction, and JSON.parse(raw.trim())
+  // crashed with "unexpected character at line 1 column 1" instead of
+  // degrading gracefully. stripJsonFences (shared by every direct-JSON
+  // helper in this file) fixes this — same regression matters for
+  // extractCulturalFrame/getCulturalProvocation/getImageGenealogy/
+  // filterWordBankByConcept too, all fixed the same way.
+  it('parses a markdown-fenced response instead of crashing', async () => {
+    mockClaudeResponse('```json\n' + JSON.stringify({ words: ['alado'] }) + '\n```');
+    const result = await proposeConceptWords({ concept: 'volar' });
+    expect(result).toEqual(['alado']);
+  });
 });
 
 describe('calculateContextWeights', () => {
@@ -881,6 +894,105 @@ describe('getCulturalProvocation', () => {
     });
     const userPrompt = JSON.parse(fetch.mock.calls[0][1].body).messages[0].content;
     expect(userPrompt).toContain('un tropo ya visto');
+  });
+
+  // Reported live: "saboreando la derrota" with no explicit subject read as
+  // ambiguity about the METAPHOR (physical vs. emotional defeat) when the
+  // real gap was the elided SUBJECT — "el miedo," named two lines earlier,
+  // was never even considered. Rather than guess, the model can ask.
+  it('returns {needsClarification} instead of {frame,tropo} when the subject/agent is genuinely ambiguous', async () => {
+    mockClaudeResponse(JSON.stringify({ needsClarification: '¿quién saborea la derrota — tú, o el miedo mencionado antes?' }));
+    const result = await getCulturalProvocation({ concept: 'saborear la derrota', lang: 'es' });
+    expect(result).toEqual({ needsClarification: '¿quién saborea la derrota — tú, o el miedo mencionado antes?' });
+  });
+
+  it('passes the clarification through to the prompt on a re-run', async () => {
+    mockClaudeResponse(JSON.stringify({ frame: 'x', tropo: 'y' }));
+    await getCulturalProvocation({ concept: 'saborear la derrota', clarification: 'el miedo', lang: 'es' });
+    const userPrompt = JSON.parse(fetch.mock.calls[0][1].body).messages[0].content;
+    expect(userPrompt).toContain('el miedo');
+  });
+});
+
+describe('getImageGenealogy', () => {
+  // "Genealogía de la imagen" — its own dedicated feature, separate from
+  // getCulturalProvocation: universal culture (not scoped to Spanish-
+  // speaking tropes), and returns SEVERAL references at once instead of one
+  // frame/tropo. Same "confirm a real concept first" contract.
+  it('requires an explicit, confirmed concept — returns null without calling anything if missing', async () => {
+    const result = await getImageGenealogy({ verseText: 'una línea cualquiera', targetVerse: null, lang: 'es' });
+    expect(result).toBeNull();
+  });
+
+  it('returns the real references the model proposes, wrapped in {references}', async () => {
+    mockClaudeResponse(JSON.stringify({
+      references: [
+        { title: 'La Odisea', source: 'Homero, épica griega', connection: 'el nostos, el regreso a casa como viaje mítico' },
+        { title: 'Ulysses', source: 'James Joyce', connection: 'la versión moderna/urbana del mismo viaje' },
+      ],
+    }));
+
+    const result = await getImageGenealogy({ concept: 'volver a casa', lang: 'es' });
+
+    expect(result).toEqual({
+      references: [
+        { title: 'La Odisea', source: 'Homero, épica griega', connection: 'el nostos, el regreso a casa como viaje mítico' },
+        { title: 'Ulysses', source: 'James Joyce', connection: 'la versión moderna/urbana del mismo viaje' },
+      ],
+    });
+  });
+
+  it('passes the confirmed concept AND the line (as extra context) when both are available', async () => {
+    mockClaudeResponse(JSON.stringify({ references: [{ title: 'x', source: 'y', connection: 'z' }] }));
+    await getImageGenealogy({
+      concept: 'volver a casa', verseText: 'después de la guerra, vuelvo a casa', targetVerse: null, lang: 'es',
+    });
+    const userPrompt = JSON.parse(fetch.mock.calls[0][1].body).messages[0].content;
+    expect(userPrompt).toContain('volver a casa');
+    expect(userPrompt).toContain('después de la guerra, vuelvo a casa');
+  });
+
+  it('drops malformed entries (missing title) rather than throwing', async () => {
+    mockClaudeResponse(JSON.stringify({
+      references: [{ source: 'sin título' }, { title: 'La Odisea', source: 'Homero', connection: 'x' }],
+    }));
+    const result = await getImageGenealogy({ concept: 'volver a casa', lang: 'es' });
+    expect(result).toEqual({ references: [{ title: 'La Odisea', source: 'Homero', connection: 'x' }] });
+  });
+
+  it('returns {needsClarification} instead of references when the subject/agent is genuinely ambiguous', async () => {
+    mockClaudeResponse(JSON.stringify({ needsClarification: '¿quién vuelve a casa — tú, o alguien más en la canción?' }));
+    const result = await getImageGenealogy({ concept: 'volver a casa', lang: 'es' });
+    expect(result).toEqual({ needsClarification: '¿quién vuelve a casa — tú, o alguien más en la canción?' });
+  });
+
+  it('passes the clarification through to the prompt on a re-run', async () => {
+    mockClaudeResponse(JSON.stringify({ references: [{ title: 'x', source: 'y', connection: 'z' }] }));
+    await getImageGenealogy({ concept: 'volver a casa', clarification: 'el miedo', lang: 'es' });
+    const userPrompt = JSON.parse(fetch.mock.calls[0][1].body).messages[0].content;
+    expect(userPrompt).toContain('el miedo');
+  });
+
+  it('returns null (not an empty array) when the model genuinely finds no real reference', async () => {
+    mockClaudeResponse(JSON.stringify({ references: [] }));
+    const result = await getImageGenealogy({ concept: 'volver a casa', lang: 'es' });
+    expect(result).toBeNull();
+  });
+
+  it('returns null (not a thrown error) when the call fails', async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error('network down'));
+    const result = await getImageGenealogy({ concept: 'volver a casa', lang: 'es' });
+    expect(result).toBeNull();
+  });
+
+  it('passes excludeReferences straight through so "otras referencias" never repeats one already shown', async () => {
+    mockClaudeResponse(JSON.stringify({ references: [{ title: 'x', source: 'y', connection: 'z' }] }));
+    await getImageGenealogy({
+      concept: 'volver a casa', lang: 'es',
+      excludeReferences: ['La Odisea'],
+    });
+    const userPrompt = JSON.parse(fetch.mock.calls[0][1].body).messages[0].content;
+    expect(userPrompt).toContain('La Odisea');
   });
 });
 

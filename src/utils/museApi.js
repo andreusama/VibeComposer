@@ -47,6 +47,36 @@ async function callClaude(system, userContent, maxTokens) {
     return data.content.filter((b) => b.type === 'text').map((b) => b.text).join('');
 }
 
+// Every direct-JSON-response helper in this file (extractCulturalFrame,
+// getCulturalProvocation, getImageGenealogy, filterWordBankByConcept,
+// proposeConceptWords) instructs the model to respond with raw JSON and no
+// markdown — but the model doesn't always honor that literally, and wraps
+// the JSON in a ```json ... ``` fence anyway. parseCompanionResponse (the
+// main askMuse parser) already strips this; reported live as a real crash
+// (SyntaxError: unexpected character at line 1 column 1) in
+// proposeConceptWords once one of these helper calls came back fenced —
+// same risk existed, unfixed, in all five. Always run raw text through this
+// before JSON.parse, never parse raw.trim() directly.
+function stripJsonFences(raw) {
+    return raw.replace(/```json|```/g, '').trim();
+}
+
+// Same "respond in ${lang} even though these instructions are in Spanish"
+// rule buildStaticMuseInstructions already applies to the main askMuse
+// system prompt (section 1) — but that rule is local to that one prompt.
+// Every OTHER direct-LLM helper in this file (extractCulturalFrame,
+// getCulturalProvocation, getImageGenealogy, filterWordBankByConcept,
+// proposeConceptWords) accepted a `lang` param without ever actually
+// telling the model to write its own prose in it, so a Catalan song still
+// got Spanish-language frame/tropo/connection/needsClarification text —
+// reported when adapting the session's work to Catalan. Shared here so all
+// five stay in sync rather than five copies drifting apart.
+function languageInstruction(lang) {
+    return `IDIOMA DE RESPUESTA: responde en ${lang} — aunque estas instrucciones estén en
+castellano, todo el texto que generes TÚ (no las palabras reales verificadas contra el
+diccionario, esas ya vienen en su propio idioma) va en ${lang}, sin excepción.`;
+}
+
 function formatConversation(conversation) {
     if (!conversation.length) return '(esta es la primera vez que hablas con el usuario sobre esta línea)';
     return conversation
@@ -133,15 +163,34 @@ ESE texto directamente, no archives ni des por sentada una interpretación previ
    narrativa y rítmica.
 3. SOCRATIC: Se activa en CUATRO escenarios específicos:
    a) AMBIGÜEDAD / DESORIENTACIÓN: La nota tiene múltiples líneas o el usuario está atascado.
+      Incluye AMBIGÜEDAD DE SUJETO ELIDIDO: el español calla sujetos constantemente (ej. "falló",
+      "saboreando" sin sujeto explícito). Si una línea tiene un sujeto gramaticalmente elidido que
+      podría referirse a más de un candidato real ya mencionado antes en el bloque (el propio
+      narrador vs. una entidad nombrada antes, ej. "el miedo"), y no puedes resolverlo con
+      confianza contra ese contexto, pregunta DIRECTAMENTE cuál es el sujeto real — no ofrezcas
+      opciones que esquivan esa pregunta (interpretaciones del significado) cuando la ambigüedad
+      real es sobre QUIÉN, no sobre qué significa.
    b) FRICCIÓN FONÉTICA (APUNTE DE ESTUDIO): La rima pedida ("rhymeTargetWord") tiene opciones
       consonantes muy escasas o antinaturales en español (ej. consonantes agudas en -ú, -ij, -oj).
       En este caso, NO fuerces palabras malas. Lanza un "APUNTE DE ESTUDIO" directo explicando
       la limitación técnica en 1 frase y ofrece 2-3 chips tácticos en "options" para desbloquear
       (ej. abrir a asonantes ricas, rematar con frase corta, reflexionar sobre el tema).
-   c) REFLEXIÓN SOBRE LA CANCIÓN (MODO ESCUCHA): El usuario pide reflexionar o explorar el concepto.
-      - REGLA DE ORO 80/20: Habla lo mínimo (1-2 frases).
+   c) REFLEXIÓN SOBRE LA CANCIÓN (MODO ESCUCHA) — INCLUYE EL ESPEJO TEMÁTICO: El usuario pide
+      reflexionar o explorar el concepto. Usa activamente el CONTEXTO GLOBAL DE LA CANCIÓN (texto
+      real de los bloques antes/después, más abajo en el mensaje) — relaciona el verso/bloque
+      actual con el RESTO de la canción, no reflexiones sobre esta línea como si estuviera aislada.
+      Señala una conexión CONCRETA y real cuando exista: una imagen o palabra que se repite, un
+      tema que evoluciona, una tensión entre lo dicho ahí y lo dicho aquí (ej. "ya usaste 'morder'
+      en el bloque anterior — aquí vuelve, ¿es la misma hambre o algo distinto?"). Si de verdad no
+      hay ninguna conexión real que señalar (p.ej. no hay otros bloques conectados todavía),
+      reflexiona igualmente sobre el verso actual, pero nunca inventes una conexión que no está
+      ahí solo por rellenar.
+      - REGLA DE ORO 80/20: Habla lo mínimo — 2-3 frases (una más que en otros escenarios, la
+        justa para nombrar la conexión concreta con el resto de la canción cuando exista; sigue
+        siendo mínimo, nunca un ensayo).
       - CERO VERSOS: Prohibido sugerir versos, rimas o palabras en este turno.
-      - Haz UNA sola pregunta incisiva sobre la verdad emocional/escena/intención del tema.
+      - Termina con UNA sola pregunta incisiva sobre la verdad emocional/escena/intención del
+        tema, informada por esa conexión con el resto de la canción cuando la haya.
    d) SIN CONTEXTO REAL: La nota está vacía o casi vacía (nada que analizar) y el mensaje del
       usuario tampoco da un tema, línea o petición concreta a la que responder. NO improvises una
       interpretación de la nada ni fuerces un "consejo genérico" sobre un vacío — pregunta
@@ -744,6 +793,9 @@ artista (lyric_dna). Tu trabajo, en este orden:
    evocadora (refrán, tropo popular, arquetipo estético/de género) que ese concepto evoque,
    coherente con esa misma voz. No la desarrolles en verso, solo nómbrala.
 
+${languageInstruction(lang)} (selectedWord es una palabra real elegida de la lista, no la
+traduzcas ni la alteres — el idioma aplica a "frame"/"tropo", que sí son texto tuyo).
+
 Responde EXCLUSIVAMENTE con JSON: {"selectedWord": "una de las candidatas, o null", "frame": "nombre corto del tropo/arquetipo, o null", "tropo": "en qué consiste muy brevemente, o null"}.
 Sin markdown, sin explicación fuera del JSON.`;
 
@@ -756,7 +808,7 @@ Voz propia del artista (lyric_dna): ${JSON.stringify(lyricDna || {})}${excludeTe
 
     try {
         const raw = await callClaude(system, userPrompt, 250);
-        const parsed = JSON.parse(raw.trim());
+        const parsed = JSON.parse(stripJsonFences(raw));
         if (!parsed.selectedWord || !candidateWords.includes(parsed.selectedWord)) return null;
         return {selectedWord: parsed.selectedWord, frame: parsed.frame || null, tropo: parsed.tropo || ''};
     } catch (e) {
@@ -890,11 +942,32 @@ export function guessConceptFromLine({verseText, targetVerse}) {
 // make) — this is a direct, on-demand tap, not something folded into a
 // turn the model is also generating.
 //
-// Returns null when there's no confirmed concept, or when the model itself
-// genuinely finds no reasonable association (asked to say so explicitly
-// rather than force one) — the caller shows an honest "couldn't find an
-// angle for this" state rather than treating null as an error.
-export async function getCulturalProvocation({concept, verseText, targetVerse, lyricDna, lang = 'es', excludeFrames = []}) {
+// Shared by getCulturalProvocation and getImageGenealogy — Spanish elides
+// subjects constantly ("falló", "saboreando" with no explicit subject), so
+// interpreting a line's imagery without checking WHO/WHAT the real agent is
+// risks confidently answering the wrong question (reported live: "quien
+// saborea la derrota" read as generic ambiguity about the METAPHOR when the
+// actual gap was the elided SUBJECT — "el miedo" named two lines earlier
+// was never even considered as a candidate). Rather than guessing, both
+// functions can return {"needsClarification": "..."} instead of their
+// normal shape, and the caller re-runs with the artist's own answer passed
+// back as `clarification` — a real answer beats a confident wrong guess.
+const SUBJECT_RESOLUTION_INSTRUCTION = `RESOLUCIÓN DE SUJETO: el español elide sujetos
+constantemente. Si la línea de origen tiene un sujeto gramaticalmente elidido o ambiguo Y esa
+ambigüedad afecta a QUIÉN o QUÉ es el agente real del concepto (ej. "saboreando la derrota" sin
+sujeto explícito — ¿el narrador? ¿algo nombrado antes, como "el miedo"?), intenta primero
+resolverlo con el contexto disponible (la propia línea, lyric_dna). Si sigue siendo genuinamente
+ambiguo entre 2+ candidatos reales y no se te ha dado ya una aclaración del compositor, NO fuerces
+una interpretación — responde EXCLUSIVAMENTE con {"needsClarification": "pregunta breve y directa
+sobre quién/qué es el sujeto real"} en vez del formato normal descrito abajo.`;
+
+// Returns null when there's no confirmed concept, {needsClarification} when
+// the subject/agent is genuinely ambiguous (see SUBJECT_RESOLUTION_INSTRUCTION
+// above), or when the model itself genuinely finds no reasonable association
+// (asked to say so explicitly rather than force one) — the caller shows an
+// honest "couldn't find an angle for this" state rather than treating null
+// as an error.
+export async function getCulturalProvocation({concept, clarification, verseText, targetVerse, lyricDna, lang = 'es', excludeFrames = []}) {
     if (!concept || !concept.trim()) return null;
 
     const targetLine = targetVerse
@@ -902,7 +975,9 @@ export async function getCulturalProvocation({concept, verseText, targetVerse, l
         : splitIntoLines(verseText || '').filter(Boolean).pop();
 
     const system = `Eres un experto en refranes, tropos culturales, arquetipos estéticos y
-referencias literarias/históricas del ámbito hispanohablante, ayudando a un compositor a
+referencias literarias/históricas del ámbito cultural correspondiente al idioma ${lang} (si
+${lang} es "ca", prioriza refranys, tropos y referencias del propio ámbito de parla catalana
+antes que asumir que lo hispanohablante en castellano aplica igual), ayudando a un compositor a
 PENSAR, no escribiendo por él.
 
 Se te da un concepto ya confirmado por el propio compositor (y, si está disponible, la línea
@@ -915,23 +990,113 @@ culturalmente, no inventes una distinta). Prioriza SIEMPRE una referencia real y
 verificable sobre una asociación vaga o genérica ("perseverancia", "el paso del tiempo")
 si hay algo más concreto disponible.
 
-Responde EXCLUSIVAMENTE con JSON: {"frame": "nombre corto de la referencia/tropo/arquetipo, o null si de verdad no hay ninguna asociación razonable", "tropo": "en qué consiste o por qué encaja, muy brevemente, o null"}.
+${SUBJECT_RESOLUTION_INSTRUCTION}
+
+${languageInstruction(lang)}
+
+Responde EXCLUSIVAMENTE con JSON: {"frame": "nombre corto de la referencia/tropo/arquetipo, o null si de verdad no hay ninguna asociación razonable", "tropo": "en qué consiste o por qué encaja, muy brevemente, o null"} — o, si aplica la resolución de sujeto de arriba, {"needsClarification": "..."} en su lugar.
 Sin markdown, sin explicación fuera del JSON.`;
 
     const excludeText = excludeFrames.length
         ? `\n\nYa se han mostrado estos ángulos en esta sesión — NO los repitas, encuentra uno distinto:\n${excludeFrames.map((f) => `- ${f}`).join('\n')}`
         : '';
     const contextLine = targetLine && targetLine.trim() ? `\nLínea de origen (contexto adicional): "${targetLine.trim()}"` : '';
-    const userPrompt = `Concepto confirmado: "${concept.trim()}"${contextLine}
+    const clarificationLine = clarification && clarification.trim()
+        ? `\nAclaración del compositor sobre el sujeto/agente real: "${clarification.trim()}"`
+        : '';
+    const userPrompt = `Concepto confirmado: "${concept.trim()}"${contextLine}${clarificationLine}
 Voz propia del artista (lyric_dna): ${JSON.stringify(lyricDna || {})}${excludeText}`;
 
     try {
         const raw = await callClaude(system, userPrompt, 300);
-        const parsed = JSON.parse(raw.trim());
+        const parsed = JSON.parse(stripJsonFences(raw));
+        if (parsed.needsClarification) return {needsClarification: parsed.needsClarification};
         if (!parsed.frame) return null;
         return {frame: parsed.frame, tropo: parsed.tropo || ''};
     } catch (e) {
         console.error('Error al generar el ángulo cultural:', e);
+        return null;
+    }
+}
+
+// "Genealogía de la imagen" — its own dedicated feature, deliberately
+// separate from getCulturalProvocation above even though both are
+// confirm-a-concept-then-call-the-model actions: ángulo cultural gives ONE
+// association scoped to Spanish-speaking tropes/refranes (matches
+// extractCulturalFrame's own REGLA DE ADUANA LÉXICA-adjacent framing);
+// genealogía deliberately reaches for UNIVERSAL culture — literature, myth,
+// painting, film, historical/legendary figures — and returns SEVERAL
+// distinct references at once, each with its own real, named source, so
+// the artist can see the conversation their own image is already part of
+// (e.g. "volver a casa" in an Odyssey-themed song → Homer's Odyssey and
+// other real nostos works, not a single vague tropo).
+//
+// Same "confirm a real concept first" contract as getCulturalProvocation —
+// concept is required, verseText/targetVerse are optional extra context.
+// Returns null (no concept), {needsClarification} (see
+// SUBJECT_RESOLUTION_INSTRUCTION above — same elided-subject problem
+// applies here too, since this ALSO interprets a concept against a line),
+// or {references: [...]} — wrapped in an object rather than returned as a
+// bare array so both possible shapes {needsClarification}/{references} are
+// distinguishable the same way at the call site.
+const IMAGE_GENEALOGY_REFERENCE_COUNT = 3;
+
+export async function getImageGenealogy({concept, clarification, verseText, targetVerse, lyricDna, lang = 'es', excludeReferences = []}) {
+    if (!concept || !concept.trim()) return null;
+
+    const targetLine = targetVerse
+        ? `${targetVerse.before}${targetVerse.text}${targetVerse.after}`
+        : splitIntoLines(verseText || '').filter(Boolean).pop();
+
+    const system = `Eres un erudito en literatura universal, mitología, historia del arte y
+cultura en general, ayudando a un compositor a descubrir de dónde viene realmente una imagen o
+idea, y qué otras obras la han explorado antes — para enriquecer su propia escritura con ese
+contexto, NUNCA para que la copie.
+
+Se te da un concepto o imagen ya confirmado por el propio compositor (y, si está disponible, la
+línea real de la que salió, como contexto adicional) junto a su voz propia (lyric_dna). Identifica
+hasta ${IMAGE_GENEALOGY_REFERENCE_COUNT} referencias culturales REALES y verificables que
+exploren esa misma imagen o idea desde ángulos distintos entre sí — pueden ser obras literarias,
+mitológicas, pictóricas, cinematográficas, musicales, o figuras históricas/legendarias. NO te
+limites a la cultura hispanohablante: usa cultura universal siempre que sea la referencia más
+relevante (ej. si el concepto es "volver a casa", La Odisea de Homero es una referencia legítima
+aunque no sea hispanohablante). Prioriza SIEMPRE referencias reales, nombradas y conocidas sobre
+asociaciones vagas — JAMÁS inventes una obra, autor o figura que no exista.
+
+${SUBJECT_RESOLUTION_INSTRUCTION}
+
+${languageInstruction(lang)} ("title"/"source" son nombres reales de obras/autores — no los
+traduzcas ni los inventes en otro idioma; el idioma aplica a "connection", que sí es texto tuyo).
+
+Responde EXCLUSIVAMENTE con JSON: {"references": [{"title": "nombre corto de la obra/figura", "source": "autor/origen/tipo, muy breve", "connection": "por qué se conecta con el concepto, en 1 frase"}]} (array vacío si de verdad no hay ninguna referencia real y relevante) — o, si aplica la resolución de sujeto de arriba, {"needsClarification": "..."} en su lugar.
+Sin markdown, sin explicación fuera del JSON.`;
+
+    const excludeText = excludeReferences.length
+        ? `\n\nYa se han mostrado estas referencias en esta sesión — NO las repitas, encuentra otras distintas:\n${excludeReferences.map((r) => `- ${r}`).join('\n')}`
+        : '';
+    const contextLine = targetLine && targetLine.trim() ? `\nLínea de origen (contexto adicional): "${targetLine.trim()}"` : '';
+    const clarificationLine = clarification && clarification.trim()
+        ? `\nAclaración del compositor sobre el sujeto/agente real: "${clarification.trim()}"`
+        : '';
+    const userPrompt = `Concepto confirmado: "${concept.trim()}"${contextLine}${clarificationLine}
+Voz propia del artista (lyric_dna): ${JSON.stringify(lyricDna || {})}${excludeText}`;
+
+    try {
+        const raw = await callClaude(system, userPrompt, 500);
+        const parsed = JSON.parse(stripJsonFences(raw));
+        if (parsed.needsClarification) return {needsClarification: parsed.needsClarification};
+        const references = Array.isArray(parsed.references)
+            ? parsed.references
+                .filter((r) => r && typeof r.title === 'string' && r.title.trim())
+                .map((r) => ({
+                    title: r.title.trim(),
+                    source: typeof r.source === 'string' ? r.source.trim() : '',
+                    connection: typeof r.connection === 'string' ? r.connection.trim() : '',
+                }))
+            : [];
+        return references.length ? {references} : null;
+    } catch (e) {
+        console.error('Error al generar la genealogía de la imagen:', e);
         return null;
     }
 }
@@ -981,7 +1146,7 @@ Voz propia del artista (lyric_dna): ${JSON.stringify(lyricDna || {})}`;
 
     try {
         const raw = await callClaude(system, userPrompt, 1500);
-        const parsed = JSON.parse(raw.trim());
+        const parsed = JSON.parse(stripJsonFences(raw));
         const poolSet = new Set(pool);
         return Array.isArray(parsed.words) ? parsed.words.filter((w) => typeof w === 'string' && poolSet.has(w)) : [];
     } catch (e) {
@@ -1012,17 +1177,32 @@ Voz propia del artista (lyric_dna): ${JSON.stringify(lyricDna || {})}`;
 // meaningful to filter beforehand.
 const CONCEPT_ONLY_PROPOSAL_COUNT = 20;
 
+// "en español" used to be hardcoded here regardless of `lang` — silently
+// wrong for Catalan (the model would propose Spanish words even when asked
+// to write for a Catalan song). Note this fix alone doesn't make Catalan
+// concept-only WORD_BANK actually WORK yet: verifyWordsInLexicon still
+// finds nothing for lang:'ca' until the lexicon table has Catalan entries
+// at all (it's 100% Spanish today, 0 Catalan rows — a real seeding project,
+// tracked separately) — but the proposal step itself needs to be correct
+// now so it's ready the moment that data exists, not a second bug to find
+// later.
+const LEXICON_LANGUAGE_NAMES = {es: 'español (castellano)', ca: 'català'};
+
 export async function proposeConceptWords({concept, lyricDna = null, lang = 'es'}) {
     if (!concept) return [];
 
+    const languageName = LEXICON_LANGUAGE_NAMES[lang] || lang;
     const system = `Eres un poeta y lexicógrafo ayudando a un compositor a explorar vocabulario
 para un concepto o sensación concreta — no a escribir versos por él.
 
 Dado un concepto y la voz propia del artista (lyric_dna), propón hasta ${CONCEPT_ONLY_PROPOSAL_COUNT}
-palabras REALES en español (existentes de verdad, sin inventar ni deformar ninguna) que se
-relacionen con ese concepto por significado, campo semántico o asociación evocadora — no
-necesitan rimar entre sí ni con nada. Prioriza variedad: mezcla palabras comunes y palabras
-menos comunes pero evocadoras, coherentes con esa voz si el contexto ayuda a decidir.
+palabras REALES en ${languageName} (existentes de verdad en ESE idioma, sin inventar ni deformar
+ninguna, y sin mezclar con otro idioma) que se relacionen con ese concepto por significado, campo
+semántico o asociación evocadora — no necesitan rimar entre sí ni con nada. Prioriza variedad:
+mezcla palabras comunes y palabras menos comunes pero evocadoras, coherentes con esa voz si el
+contexto ayuda a decidir.
+
+${languageInstruction(lang)} (aquí aplica también a las propias palabras propuestas, no solo a tu prosa — ya cubierto arriba, pero sin excepción).
 
 Responde EXCLUSIVAMENTE con JSON: {"words": ["palabra1", "palabra2", "..."]}.
 Sin markdown, sin explicación fuera del JSON.`;
@@ -1032,7 +1212,7 @@ Voz propia del artista (lyric_dna): ${JSON.stringify(lyricDna || {})}`;
 
     try {
         const raw = await callClaude(system, userPrompt, 600);
-        const parsed = JSON.parse(raw.trim());
+        const parsed = JSON.parse(stripJsonFences(raw));
         return Array.isArray(parsed.words)
             ? parsed.words.filter((w) => typeof w === 'string' && w.trim()).map((w) => w.trim().toLowerCase())
             : [];

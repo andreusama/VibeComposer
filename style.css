@@ -5187,6 +5187,8 @@ body::before {
     position: fixed;
     z-index: 55;
     display: flex;
+    flex-wrap: wrap; /* 4 pills (Rhyme/Concept/Genealogía/Ask muse) wrap to a second row on narrow phones instead of overflowing */
+    max-width: min(280px, calc(100vw - 16px));
     gap: 8px;
     background: var(--ink);
     border-radius: var(--r-md);
@@ -5362,6 +5364,37 @@ body::before {
     color: var(--ink);
 }
 .mp-concept-input:focus { outline: none; border-color: var(--amber); }
+
+/* Genealogía de la imagen — several distinct reference cards at once
+   (unlike ángulo cultural's single .mp-provocation frame), each with its
+   own real, named source. Amber accent kept consistent with the muse's
+   other cultural-reflection features, but a plain left-rule card rather
+   than a filled block so 2-3 of them in a row don't turn into a wall of
+   color the way stacked .mp-provocation blocks would. */
+.mp-genealogy { display: flex; flex-direction: column; gap: var(--space-2); }
+.mp-genealogy-ref {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-0-5);
+    padding: var(--space-2) var(--space-3);
+    border-left: 2px solid var(--amber);
+    background: var(--bg-deep);
+    border-radius: var(--r-sm);
+}
+.mp-genealogy-title {
+    font-family: var(--font-body);
+    font-size: var(--fs-secondary);
+    font-weight: 600;
+    color: var(--ink);
+    margin: 0;
+}
+.mp-genealogy-source { font-weight: 400; color: var(--muted); font-style: italic; }
+.mp-genealogy-connection {
+    font-family: var(--font-body);
+    font-size: var(--fs-secondary);
+    color: var(--graphite);
+    margin: 0;
+}
 
 /* SURGEON/ARCHITECT — exactly ONE card at a time, not a fanned stack: an
    earlier version peeked the next candidate out from behind the front one,

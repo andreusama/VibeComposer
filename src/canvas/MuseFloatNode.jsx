@@ -84,6 +84,7 @@ export default function MuseFloatNode({ id, data, selected }) {
   // on an unconfirmed guess with no chance to correct it.
   const [provocationStage, setProvocationStage] = useState('idle');
   const [provocationConceptDraft, setProvocationConceptDraft] = useState('');
+  const [provocationClarificationDraft, setProvocationClarificationDraft] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -201,12 +202,12 @@ export default function MuseFloatNode({ id, data, selected }) {
   // Shared by the confirm chip, the ask form's submit, AND "otro ángulo"
   // (re-runs with the SAME already-confirmed concept — a new angle on the
   // same topic, not a re-ask).
-  const handleCulturalProvocationRun = useCallback(async (concept) => {
+  const handleCulturalProvocationRun = useCallback(async (concept, clarification = null) => {
     setProvocationStage('idle');
     setProvocationLoading(true);
     try {
       const result = await getCulturalProvocation({
-        concept, verseText, targetVerse: pendingTargetVerse || null, lyricDna,
+        concept, clarification, verseText, targetVerse: pendingTargetVerse || null, lyricDna,
         lang: lyricLanguage,
         excludeFrames: angleHistoryRef.current.frames,
       });
@@ -225,6 +226,18 @@ export default function MuseFloatNode({ id, data, selected }) {
     if (!provocationConceptDraft.trim()) return;
     handleCulturalProvocationRun(provocationConceptDraft.trim());
   }, [provocationConceptDraft, handleCulturalProvocationRun]);
+
+  // Elided-subject clarification (museApi.js's
+  // SUBJECT_RESOLUTION_INSTRUCTION) — re-runs with the SAME confirmed
+  // concept plus the artist's own answer about who/what the real subject is.
+  const handleCulturalProvocationClarificationChange = useCallback(
+    (e) => setProvocationClarificationDraft(e.target.value), []
+  );
+  const handleCulturalProvocationClarify = useCallback((e) => {
+    e.preventDefault();
+    if (!provocationClarificationDraft.trim()) return;
+    handleCulturalProvocationRun(provocationConceptDraft, provocationClarificationDraft.trim());
+  }, [provocationConceptDraft, provocationClarificationDraft, handleCulturalProvocationRun]);
 
   const lastEntry = conversation[conversation.length - 1];
   const isPendingQuestion = lastEntry?.role === 'muse' && lastEntry.mode === 'SOCRATIC';
@@ -367,7 +380,25 @@ export default function MuseFloatNode({ id, data, selected }) {
                           no encontré un ángulo cultural claro para &quot;{provocationConceptDraft}&quot; — prueba con otro concepto
                         </p>
                       )}
-                      {!provocationLoading && provocation && (
+                      {/* Elided-subject clarification (museApi.js's
+                          SUBJECT_RESOLUTION_INSTRUCTION) — the model asked
+                          instead of guessing who/what the real subject is. */}
+                      {!provocationLoading && provocation?.needsClarification && (
+                        <form className="muse-concept-ask" onSubmit={handleCulturalProvocationClarify}>
+                          <p className="muse-question">{provocation.needsClarification}</p>
+                          <input
+                            className="muse-concept-input nodrag"
+                            type="text"
+                            value={provocationClarificationDraft}
+                            onChange={handleCulturalProvocationClarificationChange}
+                            placeholder="p. ej. el miedo"
+                          />
+                          <button className="muse-chip nodrag" type="submit" disabled={!provocationClarificationDraft.trim()}>
+                            Aclarar
+                          </button>
+                        </form>
+                      )}
+                      {!provocationLoading && provocation?.frame && (
                         <div className="muse-provocation">
                           <p className="muse-provocation-frame">
                             {provocation.frame}{provocation.tropo ? ` — ${provocation.tropo}` : ''}

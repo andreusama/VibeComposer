@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { askMuse, getCulturalProvocation, guessConceptFromLine } from '../utils/museApi.js';
+import { askMuse, getCulturalProvocation, getImageGenealogy, guessConceptFromLine } from '../utils/museApi.js';
 import { saveMuseTurn, loadMuseProfile } from '../canvas/museData.js';
 import { recordMuseTurnAndMaybeUpdateProfile } from '../canvas/museProfileUpdater.js';
 
@@ -159,25 +159,26 @@ function SuggestionCard({ suggestion, showReplace, onDiscard, onAccept, onInsert
 // banner, WORD_BANK as a scrollable pill grid — all anchored the same way.
 //
 // Two ways in:
-// 1. Selection callout (Rhyme / Concept / Ask muse pills) — targetVerse is a
-//    real {text, before, after} fragment. Rhyme AND Concept both pass
-//    forceMode: 'WORD_BANK', since a dedicated UI element already
-//    unambiguously means "give me real words" — leaving that to the model's
-//    free interpretation (the original version of this popover) was exactly
-//    the "why buttons if they both just re-interpret" gap this fixes.
-//    Concept asks for words related to the selection BY MEANING (the
-//    concept-filter WORD_BANK path — see museApi.js's
-//    filterWordBankByConcept), not by rhyme — but never fires immediately:
-//    it shows a confirm step first (conceptStage — "¿buscamos palabras
-//    relacionadas con X?"), since a real report showed that auto-firing on
-//    a raw selection with no chance to correct it made the guessed concept
-//    unreviewable. Tapping "Es otro concepto" drops to the "ask" sub-state
-//    (a plain text input) for typing a different one. (A standalone,
-//    no-selection "Cool words" FabMenu entry into this same mode existed
-//    briefly and was pulled — felt too trivial as its own doorway; the
-//    conceptStage/'ask' plumbing stays since the "change concept" flow
-//    above still exercises it.) Ask muse leaves the mode open
-//    (SURGEON/ARCHITECT/SOCRATIC, model's call), same as desktop.
+// 1. Selection callout (Rhyme / Concept / Genealogía / Ask muse pills) —
+//    targetVerse is a real {text, before, after} fragment.
+//    - Rhyme AND Concept both pass forceMode: 'WORD_BANK', since a
+//      dedicated UI element already unambiguously means "give me real
+//      words" — leaving that to the model's free interpretation (the
+//      original version of this popover) was exactly the "why buttons if
+//      they both just re-interpret" gap this fixes. Concept asks for words
+//      related to the selection BY MEANING (the concept-filter WORD_BANK
+//      path — see museApi.js's filterWordBankByConcept), not by rhyme.
+//    - Genealogía calls getImageGenealogy directly — a client-forced
+//      action, not an askMuse turn at all (same reasoning as ángulo
+//      cultural below), since the UI already decided what's being asked.
+//    Concept and Genealogía SHARE one confirm/ask step (conceptStage —
+//    "¿buscamos palabras relacionadas con X?" / "¿genealogía cultural de
+//    X?") before either ever fires: a real report showed that auto-firing
+//    on a raw selection with no chance to correct it made the guessed
+//    concept unreviewable. Tapping "Es otro concepto" drops to the "ask"
+//    sub-state (a plain text input) for typing a different one. Ask muse
+//    leaves the mode open (SURGEON/ARCHITECT/SOCRATIC, model's call), same
+//    as desktop.
 // 2. The inline "Musa, ..." wake-word line, or a tap on the friction nudge
 //    (NoteEditorScreen) — targetVerse is null and seedMessage carries the
 //    intent verbatim.
@@ -186,20 +187,33 @@ export default function MusePopover({
   lyricLanguage, lyricDialect, songStructure, songId, sectionId, anchorRect,
   onClose, onReplace, onInsertBelow, onPreviewText = () => {},
 }) {
-  // Concept mode (creativity proposal #3) doesn't auto-fire on mount — it
-  // needs a confirm/ask step first (see conceptStage below), so it starts
-  // in the confirm/ask UI, not the loading spinner every other mode shows
-  // immediately.
-  const [loading, setLoading] = useState(mode !== 'concept');
+  // Concept AND genealogy modes (creativity proposals #3 and "genealogía de
+  // la imagen") don't auto-fire on mount — both need a confirm/ask step
+  // first (see conceptStage below), so they start in the confirm/ask UI,
+  // not the loading spinner every other mode shows immediately.
+  const [loading, setLoading] = useState(mode !== 'concept' && mode !== 'genealogy');
   const [error, setError] = useState(null);
-  // 'confirm' when there's a selection to confirm as-is (SelectionCallout's
-  // Concept pill — the concept IS the selected text, no guessing needed,
-  // just a review step), 'ask' when the user rejected the guess ("Es otro
-  // concepto") and needs to type a different one. Initialized once at mount
-  // from targetVerse — stable for this popover's
-  // whole life, same reasoning as firstTurnRef below.
+  // Shared by BOTH concept and genealogy modes — same confirm-a-concept-
+  // first UX either way, just a different action fires once confirmed (see
+  // handleConceptConfirm below). 'confirm' when there's a selection to
+  // confirm as-is (the concept/idea IS the selected text, no guessing
+  // needed, just a review step), 'ask' when the user rejected the guess
+  // ("Es otro concepto") and needs to type a different one, 'sent' once the
+  // actual action has fired (hides this block either way). Initialized once
+  // at mount from targetVerse — stable for this popover's whole life, same
+  // reasoning as firstTurnRef below.
   const [conceptStage, setConceptStage] = useState(() => (targetVerse ? 'confirm' : 'ask'));
   const [conceptDraft, setConceptDraft] = useState(() => targetVerse?.text || '');
+  // Genealogía de la imagen — its own result state, separate from
+  // provocation's: unlike ángulo cultural (ONE frame/tropo), this returns
+  // SEVERAL distinct references at once (see getImageGenealogy).
+  // genealogyResult can be null, {references}, or {needsClarification} —
+  // same elided-subject case as provocation above.
+  const [genealogyLoading, setGenealogyLoading] = useState(false);
+  const [genealogyResult, setGenealogyResult] = useState(null);
+  const [genealogyAttempted, setGenealogyAttempted] = useState(false);
+  const [genealogyClarificationDraft, setGenealogyClarificationDraft] = useState('');
+  const genealogyHistoryRef = useRef([]);
   const [response, setResponse] = useState(null);
   const [conversation, setConversation] = useState([]);
   // One linear queue of the model's up-to-6 candidates — only queue[0] is
@@ -235,6 +249,14 @@ export default function MusePopover({
   // from "tried and genuinely found nothing" (provocationAttempted).
   // Cleared on every fresh `send` so a stale angle from a previous SOCRATIC
   // turn never lingers under a new question.
+  // provocation can be null, {frame, tropo}, or {needsClarification} — the
+  // elided-subject case (see museApi.js's SUBJECT_RESOLUTION_INSTRUCTION):
+  // rather than guess who/what a line's implicit subject is, the model can
+  // ask, and handleCulturalProvocationClarify re-runs with the artist's own
+  // answer. null distinguishes "never tried yet" from "tried and genuinely
+  // found nothing" (provocationAttempted). Cleared on every fresh `send` so
+  // a stale angle from a previous SOCRATIC turn never lingers under a new
+  // question.
   const [provocation, setProvocation] = useState(null);
   const [provocationLoading, setProvocationLoading] = useState(false);
   const [provocationAttempted, setProvocationAttempted] = useState(false);
@@ -244,6 +266,7 @@ export default function MusePopover({
   // is confirmed/typed — see handleCulturalProvocationStart below.
   const [provocationStage, setProvocationStage] = useState('idle');
   const [provocationConceptDraft, setProvocationConceptDraft] = useState('');
+  const [provocationClarificationDraft, setProvocationClarificationDraft] = useState('');
 
   useEffect(() => {
     if (!sectionId) return;
@@ -315,10 +338,10 @@ export default function MusePopover({
   }, [verseText, noteFunction, blockProfile, lyricDna, conversation, lyricLanguage, lyricDialect, songStructure, targetVerse, mode, songId, sectionId]);
 
   useEffect(() => {
-    // Concept mode needs a confirm/ask step first (conceptStage, rendered
-    // below) — see handleConceptConfirm/handleConceptSubmit for where the
-    // actual send() happens once the user's confirmed or typed a concept.
-    if (mode === 'concept') return;
+    // Concept AND genealogy modes need a confirm/ask step first
+    // (conceptStage, rendered below) — see handleConceptConfirm for where
+    // the actual action fires once the user's confirmed or typed a concept.
+    if (mode === 'concept' || mode === 'genealogy') return;
     const seed = seedMessage || (mode === 'rhyme'
       ? `palabras que rimen con "${targetVerse.text}"`
       : `ayúdame con este fragmento: "${targetVerse.text}"`);
@@ -357,12 +380,46 @@ export default function MusePopover({
   const handleChip = useCallback((chip) => send(chip), [send]);
 
   // Concept mode's confirm/ask step (creativity proposal #3) — never fires
-  // the actual WORD_BANK request until the user's reviewed or typed the
-  // concept themselves, per the reported issue that auto-firing on a raw
-  // selection gave no chance to catch a wrong guess before spending a call.
+  // the actual WORD_BANK request (or, in genealogy mode, the actual
+  // getImageGenealogy call) until the user's reviewed or typed the concept
+  // themselves, per the reported issue that auto-firing on a raw selection
+  // gave no chance to catch a wrong guess before spending a call.
+  //
+  // "Genealogía de la imagen" — its own dedicated feature (deliberately
+  // NOT folded into SOCRATIC, unlike the espejo temático): a direct,
+  // client-forced call, same reasoning as ángulo cultural — this isn't a
+  // new model turn deciding a mode, the UI action already decided it.
+  const runGenealogy = useCallback(async (concept, clarification = null) => {
+    setConceptStage('sent');
+    setGenealogyLoading(true);
+    try {
+      const result = await getImageGenealogy({
+        concept, clarification, verseText, targetVerse, lyricDna, lang: lyricLanguage,
+        excludeReferences: genealogyHistoryRef.current,
+      });
+      setGenealogyResult(result);
+      setGenealogyAttempted(true);
+      if (result?.references) {
+        result.references.forEach((r) => {
+          if (!genealogyHistoryRef.current.includes(r.title)) genealogyHistoryRef.current.push(r.title);
+        });
+      }
+    } finally {
+      setGenealogyLoading(false);
+    }
+  }, [verseText, targetVerse, lyricDna, lyricLanguage]);
+
+  const handleGenealogyClarificationChange = useCallback((e) => setGenealogyClarificationDraft(e.target.value), []);
+  const handleGenealogyClarify = useCallback((e) => {
+    e.preventDefault();
+    if (!genealogyClarificationDraft.trim()) return;
+    runGenealogy(conceptDraft, genealogyClarificationDraft.trim());
+  }, [conceptDraft, genealogyClarificationDraft, runGenealogy]);
+
   const handleConceptConfirm = useCallback(() => {
+    if (mode === 'genealogy') { runGenealogy(conceptDraft); return; }
     send(`dame palabras que tengan que ver con "${conceptDraft}"`);
-  }, [send, conceptDraft]);
+  }, [mode, conceptDraft, send, runGenealogy]);
 
   const handleConceptChange = useCallback(() => setConceptStage('ask'), []);
   const handleConceptDraftChange = useCallback((e) => setConceptDraft(e.target.value), []);
@@ -370,8 +427,9 @@ export default function MusePopover({
   const handleConceptSubmit = useCallback((e) => {
     e.preventDefault();
     if (!conceptDraft.trim()) return;
+    if (mode === 'genealogy') { runGenealogy(conceptDraft.trim()); return; }
     send(`dame palabras que tengan que ver con "${conceptDraft.trim()}"`);
-  }, [send, conceptDraft]);
+  }, [mode, conceptDraft, send, runGenealogy]);
 
   // Creativity proposal #4 — direct call to getCulturalProvocation, NOT a
   // trip back through send()/askMuse: this is a client-forced action, not a
@@ -395,12 +453,12 @@ export default function MusePopover({
   // the same topic, not a re-ask). Excludes frames already shown this
   // session (angleHistoryRef, same list buildCulturalResonance feeds) so a
   // regenerate never repeats a tropo already surfaced.
-  const handleCulturalProvocationRun = useCallback(async (concept) => {
+  const handleCulturalProvocationRun = useCallback(async (concept, clarification = null) => {
     setProvocationStage('idle');
     setProvocationLoading(true);
     try {
       const result = await getCulturalProvocation({
-        concept, verseText, targetVerse, lyricDna, lang: lyricLanguage,
+        concept, clarification, verseText, targetVerse, lyricDna, lang: lyricLanguage,
         excludeFrames: angleHistoryRef.current.frames,
       });
       setProvocation(result);
@@ -418,6 +476,18 @@ export default function MusePopover({
     if (!provocationConceptDraft.trim()) return;
     handleCulturalProvocationRun(provocationConceptDraft.trim());
   }, [provocationConceptDraft, handleCulturalProvocationRun]);
+
+  // Elided-subject clarification (see museApi.js's
+  // SUBJECT_RESOLUTION_INSTRUCTION) — re-runs with the SAME confirmed
+  // concept plus the artist's own answer about who/what the real subject is.
+  const handleCulturalProvocationClarificationChange = useCallback(
+    (e) => setProvocationClarificationDraft(e.target.value), []
+  );
+  const handleCulturalProvocationClarify = useCallback((e) => {
+    e.preventDefault();
+    if (!provocationClarificationDraft.trim()) return;
+    handleCulturalProvocationRun(provocationConceptDraft, provocationClarificationDraft.trim());
+  }, [provocationConceptDraft, provocationClarificationDraft, handleCulturalProvocationRun]);
 
   const handleWordPick = useCallback((word) => {
     if (targetVerse) onReplace(word); else onInsertBelow(word);
@@ -438,33 +508,87 @@ export default function MusePopover({
           <button className="mp-close" onClick={onClose} title="close">✕</button>
         </div>
 
-        {/* Concept mode's confirm/ask step (creativity proposal #3) —
-            renders BEFORE anything askMuse-related, since send() hasn't
-            been called yet at all for this mode until the concept is
-            confirmed or typed. See handleConceptConfirm/handleConceptSubmit. */}
-        {mode === 'concept' && !loading && !response && (
+        {/* Concept AND genealogy modes' shared confirm/ask step — renders
+            BEFORE anything askMuse-related, since neither send() nor
+            runGenealogy has been called yet until the concept is confirmed
+            or typed. See handleConceptConfirm/handleConceptSubmit. */}
+        {(mode === 'concept' || mode === 'genealogy') && conceptStage !== 'sent' && (
           <div className="mp-banner">
             {conceptStage === 'confirm' ? (
               <>
-                <p className="mp-question">¿Buscamos palabras relacionadas con &quot;{conceptDraft}&quot;?</p>
+                <p className="mp-question">
+                  {mode === 'genealogy'
+                    ? <>¿Genealogía cultural de &quot;{conceptDraft}&quot;?</>
+                    : <>¿Buscamos palabras relacionadas con &quot;{conceptDraft}&quot;?</>}
+                </p>
                 <div className="mp-chips">
-                  <button className="mp-chip" onClick={handleConceptConfirm}>Sí, esas</button>
+                  <button className="mp-chip" onClick={handleConceptConfirm}>Sí, esa{mode === 'concept' ? 's' : ''}</button>
                   <button className="mp-chip" onClick={handleConceptChange}>Es otro concepto</button>
                 </div>
               </>
             ) : (
               <form className="mp-concept-ask" onSubmit={handleConceptSubmit}>
-                <p className="mp-question">¿Sobre qué concepto quieres palabras?</p>
+                <p className="mp-question">
+                  {mode === 'genealogy' ? '¿Sobre qué imagen o idea quieres genealogía cultural?' : '¿Sobre qué concepto quieres palabras?'}
+                </p>
                 <input
                   className="mp-concept-input"
                   type="text"
                   value={conceptDraft}
                   onChange={handleConceptDraftChange}
-                  placeholder="p. ej. volar, el mar, ruptura…"
+                  placeholder={mode === 'genealogy' ? 'p. ej. volver a casa, el exilio…' : 'p. ej. volar, el mar, ruptura…'}
                   autoFocus
                 />
                 <button className="mp-chip" type="submit" disabled={!conceptDraft.trim()}>Buscar</button>
               </form>
+            )}
+          </div>
+        )}
+
+        {/* Genealogía de la imagen's result — several distinct real
+            references at once (unlike ángulo cultural's single frame/tropo),
+            see getImageGenealogy. "otras referencias" regenerates excluding
+            titles already shown this session (genealogyHistoryRef). */}
+        {mode === 'genealogy' && conceptStage === 'sent' && (
+          <div className="mp-genealogy">
+            {genealogyLoading && (
+              <div className="mp-loading"><span className="mp-spinner" /></div>
+            )}
+            {!genealogyLoading && genealogyAttempted && !genealogyResult && (
+              <p className="mp-provocation-empty">
+                no encontré referencias culturales claras para &quot;{conceptDraft}&quot;
+              </p>
+            )}
+            {/* Elided-subject clarification (museApi.js's
+                SUBJECT_RESOLUTION_INSTRUCTION) — same as ángulo cultural's. */}
+            {!genealogyLoading && genealogyResult?.needsClarification && (
+              <form className="mp-concept-ask" onSubmit={handleGenealogyClarify}>
+                <p className="mp-question">{genealogyResult.needsClarification}</p>
+                <input
+                  className="mp-concept-input"
+                  type="text"
+                  value={genealogyClarificationDraft}
+                  onChange={handleGenealogyClarificationChange}
+                  placeholder="p. ej. el miedo"
+                  autoFocus
+                />
+                <button className="mp-chip" type="submit" disabled={!genealogyClarificationDraft.trim()}>Aclarar</button>
+              </form>
+            )}
+            {!genealogyLoading && genealogyResult?.references && (
+              <>
+                {genealogyResult.references.map((ref, i) => (
+                  <div className="mp-genealogy-ref" key={i}>
+                    <p className="mp-genealogy-title">
+                      {ref.title}{ref.source ? <span className="mp-genealogy-source"> — {ref.source}</span> : null}
+                    </p>
+                    <p className="mp-genealogy-connection">{ref.connection}</p>
+                  </div>
+                ))}
+                <button className="mp-chip" onClick={() => runGenealogy(conceptDraft)} disabled={genealogyLoading}>
+                  otras referencias
+                </button>
+              </>
             )}
           </div>
         )}
@@ -521,7 +645,24 @@ export default function MusePopover({
                 no encontré un ángulo cultural claro para &quot;{provocationConceptDraft}&quot; — prueba con otro concepto
               </p>
             )}
-            {!provocationLoading && provocation && (
+            {/* Elided-subject clarification (museApi.js's
+                SUBJECT_RESOLUTION_INSTRUCTION) — the model asked instead of
+                guessing who/what the line's real subject is. */}
+            {!provocationLoading && provocation?.needsClarification && (
+              <form className="mp-concept-ask" onSubmit={handleCulturalProvocationClarify}>
+                <p className="mp-question">{provocation.needsClarification}</p>
+                <input
+                  className="mp-concept-input"
+                  type="text"
+                  value={provocationClarificationDraft}
+                  onChange={handleCulturalProvocationClarificationChange}
+                  placeholder="p. ej. el miedo"
+                  autoFocus
+                />
+                <button className="mp-chip" type="submit" disabled={!provocationClarificationDraft.trim()}>Aclarar</button>
+              </form>
+            )}
+            {!provocationLoading && provocation?.frame && (
               <div className="mp-provocation">
                 <p className="mp-provocation-frame">
                   {provocation.frame}{provocation.tropo ? ` — ${provocation.tropo}` : ''}

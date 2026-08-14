@@ -535,6 +535,7 @@ export default function NoteEditorScreen({
           rect={selection.rect}
           onRhyme={() => openPopover('rhyme')}
           onConcept={() => openPopover('concept')}
+          onGenealogy={() => openPopover('genealogy')}
           onAskMuse={() => openPopover('ask')}
         />
       )}

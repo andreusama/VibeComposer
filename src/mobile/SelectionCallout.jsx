@@ -1,0 +1,27 @@
+// The entry point to everything in this spec — a lightweight pill that
+// appears right where the user just selected text, offering the two ways
+// to act on it. Positioned in fixed/viewport coordinates from the
+// selection's own DOMRect (captured in LineRow), clamped so it never runs
+// off the right edge on a narrow phone.
+export default function SelectionCallout({ rect, onRhyme, onAskMuse }) {
+  if (!rect) return null;
+  const style = {
+    top: rect.bottom + 8,
+    left: Math.max(8, Math.min(rect.left, window.innerWidth - 220)),
+  };
+  return (
+    <div className="sel-callout" style={style}>
+      {/* preventDefault on mousedown (fires before the click, including on
+          touch) keeps the textarea's selection/focus alive — without this,
+          tapping the pill blurs the textarea first and the selection this
+          button is supposed to act on is already gone by the time onClick
+          fires. Same trick TextNoteNode uses on desktop. */}
+      <button className="sel-callout-btn" onMouseDown={(e) => e.preventDefault()} onClick={onRhyme}>
+        ↔ Rhyme
+      </button>
+      <button className="sel-callout-btn" onMouseDown={(e) => e.preventDefault()} onClick={onAskMuse}>
+        ✦ Ask muse
+      </button>
+    </div>
+  );
+}

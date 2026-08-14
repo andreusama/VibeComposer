@@ -19,14 +19,18 @@ vi.mock('./api.js', () => ({
 // right fake here, not a real DB round-trip.
 vi.mock('./lexicon.js', () => ({
   queryRhymeCandidates: vi.fn().mockResolvedValue({ data: [], error: null }),
+  queryWordBank: vi.fn().mockResolvedValue({ data: [], error: null }),
+  verifyWordsInLexicon: vi.fn().mockResolvedValue({ data: [], error: null }),
 }));
 
 import {
   askMuse, parseCompanionResponse, applyMuseVerification, selectDiverseSuggestions,
   calculateContextWeights, MUSE_ACTION_TYPES, MUSE_TYPES, MUSE_ANGLES,
-  buildCulturalResonance, describeCulturalResonance,
+  buildCulturalResonance, describeCulturalResonance, extractCulturalFrame,
+  buildWordBankFromLexicon, filterWordBankByConcept, getCulturalProvocation,
+  proposeConceptWords, guessConceptFromLine,
 } from './museApi.js';
-import { queryRhymeCandidates } from './lexicon.js';
+import { queryRhymeCandidates, queryWordBank, verifyWordsInLexicon } from './lexicon.js';
 
 function mockClaudeResponse(text) {
   global.fetch = vi.fn().mockResolvedValue({
@@ -79,23 +83,51 @@ describe('parseCompanionResponse', () => {
     expect(result.suggestions).toEqual([]);
   });
 
-  it('parses a WORD_BANK response, including short_phrases', () => {
+  it('parses a WORD_BANK response as a request to look up — never a model-invented word list', () => {
     const raw = JSON.stringify({
       action_type: 'WORD_BANK',
       target_rhyme: 'cielo',
       rhyme_type: 'asonante',
-      word_groups: [
-        { syllables: 2, words: ['duelo', 'recelo'] },
-        { short_phrases: ['sin consuelo', 'de terciopelo'] },
-      ],
+      letter_filter: { type: 'starts_with', value: 'D' },
+      concept: 'volar',
       themes: [],
     });
     const result = parseCompanionResponse(raw);
     expect(result.action_type).toBe('WORD_BANK');
     expect(result.wordBank.targetRhyme).toBe('cielo');
     expect(result.wordBank.rhymeType).toBe('asonante');
-    expect(result.wordBank.wordGroups[0].words).toEqual(['duelo', 'recelo']);
-    expect(result.wordBank.wordGroups[1].shortPhrases).toEqual(['sin consuelo', 'de terciopelo']);
+    expect(result.wordBank.letterFilter).toEqual({ type: 'starts_with', value: 'd' });
+    expect(result.wordBank.concept).toBe('volar');
+    // Always starts empty — only buildWordBankFromLexicon (a real DB
+    // query) is allowed to populate this, never the model's own output.
+    expect(result.wordBank.wordGroups).toEqual([]);
+  });
+
+  it('ignores a malformed or missing letter_filter rather than throwing', () => {
+    const raw = JSON.stringify({
+      action_type: 'WORD_BANK', target_rhyme: 'cielo', rhyme_type: 'consonante',
+      letter_filter: { type: 'not_a_real_type', value: 'x' }, themes: [],
+    });
+    expect(parseCompanionResponse(raw).wordBank.letterFilter).toBeNull();
+
+    const rawNoFilter = JSON.stringify({ action_type: 'WORD_BANK', target_rhyme: 'cielo', rhyme_type: 'consonante', themes: [] });
+    expect(parseCompanionResponse(rawNoFilter).wordBank.letterFilter).toBeNull();
+  });
+
+  it('parses WORD_BANK requests with no rhyme at all — rhyme is optional now', () => {
+    const raw = JSON.stringify({
+      action_type: 'WORD_BANK', target_rhyme: null, rhyme_type: 'consonante',
+      letter_filter: { type: 'contains_chain', value: 'ala' }, concept: 'volar', themes: [],
+    });
+    const result = parseCompanionResponse(raw);
+    expect(result.wordBank.targetRhyme).toBe('');
+    expect(result.wordBank.letterFilter).toEqual({ type: 'contains_chain', value: 'ala' });
+    expect(result.wordBank.concept).toBe('volar');
+  });
+
+  it('defaults concept to null when the model doesn\'t report one', () => {
+    const raw = JSON.stringify({ action_type: 'WORD_BANK', target_rhyme: 'cielo', rhyme_type: 'consonante', themes: [] });
+    expect(parseCompanionResponse(raw).wordBank.concept).toBeNull();
   });
 
   it('strips markdown code fences before parsing', () => {
@@ -323,43 +355,205 @@ describe('applyMuseVerification — SURGEON/ARCHITECT', () => {
   });
 });
 
-describe('applyMuseVerification — WORD_BANK', () => {
-  const baseCtx = { verseText: 'Camino solo por la calle vacía', lang: 'es', dialect: 'central' };
+describe('applyMuseVerification — WORD_BANK is explicitly a no-op', () => {
+  it('leaves parsed.wordBank untouched — buildWordBankFromLexicon owns this now, not verification', () => {
+    const wordBank = { targetRhyme: 'cielo', rhymeType: 'asonante', letterFilter: null, wordGroups: [] };
+    const parsed = { action_type: 'WORD_BANK', wordBank };
+    applyMuseVerification(parsed, { verseText: 'texto', lang: 'es', dialect: 'central' });
+    expect(parsed.wordBank).toBe(wordBank); // same reference, nothing mutated
+  });
+});
 
-  it('filters out words that already sit in the note', () => {
-    const parsed = {
-      action_type: 'WORD_BANK',
-      wordBank: {
-        targetRhyme: null, rhymeType: 'consonante',
-        wordGroups: [{ syllables: 2, words: ['calle', 'valle'], shortPhrases: [] }],
-      },
-    };
-    applyMuseVerification(parsed, baseCtx);
-    expect(parsed.wordBank.wordGroups[0].words).toEqual(['valle']);
+describe('buildWordBankFromLexicon', () => {
+  beforeEach(() => {
+    queryWordBank.mockReset();
+    queryWordBank.mockResolvedValue({ data: [], error: null });
+    verifyWordsInLexicon.mockReset();
+    verifyWordsInLexicon.mockResolvedValue({ data: [], error: null });
   });
 
-  it('filters words that do not actually rhyme with the stated target', () => {
-    const parsed = {
-      action_type: 'WORD_BANK',
-      wordBank: {
-        targetRhyme: 'cielo', rhymeType: 'asonante',
-        wordGroups: [{ syllables: 2, words: ['duelo', 'camino'], shortPhrases: [] }],
-      },
-    };
-    applyMuseVerification(parsed, baseCtx);
-    expect(parsed.wordBank.wordGroups[0].words).toEqual(['duelo']);
+  it('never trusts model-generated words — the list comes entirely from queryWordBank', async () => {
+    queryWordBank.mockResolvedValue({
+      data: [
+        { word: 'duelo', syllables: 2, charisma_score: 6 },
+        { word: 'recelo', syllables: 3, charisma_score: 5 },
+      ],
+      error: null,
+    });
+    const wordBank = { targetRhyme: 'cielo', rhymeType: 'asonante', letterFilter: null, wordGroups: [] };
+    const result = await buildWordBankFromLexicon(wordBank, { verseText: 'texto', lang: 'es', dialect: 'central' });
+
+    expect(queryWordBank).toHaveBeenCalledWith(expect.objectContaining({ rhymeType: 'asonante', lang: 'es' }));
+    expect(result.wordGroups).toEqual([
+      { syllables: 2, words: ['duelo'], shortPhrases: [] },
+      { syllables: 3, words: ['recelo'], shortPhrases: [] },
+    ]);
   });
 
-  it('drops a group entirely once it has nothing left', () => {
-    const parsed = {
-      action_type: 'WORD_BANK',
-      wordBank: {
-        targetRhyme: 'cielo', rhymeType: 'asonante',
-        wordGroups: [{ syllables: 2, words: ['camino'], shortPhrases: [] }],
-      },
-    };
-    applyMuseVerification(parsed, baseCtx);
-    expect(parsed.wordBank.wordGroups).toHaveLength(0);
+  it('groups multiple words sharing a syllable count together, preserving query order', async () => {
+    queryWordBank.mockResolvedValue({
+      data: [
+        { word: 'duelo', syllables: 2, charisma_score: 8 },
+        { word: 'suelo', syllables: 2, charisma_score: 5 },
+      ],
+      error: null,
+    });
+    const wordBank = { targetRhyme: 'cielo', rhymeType: 'consonante', letterFilter: null, wordGroups: [] };
+    const result = await buildWordBankFromLexicon(wordBank, { verseText: 'texto', lang: 'es', dialect: 'central' });
+    expect(result.wordGroups).toEqual([{ syllables: 2, words: ['duelo', 'suelo'], shortPhrases: [] }]);
+  });
+
+  it('passes the letterFilter straight through to queryWordBank untouched', async () => {
+    const letterFilter = { type: 'starts_with', value: 'd' };
+    const wordBank = { targetRhyme: 'cielo', rhymeType: 'consonante', letterFilter, wordGroups: [] };
+    await buildWordBankFromLexicon(wordBank, { verseText: 'texto', lang: 'es', dialect: 'central' });
+    expect(queryWordBank).toHaveBeenCalledWith(expect.objectContaining({ letterFilter }));
+  });
+
+  it('excludes words already sitting in the note, same repetition principle as SURGEON/ARCHITECT', async () => {
+    const wordBank = { targetRhyme: 'cielo', rhymeType: 'consonante', letterFilter: null, wordGroups: [] };
+    await buildWordBankFromLexicon(wordBank, { verseText: 'Camino solo por la calle vacía', lang: 'es', dialect: 'central' });
+    const callArg = queryWordBank.mock.calls[0][0];
+    expect(callArg.exclude).toEqual(expect.arrayContaining(['camino', 'calle', 'vacía']));
+  });
+
+  it('is a real, honest empty result (not a fallback) when the lexicon has no matches — no group survives', async () => {
+    const wordBank = { targetRhyme: 'cielo', rhymeType: 'consonante', letterFilter: null, wordGroups: [] };
+    const result = await buildWordBankFromLexicon(wordBank, { verseText: 'texto', lang: 'es', dialect: 'central' });
+    expect(result.wordGroups).toEqual([]);
+    expect(queryWordBank).toHaveBeenCalled(); // a real query ran — this isn't a short-circuit
+  });
+
+  // Reported bug: "dame palabras carismáticas" (no rhyme/letters/concept at
+  // all) used to short-circuit to an empty result — even though reaching
+  // this function at all means the model already classified the turn as an
+  // explicit vocabulary request. Now it runs the plain common-and-cool
+  // query instead of nothing.
+  it('runs the plain common-and-cool query (not a short-circuit) when rhyme, letter filter, AND concept are all absent', async () => {
+    queryWordBank.mockResolvedValue({
+      data: [{ word: 'carisma', syllables: 3, charisma_score: 9 }],
+      error: null,
+    });
+    const wordBank = { targetRhyme: '', rhymeType: 'consonante', letterFilter: null, concept: null, wordGroups: [] };
+    const result = await buildWordBankFromLexicon(wordBank, { verseText: 'texto', lang: 'es', dialect: 'central' });
+
+    expect(queryWordBank).toHaveBeenCalledWith(expect.objectContaining({ rhymeKey: null, letterFilter: null }));
+    expect(result.wordGroups).toEqual([{ syllables: 3, words: ['carisma'], shortPhrases: [] }]);
+  });
+
+  it('runs the query using only a letter filter when no rhyme was requested — the reported bug ("ala" with no rhyme target)', async () => {
+    queryWordBank.mockResolvedValue({ data: [{ word: 'ala', syllables: 2, charisma_score: 5 }], error: null });
+    const letterFilter = { type: 'contains_chain', value: 'ala' };
+    const wordBank = { targetRhyme: '', rhymeType: 'consonante', letterFilter, concept: null, wordGroups: [] };
+    const result = await buildWordBankFromLexicon(wordBank, { verseText: 'texto', lang: 'es', dialect: 'central' });
+
+    expect(queryWordBank).toHaveBeenCalledWith(expect.objectContaining({ rhymeKey: null, letterFilter }));
+    expect(result.wordGroups).toEqual([{ syllables: 2, words: ['ala'], shortPhrases: [] }]);
+  });
+
+  // Rewritten after a real reported bug: a concept-only request used to run
+  // queryWordBank with no rhyme/letter filter at all — a "top N by
+  // charisma across the whole 734k-word lexicon" pool that has NO real
+  // relationship to any given concept, then filtered it with
+  // filterWordBankByConcept. Live testing showed this surfacing as "a
+  // random word family" completely unrelated to what was asked. The fix:
+  // for concept-only, don't touch queryWordBank at all — propose real
+  // words for the concept (LLM), then verify each is a real lexicon entry.
+  it('proposes real words for a concept alone (no rhyme, no letter filter) and verifies them against the lexicon — never queries queryWordBank\'s blind top-charisma pool', async () => {
+    verifyWordsInLexicon.mockResolvedValue({
+      data: [{ word: 'alado', syllables: 3, charisma_score: 7, freq_rank: 50000 }],
+      error: null,
+    });
+    mockClaudeResponse(JSON.stringify({ words: ['alado', 'volar'] }));
+    const wordBank = { targetRhyme: '', rhymeType: 'consonante', letterFilter: null, concept: 'volar', wordGroups: [] };
+    const result = await buildWordBankFromLexicon(wordBank, { verseText: 'texto', lang: 'es', dialect: 'central' });
+
+    expect(queryWordBank).not.toHaveBeenCalled();
+    expect(verifyWordsInLexicon).toHaveBeenCalledWith(expect.objectContaining({ words: ['alado', 'volar'], lang: 'es' }));
+    expect(result.wordGroups).toEqual([{ syllables: 3, words: ['alado'], shortPhrases: [] }]);
+    expect(result.conceptMatched).toBe(true);
+  });
+
+  it('an honest empty result (not a fallback to an irrelevant pool) when none of the proposed words verify', async () => {
+    verifyWordsInLexicon.mockResolvedValue({ data: [], error: null });
+    mockClaudeResponse(JSON.stringify({ words: ['palabraInventada'] }));
+    const wordBank = { targetRhyme: '', rhymeType: 'consonante', letterFilter: null, concept: 'volar', wordGroups: [] };
+    const result = await buildWordBankFromLexicon(wordBank, { verseText: 'texto', lang: 'es', dialect: 'central' });
+
+    expect(result.wordGroups).toEqual([]);
+    expect(result.conceptMatched).toBeUndefined();
+    expect(queryWordBank).not.toHaveBeenCalled();
+  });
+
+  it('excludes words already in the note from a concept-only result too', async () => {
+    verifyWordsInLexicon.mockResolvedValue({
+      data: [
+        { word: 'alado', syllables: 3, charisma_score: 7, freq_rank: 50000 },
+        { word: 'camino', syllables: 3, charisma_score: 5, freq_rank: 200 },
+      ],
+      error: null,
+    });
+    mockClaudeResponse(JSON.stringify({ words: ['alado', 'camino'] }));
+    const wordBank = { targetRhyme: '', rhymeType: 'consonante', letterFilter: null, concept: 'volar', wordGroups: [] };
+    const result = await buildWordBankFromLexicon(wordBank, { verseText: 'Camino solo por la calle', lang: 'es', dialect: 'central' });
+
+    expect(result.wordGroups).toEqual([{ syllables: 3, words: ['alado'], shortPhrases: [] }]);
+  });
+
+  it('falls back to the unfiltered deterministic pool when the concept filter finds nothing real — never a dead end', async () => {
+    queryWordBank.mockResolvedValue({ data: [{ word: 'mesa', syllables: 2, charisma_score: 5 }], error: null });
+    mockClaudeResponse(JSON.stringify({ words: [] }));
+    const wordBank = { targetRhyme: 'cielo', rhymeType: 'consonante', letterFilter: null, concept: 'volar', wordGroups: [] };
+    const result = await buildWordBankFromLexicon(wordBank, { verseText: 'texto', lang: 'es', dialect: 'central' });
+
+    expect(result.wordGroups).toEqual([{ syllables: 2, words: ['mesa'], shortPhrases: [] }]);
+    expect(result.conceptMatched).toBe(false);
+  });
+
+  it('does not run the concept filter at all when no concept was requested', async () => {
+    queryWordBank.mockResolvedValue({ data: [{ word: 'duelo', syllables: 2, charisma_score: 6 }], error: null });
+    const wordBank = { targetRhyme: 'cielo', rhymeType: 'consonante', letterFilter: null, concept: null, wordGroups: [] };
+    const result = await buildWordBankFromLexicon(wordBank, { verseText: 'texto', lang: 'es', dialect: 'central' });
+
+    expect(result.conceptMatched).toBeUndefined();
+    expect(result.wordGroups).toEqual([{ syllables: 2, words: ['duelo'], shortPhrases: [] }]);
+  });
+});
+
+describe('filterWordBankByConcept', () => {
+  it('returns the candidate list untouched when there is no concept, and [] when there are no candidates', async () => {
+    expect(await filterWordBankByConcept({ concept: null, candidateWords: ['ala', 'bala'] })).toEqual(['ala', 'bala']);
+    expect(await filterWordBankByConcept({ concept: 'volar', candidateWords: [] })).toEqual([]);
+  });
+
+  it('only ever returns words that were actually in the candidate list — never invents new ones', async () => {
+    mockClaudeResponse(JSON.stringify({ words: ['alado', 'palabra-inventada-fuera-de-la-lista'] }));
+    const result = await filterWordBankByConcept({ concept: 'volar', candidateWords: ['alado', 'mesa', 'silla'] });
+    expect(result).toEqual(['alado']);
+  });
+
+  it('degrades to an empty array (not a thrown error) when the call fails', async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error('network down'));
+    const result = await filterWordBankByConcept({ concept: 'volar', candidateWords: ['alado'] });
+    expect(result).toEqual([]);
+  });
+});
+
+describe('proposeConceptWords', () => {
+  it('returns [] without calling anything when there is no concept', async () => {
+    expect(await proposeConceptWords({ concept: null })).toEqual([]);
+  });
+
+  it('lowercases and trims the model\'s proposed words', async () => {
+    mockClaudeResponse(JSON.stringify({ words: [' Alado ', 'PLANEAR'] }));
+    const result = await proposeConceptWords({ concept: 'volar' });
+    expect(result).toEqual(['alado', 'planear']);
+  });
+
+  it('degrades to an empty array (not a thrown error) when the call fails', async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error('network down'));
+    const result = await proposeConceptWords({ concept: 'volar' });
+    expect(result).toEqual([]);
   });
 });
 
@@ -407,6 +601,83 @@ describe('askMuse (integration, mocked network)', () => {
     });
     expect(result.action_type).toBe('SOCRATIC');
   });
+
+  it('WORD_BANK end-to-end: the model only parses the request, real words come from the lexicon query', async () => {
+    // vi.restoreAllMocks() above wipes the vi.mock() factory's default
+    // resolved value for this describe block's tests — set explicitly here
+    // rather than relying on it.
+    queryWordBank.mockResolvedValue({
+      data: [{ word: 'duelo', syllables: 2, charisma_score: 6 }, { word: 'recelo', syllables: 3, charisma_score: 5 }],
+      error: null,
+    });
+    mockClaudeResponse(JSON.stringify({
+      action_type: 'WORD_BANK', target_rhyme: 'cielo', rhyme_type: 'asonante',
+      letter_filter: null, themes: [],
+    }));
+
+    const result = await askMuse({
+      verseText: 'texto', noteFunction: 'verse', blockProfile: '', userMessage: 'dame rimas con cielo',
+    });
+
+    expect(result.action_type).toBe('WORD_BANK');
+    // The real content came from the lexicon query, not anything the model
+    // itself proposed (the mocked Claude response never mentioned these words).
+    expect(result.wordBank.wordGroups).toEqual([
+      { syllables: 2, words: ['duelo'], shortPhrases: [] },
+      { syllables: 3, words: ['recelo'], shortPhrases: [] },
+    ]);
+    expect(queryWordBank).toHaveBeenCalledWith(expect.objectContaining({ rhymeType: 'asonante' }));
+  });
+
+  it('WORD_BANK concept filtering end-to-end: a rhyme-less "letters + concept" request runs a real lexicon query, then an LLM concept filter over real candidates — the reported "ala" + "volar" bug', async () => {
+    queryWordBank.mockResolvedValue({
+      data: [
+        { word: 'alado', syllables: 3, charisma_score: 7 },
+        { word: 'palabrota', syllables: 4, charisma_score: 5 },
+      ],
+      error: null,
+    });
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ content: [{ type: 'text', text: JSON.stringify({
+          action_type: 'WORD_BANK', target_rhyme: null, rhyme_type: 'consonante',
+          letter_filter: { type: 'contains_chain', value: 'ala' }, concept: 'volar', themes: [],
+        }) }] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ content: [{ type: 'text', text: JSON.stringify({ words: ['alado'] }) }] }),
+      });
+
+    const result = await askMuse({
+      verseText: 'texto', noteFunction: 'verse', blockProfile: '',
+      userMessage: 'dame todas las palabras que contengan "ala" y tengan que ver con volar',
+    });
+
+    expect(result.action_type).toBe('WORD_BANK');
+    // Not empty (the reported dead end) and not the concept-irrelevant "palabrota" either.
+    expect(result.wordBank.wordGroups).toEqual([{ syllables: 3, words: ['alado'], shortPhrases: [] }]);
+    expect(result.wordBank.conceptMatched).toBe(true);
+    expect(queryWordBank).toHaveBeenCalledWith(expect.objectContaining({
+      rhymeKey: null, letterFilter: { type: 'contains_chain', value: 'ala' },
+    }));
+  });
+});
+
+describe('extractCulturalFrame', () => {
+  it('rejects a hallucinated selection not present in the candidate list', async () => {
+    mockClaudeResponse(JSON.stringify({ selectedWord: 'palabraInventada', frame: 'x', tropo: 'y' }));
+    const result = await extractCulturalFrame({
+      concept: 'caballo', candidateWords: ['soslayo', 'vasallo'], lyricDna: {},
+    });
+    expect(result).toBeNull();
+  });
+
+  it('returns null (not a thrown error) with an empty candidate list', async () => {
+    const result = await extractCulturalFrame({ concept: 'caballo', candidateWords: [], lyricDna: {} });
+    expect(result).toBeNull();
+  });
 });
 
 describe('buildCulturalResonance', () => {
@@ -424,14 +695,82 @@ describe('buildCulturalResonance', () => {
     expect(queryRhymeCandidates).not.toHaveBeenCalled();
   });
 
-  it('degrades gracefully with a concept but no mandatory word when the lexicon has no high-charisma match', async () => {
+  it('is disabled entirely for WORD_BANK too — that mode is now a pure lexicon dictionary lookup, not a single-word selection', async () => {
+    const result = await buildCulturalResonance({
+      verseText: 'Cruzó la frontera a lomos de un caballo',
+      targetVerse: null, lang: 'es', dialect: 'central', forceMode: 'WORD_BANK',
+    });
+    expect(result).toBeNull();
+    expect(queryRhymeCandidates).not.toHaveBeenCalled();
+  });
+
+  it('degrades gracefully (reason: no_rhyme_match) when the lexicon has no high-charisma match', async () => {
     const result = await buildCulturalResonance({
       verseText: 'Cruzó la frontera a lomos de un caballo',
       targetVerse: null, lang: 'es', dialect: 'central', forceMode: null,
     });
     expect(result.enabled).toBe(false);
     expect(result.degraded).toBe(true);
+    expect(result.reason).toBe('no_rhyme_match');
     expect(result.concept).toBe('caballo');
+  });
+
+  it('selects the model-chosen word (not just the top DB result) when real candidates exist', async () => {
+    queryRhymeCandidates.mockResolvedValue({
+      data: [{ word: 'soslayo' }, { word: 'vasallo' }, { word: 'desmayo' }],
+      error: null,
+    });
+    mockClaudeResponse(JSON.stringify({ selectedWord: 'vasallo', frame: 'lealtad feudal', tropo: 'servir a un señor' }));
+
+    const result = await buildCulturalResonance({
+      verseText: 'Cruzó la frontera a lomos de un caballo',
+      targetVerse: null, lang: 'es', dialect: 'central', forceMode: null,
+      lyricDna: { vozPropia: { estiloVocabulario: 'crudo, callejero' } },
+    });
+
+    expect(result.enabled).toBe(true);
+    expect(result.mandatoryWord).toBe('vasallo');
+    expect(result.culturalFrame).toBe('lealtad feudal');
+    expect(result.reason).toBeNull();
+
+    const userPrompt = JSON.parse(fetch.mock.calls[0][1].body).messages[0].content;
+    expect(userPrompt).toContain('crudo, callejero');
+  });
+
+  it('degrades (reason: no_voice_fit) when real candidates exist but none fit the artist voice', async () => {
+    queryRhymeCandidates.mockResolvedValue({
+      data: [{ word: 'tiwanacota' }, { word: 'idiota' }],
+      error: null,
+    });
+    mockClaudeResponse(JSON.stringify({ selectedWord: null, frame: null, tropo: null }));
+
+    const result = await buildCulturalResonance({
+      verseText: 'Como piedra tiwanacota resisto',
+      targetVerse: null, lang: 'es', dialect: 'central', forceMode: null,
+      lyricDna: { vozPropia: { estiloVocabulario: 'crudo, callejero, urbano moderno' } },
+    });
+
+    expect(result.enabled).toBe(false);
+    expect(result.degraded).toBe(true);
+    expect(result.reason).toBe('no_voice_fit');
+  });
+
+  it('does not use the DB pool blindly — a candidates[0]-only regression would fail this', async () => {
+    // Same candidates as the first test, but the model picks the LAST one
+    // rather than the first (DB-sorted-by-charisma) one — proves selection
+    // actually drives the outcome, not array position.
+    queryRhymeCandidates.mockResolvedValue({
+      data: [{ word: 'soslayo' }, { word: 'vasallo' }, { word: 'desmayo' }],
+      error: null,
+    });
+    mockClaudeResponse(JSON.stringify({ selectedWord: 'desmayo', frame: 'vulnerabilidad', tropo: 'perder el control' }));
+
+    const result = await buildCulturalResonance({
+      verseText: 'Cruzó la frontera a lomos de un caballo',
+      targetVerse: null, lang: 'es', dialect: 'central', forceMode: null,
+      lyricDna: {},
+    });
+    expect(result.mandatoryWord).toBe('desmayo');
   });
 
   it('queries the lexicon using the target verse selection, not the raw note text, when one is given', async () => {
@@ -449,6 +788,99 @@ describe('buildCulturalResonance', () => {
     });
     expect(result).toBeNull();
     expect(queryRhymeCandidates).not.toHaveBeenCalled();
+  });
+});
+
+describe('guessConceptFromLine', () => {
+  // Zero-cost, synchronous — no LLM call at all, used purely to seed a
+  // confirm-before-you-fire UI step (see MusePopover/MuseFloatNode's
+  // provocationStage / conceptStage). Same "last significant word"
+  // heuristic buildCulturalResonance's own concept derivation used.
+  it('returns the last significant word of the target verse when given one', () => {
+    expect(guessConceptFromLine({ verseText: '', targetVerse: { before: '', text: 'un viejo caballo', after: '' } }))
+      .toBe('caballo');
+  });
+
+  it('falls back to the last non-empty line of verseText when there is no targetVerse', () => {
+    expect(guessConceptFromLine({ verseText: 'primera línea\nCruzó la frontera a lomos de un caballo', targetVerse: null }))
+      .toBe('caballo');
+  });
+
+  it('returns null when there is no usable text at all', () => {
+    expect(guessConceptFromLine({ verseText: '', targetVerse: null })).toBeNull();
+  });
+});
+
+describe('getCulturalProvocation', () => {
+  // Rewritten TWICE after real reported bugs:
+  // 1. The first version routed this through queryRhymeCandidates/
+  //    extractCulturalFrame (buildCulturalResonance's pipeline), which
+  //    gated a non-rhyme feature behind "does this line's last word have
+  //    high-charisma rhyme matches" — it came back empty even for a real
+  //    Quijote quote.
+  // 2. The second version derived a concept from the line internally and
+  //    fired straight at the model with no human check — the caller had no
+  //    way to correct a wrong guess before the call ran. `concept` is now a
+  //    REQUIRED, externally-confirmed input (see guessConceptFromLine
+  //    above, used by the UI to seed a confirm step); verseText/targetVerse
+  //    are optional EXTRA context only.
+  it('requires an explicit, confirmed concept — returns null without calling anything if missing', async () => {
+    const result = await getCulturalProvocation({ verseText: 'una línea cualquiera', targetVerse: null, lang: 'es' });
+    expect(result).toBeNull();
+    expect(queryRhymeCandidates).not.toHaveBeenCalled();
+  });
+
+  it('never queries the lexicon at all — no rhyme dependency, unlike the first version of this function', async () => {
+    mockClaudeResponse(JSON.stringify({ frame: 'refrán: "quien a buen árbol se arrima..."', tropo: 'protección/pertenencia' }));
+
+    const result = await getCulturalProvocation({ concept: 'caballo', lang: 'es' });
+
+    expect(result).toEqual({ frame: 'refrán: "quien a buen árbol se arrima..."', tropo: 'protección/pertenencia' });
+    expect(queryRhymeCandidates).not.toHaveBeenCalled();
+  });
+
+  it('passes the confirmed concept AND the line (as extra context) when both are available', async () => {
+    mockClaudeResponse(JSON.stringify({ frame: 'x', tropo: 'y' }));
+    await getCulturalProvocation({
+      concept: 'caballo', verseText: 'ladran, luego cabalgamos', targetVerse: null, lang: 'es',
+    });
+    const userPrompt = JSON.parse(fetch.mock.calls[0][1].body).messages[0].content;
+    expect(userPrompt).toContain('caballo');
+    expect(userPrompt).toContain('ladran, luego cabalgamos');
+  });
+
+  it('works with only a concept and no line context at all', async () => {
+    mockClaudeResponse(JSON.stringify({ frame: 'x', tropo: 'y' }));
+    const result = await getCulturalProvocation({ concept: 'la ausencia', lang: 'es' });
+    expect(result).not.toBeNull();
+  });
+
+  it('never gated by forceMode — unlike buildCulturalResonance, this is a direct, on-demand tap with no forceMode param at all', async () => {
+    mockClaudeResponse(JSON.stringify({ frame: 'x', tropo: 'y' }));
+    const result = await getCulturalProvocation({ concept: 'caballo', lang: 'es' });
+    expect(result).not.toBeNull();
+  });
+
+  it('returns null when the model genuinely finds no reasonable association, rather than forcing one', async () => {
+    mockClaudeResponse(JSON.stringify({ frame: null, tropo: null }));
+    const result = await getCulturalProvocation({ concept: 'caballo', lang: 'es' });
+    expect(result).toBeNull();
+  });
+
+  it('returns null (not a thrown error) when the call fails', async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error('network down'));
+    const result = await getCulturalProvocation({ concept: 'caballo', lang: 'es' });
+    expect(result).toBeNull();
+  });
+
+  it('passes excludeFrames straight through so "otro ángulo" never repeats a tropo already shown', async () => {
+    mockClaudeResponse(JSON.stringify({ frame: 'x', tropo: 'y' }));
+    await getCulturalProvocation({
+      concept: 'caballo', lang: 'es',
+      excludeFrames: ['un tropo ya visto'],
+    });
+    const userPrompt = JSON.parse(fetch.mock.calls[0][1].body).messages[0].content;
+    expect(userPrompt).toContain('un tropo ya visto');
   });
 });
 

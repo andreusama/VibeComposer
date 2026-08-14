@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { NodeResizer } from '@xyflow/react';
 import { loadMuseConversation, saveMuseTurn, markMuseOptionSaved, loadMuseProfile } from './museData.js';
-import { askMuse } from '../utils/museApi.js';
+import { askMuse, getCulturalProvocation, guessConceptFromLine } from '../utils/museApi.js';
 import { recordMuseTurnAndMaybeUpdateProfile } from './museProfileUpdater.js';
 import { addAnnotation } from './canvasData.js';
 import MuseEyePanel from './MuseEyePanel.jsx';
@@ -72,6 +72,18 @@ export default function MuseFloatNode({ id, data, selected }) {
   // (see museApi.js's buildCulturalResonance), so it never hands back the
   // same mandatory word or refrán/tropo twice across the conversation.
   const angleHistoryRef = useRef({ words: [], frames: [] });
+  // Creativity proposal #4 — same shape/reasoning as MusePopover's mobile
+  // version: only ever relevant to the LAST (pending) SOCRATIC turn, so one
+  // flat state is enough, no per-entry map needed. Reset on every new send.
+  const [provocation, setProvocation] = useState(null);
+  const [provocationLoading, setProvocationLoading] = useState(false);
+  const [provocationAttempted, setProvocationAttempted] = useState(false);
+  // 'idle' | 'confirm' (showing guessConceptFromLine's guess) | 'ask' (no
+  // guess, or the user said "that's not it") — same confirm-before-firing
+  // reasoning as mobile's MusePopover: a real reported bug came from firing
+  // on an unconfirmed guess with no chance to correct it.
+  const [provocationStage, setProvocationStage] = useState('idle');
+  const [provocationConceptDraft, setProvocationConceptDraft] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -99,6 +111,9 @@ export default function MuseFloatNode({ id, data, selected }) {
     if (!message || asking) return;
     setAsking(true);
     setError(null);
+    setProvocation(null);
+    setProvocationAttempted(false);
+    setProvocationStage('idle');
     try {
       const response = await askMuse({
         verseText, noteFunction, blockProfile, lyricDna, userMessage: message,
@@ -163,6 +178,53 @@ export default function MuseFloatNode({ id, data, selected }) {
     markMuseOptionSaved(entry.id, annotation.id); // bookkeeping only, UI state is local
     setSavedOptions((s) => new Set(s).add(key));
   }, [userId, lineId]);
+
+  // Creativity proposal #4 — direct call, not a trip through send()/askMuse:
+  // this is a client-forced action, not a new model turn deciding a mode.
+  // Never fires on the first click anymore — guessConceptFromLine's guess
+  // (or a blank ask if there's nothing to guess from) has to be confirmed
+  // or corrected first (provocationStage), same reasoning as mobile's
+  // MusePopover: a real reported bug came from firing on an unconfirmed
+  // guess with no chance to correct it. pendingTargetVerse is usually
+  // already cleared by the time this fires (send() clears it right after
+  // use) — guessConceptFromLine/getCulturalProvocation fall back to
+  // verseText's own last line in that case, same as buildCulturalResonance.
+  const handleCulturalProvocationStart = useCallback(() => {
+    const guess = guessConceptFromLine({ verseText, targetVerse: pendingTargetVerse || null });
+    setProvocationConceptDraft(guess || '');
+    setProvocationStage(guess ? 'confirm' : 'ask');
+  }, [verseText, pendingTargetVerse]);
+
+  const handleCulturalProvocationChange = useCallback(() => setProvocationStage('ask'), []);
+  const handleCulturalProvocationDraftChange = useCallback((e) => setProvocationConceptDraft(e.target.value), []);
+
+  // Shared by the confirm chip, the ask form's submit, AND "otro ángulo"
+  // (re-runs with the SAME already-confirmed concept — a new angle on the
+  // same topic, not a re-ask).
+  const handleCulturalProvocationRun = useCallback(async (concept) => {
+    setProvocationStage('idle');
+    setProvocationLoading(true);
+    try {
+      const result = await getCulturalProvocation({
+        concept, verseText, targetVerse: pendingTargetVerse || null, lyricDna,
+        lang: lyricLanguage,
+        excludeFrames: angleHistoryRef.current.frames,
+      });
+      setProvocation(result);
+      setProvocationAttempted(true);
+      if (result?.frame && !angleHistoryRef.current.frames.includes(result.frame)) {
+        angleHistoryRef.current.frames.push(result.frame);
+      }
+    } finally {
+      setProvocationLoading(false);
+    }
+  }, [verseText, pendingTargetVerse, lyricDna, lyricLanguage]);
+
+  const handleCulturalProvocationSubmit = useCallback((e) => {
+    e.preventDefault();
+    if (!provocationConceptDraft.trim()) return;
+    handleCulturalProvocationRun(provocationConceptDraft.trim());
+  }, [provocationConceptDraft, handleCulturalProvocationRun]);
 
   const lastEntry = conversation[conversation.length - 1];
   const isPendingQuestion = lastEntry?.role === 'muse' && lastEntry.mode === 'SOCRATIC';
@@ -255,8 +317,81 @@ export default function MuseFloatNode({ id, data, selected }) {
                     </div>
                   )}
 
+                  {/* Creativity proposal #4 — always available on the
+                      pending SOCRATIC turn, independent of whatever dynamic
+                      chips the model itself offered this turn. */}
+                  {entry.mode === 'SOCRATIC' && isLast && (
+                    <div className="muse-provocation-block">
+                      {provocationStage === 'idle' && !provocationAttempted && !provocationLoading && (
+                        <button
+                          className="muse-chip muse-chip-cultural nodrag"
+                          onClick={handleCulturalProvocationStart}
+                        >
+                          ✧ ángulo cultural
+                        </button>
+                      )}
+                      {provocationStage === 'confirm' && (
+                        <div className="muse-provocation-ask">
+                          <p className="muse-question">¿Un ángulo cultural sobre &quot;{provocationConceptDraft}&quot;?</p>
+                          <div className="muse-chip-row">
+                            <button
+                              className="muse-chip nodrag"
+                              onClick={() => handleCulturalProvocationRun(provocationConceptDraft)}
+                            >
+                              Sí, ese
+                            </button>
+                            <button className="muse-chip nodrag" onClick={handleCulturalProvocationChange}>
+                              Es otro concepto
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                      {provocationStage === 'ask' && (
+                        <form className="muse-concept-ask" onSubmit={handleCulturalProvocationSubmit}>
+                          <p className="muse-question">¿Sobre qué concepto quieres un ángulo cultural?</p>
+                          <input
+                            className="muse-concept-input nodrag"
+                            type="text"
+                            value={provocationConceptDraft}
+                            onChange={handleCulturalProvocationDraftChange}
+                            placeholder="p. ej. la ausencia, el orgullo…"
+                          />
+                          <button className="muse-chip nodrag" type="submit" disabled={!provocationConceptDraft.trim()}>
+                            Buscar
+                          </button>
+                        </form>
+                      )}
+                      {provocationLoading && <p className="muse-provocation-loading">buscando un ángulo…</p>}
+                      {!provocationLoading && provocationAttempted && !provocation && (
+                        <p className="muse-provocation-empty">
+                          no encontré un ángulo cultural claro para &quot;{provocationConceptDraft}&quot; — prueba con otro concepto
+                        </p>
+                      )}
+                      {!provocationLoading && provocation && (
+                        <div className="muse-provocation">
+                          <p className="muse-provocation-frame">
+                            {provocation.frame}{provocation.tropo ? ` — ${provocation.tropo}` : ''}
+                          </p>
+                          <p className="muse-provocation-hint">reacciona a esto, no lo copies</p>
+                          <button
+                            className="muse-chip nodrag"
+                            onClick={() => handleCulturalProvocationRun(provocationConceptDraft)}
+                            disabled={provocationLoading}
+                          >
+                            otro ángulo
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {entry.mode === 'WORD_BANK' && entry.options?.wordGroups?.length > 0 && (
                     <div className="muse-word-bank">
+                      {entry.options.conceptMatched === false && (
+                        <p className="muse-word-bank-note">
+                          ninguna encajó de verdad con &quot;{entry.options.concept}&quot; — aquí tienes el resto
+                        </p>
+                      )}
                       {entry.options.wordGroups.map((group, gi) => (
                         <div className="muse-word-group" key={gi}>
                           {group.syllables != null && <span className="muse-word-group-label">{group.syllables} síl.</span>}

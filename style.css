@@ -3256,6 +3256,66 @@ body::before {
 .muse-chip:hover { border-color: var(--chord); }
 .muse-chip:disabled { cursor: default; opacity: 0.6; }
 
+/* Creativity proposal #4 — cultural provocation. Amber (the muse's own
+   accent), not the chord indigo .muse-chip uses for the model's own
+   dynamic SOCRATIC chips — this is a separate, always-available affordance,
+   not one more option among those. */
+.muse-provocation-block { margin-top: var(--space-1-5); }
+.muse-chip-cultural {
+    border-color: var(--amber);
+    background: var(--chord-soft);
+    color: var(--amber);
+    margin-bottom: var(--space-1-5);
+}
+.muse-chip-cultural:hover { border-color: var(--amber); }
+.muse-provocation-loading, .muse-provocation-empty {
+    font-family: var(--font-body);
+    font-style: italic;
+    font-size: calc(var(--fs-secondary) * var(--canvas-scale));
+    color: var(--muted);
+}
+.muse-provocation {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    padding: var(--space-2-5) var(--space-3);
+    background: var(--paper);
+    border-left: 2px solid var(--amber);
+    border-radius: var(--r-sm);
+}
+.muse-provocation-frame {
+    font-family: var(--font-serif);
+    font-size: calc(var(--fs-secondary) * var(--canvas-scale));
+    color: var(--ink);
+}
+.muse-provocation-hint {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--amber);
+}
+
+/* Confirm-before-firing step (creativity proposal #4) — shared shape for
+   "is this the concept?" and the plain-input fallback when there's nothing
+   to guess from. */
+.muse-provocation-ask, .muse-concept-ask {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1-5);
+    margin-top: var(--space-1-5);
+}
+.muse-concept-input {
+    font-family: var(--font-sans);
+    font-size: calc(var(--fs-secondary) * var(--canvas-scale));
+    border: 1px solid var(--chord-line);
+    border-radius: var(--r-sm);
+    background: var(--paper);
+    padding: var(--space-1-5) var(--space-2-5);
+    color: var(--ink);
+}
+.muse-concept-input:focus { outline: none; border-color: var(--amber); }
+
 /* WORD_BANK — a dense grid of loose words, not a list of crafted lines, so
    it reads visually distinct from .muse-options (which promises a finished
    line each). Grouped by syllable count, same mono micro-label as the
@@ -3265,6 +3325,12 @@ body::before {
     flex-direction: column;
     gap: var(--space-2);
     margin-top: var(--space-1-5);
+}
+.muse-word-bank-note {
+    font-family: var(--font-body);
+    font-style: italic;
+    font-size: var(--fs-secondary);
+    color: var(--muted);
 }
 .muse-word-group-label {
     display: block;
@@ -5243,6 +5309,59 @@ body::before {
     font-size: var(--fs-secondary);
     cursor: pointer;
 }
+.mp-chip:disabled { opacity: 0.55; cursor: default; }
+
+/* Creativity proposal #4 — cultural provocation. Amber, not thread green:
+   deliberately distinct from the model's own dynamic SOCRATIC chips, since
+   this is a separate, always-available affordance rather than one more
+   option among the model's own. */
+.mp-chip-cultural { background: var(--amber-soft); color: var(--amber); align-self: flex-start; }
+.mp-provocation-loading, .mp-provocation-empty {
+    font-family: var(--font-body);
+    font-style: italic;
+    font-size: var(--fs-secondary);
+    color: var(--muted);
+    margin: 0;
+}
+.mp-provocation {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1-5);
+    padding: var(--space-3);
+    background: var(--amber-soft);
+    border-radius: var(--r-md);
+}
+.mp-provocation-frame {
+    font-family: var(--font-body);
+    font-size: var(--fs-body);
+    color: var(--ink);
+    margin: 0;
+}
+.mp-provocation-hint {
+    font-family: var(--font-sans);
+    font-size: var(--fs-micro);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--amber);
+    margin: 0;
+}
+
+/* Confirm-before-firing step (creativity proposals #3/#4) — shared shape
+   for "is this the concept?" (mp-question + mp-chips, reused as-is) and the
+   plain-input fallback when there's nothing to guess from. */
+.mp-provocation-ask { display: flex; flex-direction: column; gap: var(--space-2); }
+.mp-concept-ask { display: flex; flex-direction: column; gap: var(--space-2); }
+.mp-concept-input {
+    min-height: 48px;
+    padding: 0 var(--space-3);
+    background: var(--bg-deep);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    color: var(--ink);
+}
+.mp-concept-input:focus { outline: none; border-color: var(--amber); }
 
 /* SURGEON/ARCHITECT — exactly ONE card at a time, not a fanned stack: an
    earlier version peeked the next candidate out from behind the front one,
@@ -5307,6 +5426,13 @@ body::before {
    overscroll-behavior-x contains the scroll so it doesn't chain into the
    popover's own vertical scroll when a row is dragged past its edge. */
 .mp-wordbank { display: flex; flex-direction: column; gap: var(--space-3); }
+.mp-wb-note {
+    font-family: var(--font-body);
+    font-style: italic;
+    font-size: var(--fs-secondary);
+    color: var(--muted);
+    margin-bottom: var(--space-1);
+}
 .mp-wb-label {
     display: block;
     font-family: var(--font-mono);
@@ -5321,7 +5447,12 @@ body::before {
     gap: 8px;
     overflow-x: auto;
     overscroll-behavior-x: contain;
+    scroll-snap-type: x mandatory;
+    touch-action: pan-x; /* axis-locks the drag to this row so it can't fight the popover's vertical scroll */
     padding-bottom: 2px;
+    padding-inline: 2px;
+    -webkit-mask-image: linear-gradient(to right, transparent, black 20px, black calc(100% - 20px), transparent);
+    mask-image: linear-gradient(to right, transparent, black 20px, black calc(100% - 20px), transparent);
 }
 .mp-wb-pill {
     flex-shrink: 0;
@@ -5338,6 +5469,7 @@ body::before {
     font-size: var(--fs-secondary);
     white-space: nowrap;
     cursor: pointer;
+    scroll-snap-align: start;
 }
 .mp-wb-phrase { background: var(--bg-deep); color: var(--ink); }
 
@@ -5509,7 +5641,8 @@ body::before {
    green, matches the main-thread edge color) each get their own accent so
    the three pills stay visually distinct at a glance, not just by label. */
 .fab-menu-pill-icon-chord,
-.fab-menu-pill-icon-thread {
+.fab-menu-pill-icon-thread,
+.fab-menu-pill-icon-amber {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -5519,6 +5652,10 @@ body::before {
 }
 .fab-menu-pill-icon-chord { background: var(--chord-soft); color: var(--chord); }
 .fab-menu-pill-icon-thread { background: var(--thread-soft); color: var(--thread); }
+/* "Cool words" pill (creativity proposal #3) — same amber identity as
+   WORD_BANK's own pills (.mp-wb-pill), so the FabMenu entry visually
+   promises what it actually opens. */
+.fab-menu-pill-icon-amber { background: var(--amber-soft); color: var(--amber); }
 
 @keyframes fab-pill-in {
     from { opacity: 0; transform: translateY(8px) scale(0.9); }

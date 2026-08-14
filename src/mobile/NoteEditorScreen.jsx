@@ -534,6 +534,7 @@ export default function NoteEditorScreen({
         <SelectionCallout
           rect={selection.rect}
           onRhyme={() => openPopover('rhyme')}
+          onConcept={() => openPopover('concept')}
           onAskMuse={() => openPopover('ask')}
         />
       )}

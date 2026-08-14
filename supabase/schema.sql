@@ -795,33 +795,42 @@ create policy voice_memos_owner_delete on storage.objects
 -- getWordRhymeKey — consonant key), computed with the SAME algorithm the
 -- live app uses to check rhymes, so a lexicon match is guaranteed to also
 -- pass the app's own wordMatchesRhyme check, not just approximately agree
--- with it. charisma_score (1-10) is a heuristic "how evocative/poetic does
--- this word read" proxy derived from word shape + corpus frequency at seed
--- time (see the seed script's own comment) — NOT a linguistically
--- validated rating; short, ultra-common function words score low, longer
--- rarer content words score higher. Good enough to bias SELECTs toward
--- more interesting candidates, not a claim of poetic authority.
+-- with it. rhyme_key_assonant is the same word's assonant key (vowels
+-- only, from the stressed syllable onward) — WORD_BANK needs both, real
+-- rhyme dictionaries distinguish "rima consonante" from "rima asonante"
+-- and this table originally only stored the former. charisma_score (1-10)
+-- is a heuristic "how evocative/poetic does this word read" proxy derived
+-- from word shape + corpus frequency at seed time (see the seed script's
+-- own comment) — NOT a linguistically validated rating; short, ultra-
+-- common function words score low, longer rarer content words score
+-- higher. Good enough to bias SELECTs toward more interesting candidates,
+-- not a claim of poetic authority — and NOT the right sort key on its own
+-- for a "show me everything, common and cool first" word bank (see
+-- src/utils/lexicon.js's queryWordBank for the actual blended sort).
 -- ─────────────────────────────────────────────────────────────────────────────
 
 create table if not exists lexicon (
-  id               bigint generated always as identity primary key,
-  word             text not null,
-  lang_code        varchar(5) not null default 'es',
-  syllables        int not null,
-  stress_type      text check (stress_type in ('aguda', 'llana', 'esdrujula')),
-  rhyme_key        varchar(20) not null,
-  charisma_score   int not null default 5 check (charisma_score between 1 and 10),
-  freq_rank        int,
-  tags             text[] not null default '{}',
-  created_at       timestamptz not null default now(),
+  id                  bigint generated always as identity primary key,
+  word                text not null,
+  lang_code           varchar(5) not null default 'es',
+  syllables           int not null,
+  stress_type         text check (stress_type in ('aguda', 'llana', 'esdrujula')),
+  rhyme_key           varchar(20) not null,
+  rhyme_key_assonant  varchar(20),
+  charisma_score      int not null default 5 check (charisma_score between 1 and 10),
+  freq_rank           int,
+  tags                text[] not null default '{}',
+  created_at          timestamptz not null default now(),
   unique (word, lang_code)
 );
 
--- The Cultural Resonance Engine's one real query: "give me high-charisma
--- words matching this rhyme_key, for this language" — this index is what
--- makes that a real indexed lookup instead of a sequential scan over
--- however many tens of thousands of rows the seed script imports.
+-- Two lookup shapes: the Cultural Resonance Engine's single "give me
+-- high-charisma words matching this rhyme_key" query (ARCHITECT), and
+-- WORD_BANK's "give me everything matching this rhyme, either type" —
+-- both need an indexed path instead of a sequential scan over however many
+-- hundreds of thousands of rows the seed script imports.
 create index if not exists idx_lexicon_rhyme on lexicon(lang_code, rhyme_key, charisma_score desc);
+create index if not exists idx_lexicon_rhyme_assonant on lexicon(lang_code, rhyme_key_assonant, charisma_score desc);
 
 alter table lexicon enable row level security;
 

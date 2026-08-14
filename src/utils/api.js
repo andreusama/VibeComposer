@@ -59,6 +59,13 @@ export function getUsageRemaining() {
 }
 
 export function checkAndIncrementLimit() {
+  // No cap while running the local dev server (`npm run dev`) — the
+  // production build (`npm run build`/`vite preview`) still enforces the
+  // real limit below; import.meta.env.DEV is false there. Requested
+  // explicitly to stop local development/testing from tripping the same
+  // daily counter real users share.
+  if (import.meta.env.DEV) return;
+
   const stored = JSON.parse(localStorage.getItem('vc_usage') || '{}');
   
   if (stored.date !== TODAY) {

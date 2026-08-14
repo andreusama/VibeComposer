@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "seed:lexicon": "tsx scripts/seed-lexicon-kaikki.ts",
-    "coolscore": "tsx scripts/recompute-coolscore.ts"
+    "coolscore": "tsx scripts/recompute-coolscore.ts",
+    "backfill:assonant": "tsx scripts/backfill-assonant-key.ts"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",

@@ -21,7 +21,7 @@ import {splitIntoLines} from './textLines.js';
 import {countLineSyllables} from './syllables.js';
 import {significantWords} from './repeatedWords.js';
 import {logDebugEvent} from './debugLog.js';
-import {queryRhymeCandidates} from './lexicon.js';
+import {queryRhymeCandidates, queryWordBank, verifyWordsInLexicon} from './lexicon.js';
 
 export const MUSE_MODEL = 'claude-sonnet-5';
 
@@ -131,7 +131,7 @@ ESE texto directamente, no archives ni des por sentada una interpretación previ
    Mantiene la métrica exacta y la acentuación del compás de la línea que sustituye.
 2. ARCHITECT: Resolución o remate de un verso incompleto/estrofa. Mantiene la continuidad
    narrativa y rítmica.
-3. SOCRATIC: Se activa en TRES escenarios específicos:
+3. SOCRATIC: Se activa en CUATRO escenarios específicos:
    a) AMBIGÜEDAD / DESORIENTACIÓN: La nota tiene múltiples líneas o el usuario está atascado.
    b) FRICCIÓN FONÉTICA (APUNTE DE ESTUDIO): La rima pedida ("rhymeTargetWord") tiene opciones
       consonantes muy escasas o antinaturales en español (ej. consonantes agudas en -ú, -ij, -oj).
@@ -142,9 +142,37 @@ ESE texto directamente, no archives ni des por sentada una interpretación previ
       - REGLA DE ORO 80/20: Habla lo mínimo (1-2 frases).
       - CERO VERSOS: Prohibido sugerir versos, rimas o palabras en este turno.
       - Haz UNA sola pregunta incisiva sobre la verdad emocional/escena/intención del tema.
-4. WORD_BANK: Diccionario de palabras y frases cortas (2-3 palabras) filtradas ESTRICTAMENTE
-   por el estilo del artista (lyric_dna). NO genera versos completos. Se activa ante peticiones
-   explícitas de vocabulario.
+   d) SIN CONTEXTO REAL: La nota está vacía o casi vacía (nada que analizar) y el mensaje del
+      usuario tampoco da un tema, línea o petición concreta a la que responder. NO improvises una
+      interpretación de la nada ni fuerces un "consejo genérico" sobre un vacío — pregunta
+      directa y brevemente de qué quiere hablar o escribir (ej. "¿de qué quieres hablar hoy?" /
+      "¿sobre qué quieres escribir?"), sin chips de opciones inventadas para rellenar.
+4. WORD_BANK: Diccionario real de rimas y vocabulario — se activa ante CUALQUIER petición
+   explícita de vocabulario/palabras sueltas, INCLUIDA una petición sin ningún filtro concreto
+   (ej. "dame palabras carismáticas", "dame palabras chulas", "dame palabras que suenen bien",
+   sin más). Esto NO es SURGEON/ARCHITECT (no se piden versos ni frases) ni SOCRATIC (no hace
+   falta preguntar nada, es una petición perfectamente clara) — es exactamente lo que WORD_BANK
+   existe para responder: el propio diccionario ya viene ordenado por lo más común-y-carismático
+   primero, así que "dame palabras carismáticas" sin más filtro es una petición WORD_BANK
+   completa y válida con target_rhyme, letter_filter y concept los tres en null.
+   TU ÚNICA FUNCIÓN es entender la petición, NO inventar palabras: identifica (cada uno es
+   independiente y opcional) la palabra ancla de la rima si se pidió una, si es consonante o
+   asonante, cualquier filtro de letras explícito, y cualquier concepto/tema semántico pedido.
+   LA RIMA YA NO ES OBLIGATORIA para activar este modo — una petición válida puede pedir solo
+   letras, solo un concepto, solo "las más chulas sin más filtro", o cualquier combinación de
+   rima + letras + concepto. El diccionario real (y, si se pidió concepto, un filtro semántico
+   aparte sobre esos resultados reales) se consulta por separado, directamente contra datos
+   verificados — cualquier palabra que tú propongas aquí se descarta.
+   Ejemplos:
+   - "que empiecen por S" / "que empiecen con la letra ese" → letter_filter {"type": "starts_with", "value": "s"}
+   - "que tengan 'tr' en algún lado" / "con la cadena 'bl'" → letter_filter {"type": "contains_chain", "value": "tr"}
+   - "que tengan las letras a, r y o" → letter_filter {"type": "contains_letters", "value": "aro"}
+   - "que tengan que ver con volar" / "relacionadas con el mar" → concept: "volar" / "el mar"
+     (copia o resume el concepto en 1-3 palabras, no lo inventes)
+   - "dame palabras carismáticas" / "palabras chulas" / "palabras que suenen bien" (sin más
+     detalle) → target_rhyme null, letter_filter null, concept null — el propio banco ya
+     resuelve esto ordenando por carisma, no necesitas pedir ninguna aclaración
+   - sin petición de letras → letter_filter null; sin petición de concepto → concept null
 
 Para SURGEON y ARCHITECT: genera 5-6 candidatos en "suggestions" repartidos en los 3 tipos.
 No reutilices palabras significativas que ya aparezcan 1 sola vez en esta nota (salvo si ya
@@ -161,7 +189,7 @@ SI action_type == "SOCRATIC":
 {"action_type": "SOCRATIC", "reasoning": "justificación del bloqueo, fricción fonética o reflexión", "question": {"text": "pregunta concisa o apunte de estudio", "options": ["opción A", "opción B", "opción C"]}, "themes": ["..."]}
 
 SI action_type == "WORD_BANK":
-{"action_type": "WORD_BANK", "target_rhyme": "palabra de ejemplo que ancla la rima", "rhyme_type": "consonante"|"asonante", "word_groups": [{"syllables": 2, "words": ["palabra1", "palabra2"]}, {"syllables": 3, "words": ["palabra3"]}, {"short_phrases": ["frase corta 1", "frase corta 2"]}], "themes": ["..."]}`;
+{"action_type": "WORD_BANK", "target_rhyme": "palabra que ancla la rima — cópiala de la línea seleccionada o del mensaje del usuario, no la inventes — o null si no se pidió rima", "rhyme_type": "consonante"|"asonante", "letter_filter": {"type": "starts_with"|"contains_chain"|"contains_letters", "value": "cadena de letras pedida"} o null si no se pidió ningún filtro, "concept": "concepto/tema semántico pedido en 1-3 palabras, o null si no se pidió ninguno", "themes": ["..."]}`;
 }
 
 // The GLOBAL layer (see buildStaticMuseInstructions' section 3) — real,
@@ -206,9 +234,9 @@ export function describeCulturalResonance(resonance) {
     const frameLine = resonance.culturalFrame
         ? `- Marco cultural sugerido: "${resonance.culturalFrame}"${resonance.tropo ? ` (${resonance.tropo})` : ''}\n`
         : '';
-    return `\nMOTOR DE RESONANCIA CULTURAL — aplica ÚNICAMENTE si tu respuesta es ARCHITECT o WORD_BANK; si el modo correcto para este turno es SURGEON, ignora este bloque por completo:
-- Palabra obligatoria a incorporar en la línea que generes: "${resonance.mandatoryWord}" (ya verificada como rima real de "${resonance.concept}" — no la cuestiones ni la sustituyas)
-${frameLine}Construye la línea con naturalidad alrededor de esa palabra y ese marco — no fuerces la referencia si choca con la voz del artista definida arriba; la voz siempre gana.\n`;
+    return `\nMOTOR DE RESONANCIA CULTURAL — aplica ÚNICAMENTE si tu respuesta es ARCHITECT; si el modo correcto para este turno es SURGEON o WORD_BANK, ignora este bloque por completo:
+- Palabra sugerida para esta línea: "${resonance.mandatoryWord}" (ya verificada como rima real de "${resonance.concept}" y preseleccionada por encajar con la voz del artista — no la cuestiones fonéticamente)
+${frameLine}Construye la línea con naturalidad alrededor de esa palabra y ese marco. La REGLA DE ADUANA LÉXICA (sección 2) sigue teniendo prioridad sobre esta sugerencia: si pese a la preselección la palabra sigue sin encajar con la voz del artista, descártala y sigue tu criterio habitual — la voz siempre gana.\n`;
 }
 
 export function buildDynamicMuseContext({
@@ -294,22 +322,36 @@ function parseSocratic(parsed) {
     };
 }
 
+const LETTER_FILTER_TYPES = ['starts_with', 'contains_chain', 'contains_letters'];
+
+// The model NEVER generates the actual word list anymore — its only job is
+// parsing the request into {targetRhyme, rhymeType, letterFilter}.
+// wordGroups starts empty and gets filled in by buildWordBankFromLexicon
+// (a real lexicon.js query), which is the only thing allowed to populate
+// it — see that function's own comment for why.
 function parseWordBank(parsed) {
-    const wordGroups = Array.isArray(parsed.word_groups)
-        ? parsed.word_groups.map((g) => ({
-            syllables: typeof g.syllables === 'number' ? g.syllables : null,
-            words: Array.isArray(g.words) ? g.words.filter((w) => typeof w === 'string' && w.trim()) : [],
-            shortPhrases: Array.isArray(g.short_phrases) ? g.short_phrases.filter((p) => typeof p === 'string' && p.trim()) : [],
-        }))
-        : [];
     const targetRhyme = typeof parsed.target_rhyme === 'string' ? parsed.target_rhyme.trim() : '';
     const rhymeType = parsed.rhyme_type === 'asonante' ? 'asonante' : 'consonante';
+    const rawFilter = parsed.letter_filter;
+    const letterFilter = rawFilter
+        && LETTER_FILTER_TYPES.includes(rawFilter.type)
+        && typeof rawFilter.value === 'string' && rawFilter.value.trim()
+        ? {type: rawFilter.type, value: rawFilter.value.trim().toLowerCase()}
+        : null;
+    const concept = typeof parsed.concept === 'string' && parsed.concept.trim() ? parsed.concept.trim() : null;
+
+    const parts = [];
+    if (targetRhyme) parts.push(`rima ${rhymeType} con "${targetRhyme}"`);
+    if (letterFilter) parts.push('filtro de letras');
+    if (concept) parts.push(`relacionadas con "${concept}"`);
+    const message = parts.length ? `banco de palabras — ${parts.join(', ')}` : 'banco de palabras';
+
     return {
         action_type: 'WORD_BANK',
-        message: targetRhyme ? `banco de palabras — rima ${rhymeType} con "${targetRhyme}"` : 'banco de palabras',
+        message,
         suggestions: [],
         question: null,
-        wordBank: {targetRhyme, rhymeType, wordGroups},
+        wordBank: {targetRhyme, rhymeType, letterFilter, concept, wordGroups: []},
         targetLineText: null,
         isRhymeRequest: false,
         rhymeTargetWord: null,
@@ -444,45 +486,15 @@ export function applyMuseVerification(parsed, {
         pushTraceStep(trace, 'after diversity selection (final)', beforeFinal, parsed.suggestions.map((s) => s.text));
     }
 
-    if (parsed.action_type === 'WORD_BANK' && parsed.wordBank) {
-        const wordBankItems = (wb) => wb.wordGroups.flatMap((g) => [...g.words, ...(g.shortPhrases || [])]);
-        const wordBankCount = (wb) => wordBankItems(wb).length;
-        const proposedCount = wordBankCount(parsed.wordBank);
-        trace?.push({stage: 'model proposed', count: proposedCount, rejected: []});
-
-        // Same word-repetition rule as SURGEON/ARCHITECT above: a rhyme
-        // bank that hands back a word already sitting in the note isn't
-        // offering anything new. minLength 2, not the usual 3 — rhyme
-        // words legitimately run shorter than a full line's vocabulary.
-        const beforeRepeat = wordBankItems(parsed.wordBank);
-        const existingWords = new Set(significantWords(verseText, 2));
-        if (existingWords.size) {
-            const isFresh = (w) => !significantWords(w, 2).some((tok) => existingWords.has(tok));
-            parsed.wordBank.wordGroups = parsed.wordBank.wordGroups.map((g) => ({
-                ...g,
-                words: g.words.filter(isFresh),
-                shortPhrases: g.shortPhrases.filter(isFresh),
-            }));
-        }
-        pushTraceStep(trace, 'after word-repeat filter', beforeRepeat, wordBankItems(parsed.wordBank));
-
-        // No safety valve here on purpose, unlike the metric/rhyme filters
-        // above — a word bank whose entries don't actually rhyme is worse
-        // than a short, honest one. If nothing survives, the result is
-        // genuinely empty; that's the correct outcome, not a bug.
-        const beforeRhyme = wordBankItems(parsed.wordBank);
-        if (parsed.wordBank.targetRhyme) {
-            const targetKey = getWordRhymeKey(parsed.wordBank.targetRhyme, lang, dialect);
-            if (targetKey) {
-                const matches = (w) => wordMatchesRhyme(w, targetKey, lang, dialect);
-                parsed.wordBank.wordGroups = parsed.wordBank.wordGroups
-                    .map((g) => ({...g, words: g.words.filter(matches), shortPhrases: g.shortPhrases.filter(matches)}));
-            }
-        }
-
-        parsed.wordBank.wordGroups = parsed.wordBank.wordGroups.filter((g) => g.words.length || g.shortPhrases.length);
-        pushTraceStep(trace, 'after rhyme filter (final)', beforeRhyme, wordBankItems(parsed.wordBank));
-    }
+    // WORD_BANK is deliberately NOT handled here — there is nothing to
+    // verify, because the model never generates the word list in the first
+    // place anymore. See buildWordBankFromLexicon (below): it replaces
+    // parsed.wordBank.wordGroups with a real lexicon.js query result,
+    // async, called separately from askMuse. A previous version trusted
+    // the model's own invented words and ran them back through
+    // wordMatchesRhyme() as a post-hoc check — exactly the "let the LLM
+    // propose, then verify" pattern the whole Cultural Resonance Engine
+    // exists to replace with real data queried up front.
 
     return parsed;
 }
@@ -549,7 +561,7 @@ export async function askMuse({
                               }) {
     const staticSystem = staticSystemOverride ?? buildStaticMuseInstructions({lyricDna, blockProfile, lang, dialect});
     const culturalResonance = await buildCulturalResonance({
-        verseText, targetVerse, lang, dialect, forceMode,
+        verseText, targetVerse, lang, dialect, forceMode, lyricDna,
         excludeWords: excludeRhymeWords, excludeFrames: excludeCulturalFrames,
     });
     const dynamicContext = buildDynamicMuseContext({
@@ -583,6 +595,13 @@ export async function askMuse({
     // users in production.
     const verificationTrace = import.meta.env.DEV ? [] : null;
     applyMuseVerification(parsed, {verseText, targetVerse, lang, dialect}, verificationTrace);
+
+    // WORD_BANK's word list comes from here, not from the model or from
+    // applyMuseVerification above (which explicitly does nothing for this
+    // action_type now) — see buildWordBankFromLexicon's own comment.
+    if (parsed.action_type === 'WORD_BANK' && parsed.wordBank) {
+        await buildWordBankFromLexicon(parsed.wordBank, {verseText, lang, dialect, lyricDna, trace: verificationTrace});
+    }
 
     // Captured for EVERY real call in dev, not just the ones a UI toggle
     // happened to have on (that's what debugMode/the 🔧 toggle used to
@@ -622,6 +641,12 @@ export async function askMuse({
             actionType: parsed.action_type,
             parsedOutput: {suggestions: parsed.suggestions, question: parsed.question, wordBank: parsed.wordBank},
             lineContext: buildLineContextForDebug(verseText, lang, dialect, songStructure),
+            // Surfaced explicitly (not just buried in rawDynamicContext's
+            // rendered text) so Muse Eye/the Lab can show WHY the engine
+            // didn't fire — 'no_rhyme_match' (lexicon had nothing) vs
+            // 'no_voice_fit' (real candidates existed, none read as this
+            // artist's voice) point at different tuning knobs.
+            culturalResonance,
         };
         logDebugEvent('muse', debugPayload, meta);
         // debug=true additionally attaches it to the return value — only
@@ -672,67 +697,116 @@ Genera el resumen actualizado.`;
     }
 }
 
-// ─── Cultural Resonance Engine — cultural-frame extraction ─────────────────
+// ─── Cultural Resonance Engine — voice-fit selection + cultural framing ────
 // Step 3 of the pipeline (see buildCulturalResonance below): a short,
-// separate LLM call that finds the cultural trope/aesthetic frame a key
-// concept evokes (e.g. "caballo" → "el caballo del malo," derrota y mala
-// suerte) — deliberately NOT folded into the main ARCHITECT/WORD_BANK call,
-// because its result (the Cultural Frame) is an INPUT to that call, per the
-// pipeline's own ordering: DB rhyme query → cultural extraction → LLM
-// assembly. This is the one part of the engine that's genuinely
-// LLM-driven, not deterministic — unlike the rhyme word itself (always
-// from lexicon.js's SQL query, never invented here), a cultural
-// association is inherently an interpretive, not a lookup, task.
+// separate LLM call with two jobs, deliberately combined into one instead
+// of two separate calls:
+//   1. SELECT — of the rhyme-verified candidateWords (all real, all
+//      phonetically confirmed by lexicon.js's SQL query), pick the one a
+//      composer with THIS artist's specific voice would actually reach
+//      for — or explicitly none, if nothing in the pool fits. This is the
+//      fix for a real failure mode: charisma_score alone doesn't know
+//      anything about the song, so a genuinely rare, high-scoring word
+//      ("tiwanacota") could win purely on rarity/phonetics while reading
+//      as a total non-sequitur against an artist whose voice is
+//      "crudo, callejero" — nothing before this step ever checked fit.
+//   2. FRAME — only for a selected word, find the cultural trope/aesthetic
+//      frame it evokes (e.g. "caballo" → "el caballo del malo," derrota y
+//      mala suerte), consistent with that same voice.
+// Both are genuinely interpretive, not lookups — unlike the rhyme
+// candidates themselves (always from lexicon.js's SQL query, never
+// invented here) — so this stays the one deliberately LLM-driven part of
+// the engine. Deliberately NOT folded into the MAIN ARCHITECT/WORD_BANK
+// call, since its result is an INPUT to that call, per the pipeline's own
+// ordering: DB rhyme query → voice-fit selection + framing → LLM assembly.
 //
 // excludeFrames is this turn's session_angles_history — tropes already
 // surfaced for THIS concept earlier in the session, so a regenerate never
 // hands back the same refrán/archetype twice.
-export async function extractCulturalFrame({concept, lang = 'es', excludeFrames = []}) {
-    if (!concept) return null;
+export async function extractCulturalFrame({concept, candidateWords = [], lyricDna, lang = 'es', excludeFrames = []}) {
+    if (!concept || !candidateWords.length) return null;
 
-    const system = `Eres un experto en refranes, tropos culturales y arquetipos estéticos
-hispanohablantes. Dado un concepto clave de una letra de canción, identifica UNA asociación
-cultural concreta y evocadora — un refrán, un tropo popular, o un arquetipo estético/de género
-musical — que ese concepto evoque. No la desarrolles en verso, solo nómbrala.
-Responde EXCLUSIVAMENTE con JSON: {"frame": "nombre corto del tropo/arquetipo", "tropo": "en qué consiste, muy brevemente"}.
+    const system = `Eres a la vez un editor exigente de voz artística y un experto en refranes,
+tropos culturales y arquetipos estéticos hispanohablantes.
+
+Se te da un concepto clave de una letra, una lista de palabras candidatas que YA riman
+verificadamente con él (verificación fonética real, no la cuestiones), y la voz propia del
+artista (lyric_dna). Tu trabajo, en este orden:
+
+1. SELECCIÓN: de la lista de candidatas, elige la ÚNICA palabra que un compositor con ESA voz
+   específica realmente usaría — no la más rara o "interesante" en abstracto, sino la que encaja
+   con su vocabulario, actitud e imágenes habituales. Aplica el mismo criterio que la REGLA DE
+   ADUANA LÉXICA: una palabra rara y bien sonante pero descontextualizada (ej. un adjetivo
+   arqueológico/histórico específico en una voz urbana moderna) NO encaja solo por rimar bien.
+   Si NINGUNA candidata encaja de verdad con esta voz, selectedWord debe ser null — no fuerces
+   una elección solo por tener que elegir algo.
+2. MARCO CULTURAL: solo si elegiste una palabra, identifica UNA asociación cultural concreta y
+   evocadora (refrán, tropo popular, arquetipo estético/de género) que ese concepto evoque,
+   coherente con esa misma voz. No la desarrolles en verso, solo nómbrala.
+
+Responde EXCLUSIVAMENTE con JSON: {"selectedWord": "una de las candidatas, o null", "frame": "nombre corto del tropo/arquetipo, o null", "tropo": "en qué consiste muy brevemente, o null"}.
 Sin markdown, sin explicación fuera del JSON.`;
 
     const excludeText = excludeFrames.length
         ? `\n\nYa se han usado estos tropos para "${concept}" en esta sesión — NO los repitas, encuentra uno distinto:\n${excludeFrames.map((f) => `- ${f}`).join('\n')}`
         : '';
-    const userPrompt = `Concepto clave: "${concept}"${excludeText}`;
+    const userPrompt = `Concepto clave: "${concept}"
+Palabras candidatas (todas verificadas como rima real de "${concept}"): ${candidateWords.join(', ')}
+Voz propia del artista (lyric_dna): ${JSON.stringify(lyricDna || {})}${excludeText}`;
 
     try {
-        const raw = await callClaude(system, userPrompt, 200);
+        const raw = await callClaude(system, userPrompt, 250);
         const parsed = JSON.parse(raw.trim());
-        if (!parsed.frame) return null;
-        return {frame: parsed.frame, tropo: parsed.tropo || ''};
+        if (!parsed.selectedWord || !candidateWords.includes(parsed.selectedWord)) return null;
+        return {selectedWord: parsed.selectedWord, frame: parsed.frame || null, tropo: parsed.tropo || ''};
     } catch (e) {
-        // Cultural framing is an enhancement, not a requirement — a failed
-        // extraction just means the main call proceeds without one (same
-        // "graceful degrade" the DB-side fallback uses for zero rhyme
-        // matches), not a broken turn.
-        console.error('Error al extraer el marco cultural:', e);
+        // An enhancement, not a requirement — a failed call just means the
+        // main call proceeds without a mandatory word (same "graceful
+        // degrade" the DB-side fallback uses for zero rhyme matches), not
+        // a broken turn.
+        console.error('Error al seleccionar/enmarcar la palabra cultural:', e);
         return null;
     }
 }
 
-// Orchestrates the full pipeline for one turn: DB Query → Cultural
-// Extraction, producing the material Step 4 (LLM Assembly) injects into
-// the main call — see the block built in buildDynamicMuseContext. Never
-// called for SURGEON (forceMode === 'SURGEON' skips it entirely, per the
-// engine's own rule of staying purely metric there); for an
-// unforced/model-decided turn we still can't know in advance whether the
-// model will land on SURGEON, so the injected prompt block itself also
-// tells the model to ignore this material if it does.
+// Orchestrates the full pipeline for one turn: DB Query → voice-fit
+// Selection + Cultural Framing, producing the material Step 4 (LLM
+// Assembly) injects into the main call — see the block built in
+// buildDynamicMuseContext. Never called for SURGEON (forceMode ===
+// 'SURGEON' skips it entirely, per the engine's own rule of staying purely
+// metric there); for an unforced/model-decided turn we still can't know in
+// advance whether the model will land on SURGEON, so the injected prompt
+// block itself also tells the model to ignore this material if it does.
 //
 // The "key concept" is simply the target line's own last significant
 // word — matches every example in the spec (caballo/haunted/cierge are
 // each literally the line's ending word, not a separately abstracted
 // theme), and it's also exactly the word whose rhyme_key we need to query
 // anyway, so one word serves both roles.
-export async function buildCulturalResonance({verseText, targetVerse, lang, dialect, forceMode, excludeWords = [], excludeFrames = []}) {
-    if (forceMode === 'SURGEON') return null;
+//
+// Two distinct degrade reasons, both landing on the SAME "no mandatory
+// word, generate normally" behavior downstream (describeCulturalResonance
+// treats any !enabled result identically) but worth telling apart in the
+// debug log for tuning: 'no_rhyme_match' means the lexicon had nothing
+// (charisma_score >= 7) for this rhyme at all; 'no_voice_fit' means real
+// rhyme-verified candidates existed but NONE of them read as something
+// this artist's voice would actually use — the fix for a real failure
+// mode where a rare, high-charisma word won purely on phonetics/rarity
+// while being a total non-sequitur for the song ("tiwanacota" in a modern
+// urban track). Explicitly NOT forced to pick something when the pool
+// comes back empty on fit — a forced bad pick defeats the point of adding
+// this check at all.
+export async function buildCulturalResonance({verseText, targetVerse, lang, dialect, forceMode, lyricDna, excludeWords = [], excludeFrames = []}) {
+    // WORD_BANK no longer runs through this at all — it's now a pure
+    // lexicon.js dictionary query (see buildWordBankFromLexicon, below),
+    // not a single-winner voice-fit selection. A single "mandatory word"
+    // makes sense when you're building ONE line (ARCHITECT); it's the
+    // wrong shape for "show me every real rhyme," which is what a word
+    // bank actually is — that mismatch was the real cause of an empty
+    // deck: every filtering stage can only shrink the surviving set, and
+    // reducing a whole dictionary down to "one word or nothing" made an
+    // artificial dead end far more likely than it needed to be.
+    if (forceMode === 'SURGEON' || forceMode === 'WORD_BANK') return null;
 
     const targetLine = targetVerse
         ? `${targetVerse.before}${targetVerse.text}${targetVerse.after}`
@@ -747,15 +821,341 @@ export async function buildCulturalResonance({verseText, targetVerse, lang, dial
     if (!concept) return null;
 
     const {data: candidates} = await queryRhymeCandidates({rhymeKey: key.consonant, lang, exclude: excludeWords});
-    if (!candidates.length) return {enabled: false, degraded: true, concept};
+    if (!candidates.length) return {enabled: false, degraded: true, concept, reason: 'no_rhyme_match'};
 
-    const frameResult = await extractCulturalFrame({concept, lang, excludeFrames});
+    const selection = await extractCulturalFrame({
+        concept, candidateWords: candidates.map((c) => c.word), lyricDna, lang, excludeFrames,
+    });
+    if (!selection?.selectedWord) return {enabled: false, degraded: true, concept, reason: 'no_voice_fit'};
+
     return {
         enabled: true,
         concept,
-        mandatoryWord: candidates[0].word,
+        mandatoryWord: selection.selectedWord,
         candidateWords: candidates.map((c) => c.word),
-        culturalFrame: frameResult?.frame || null,
-        tropo: frameResult?.tropo || null,
+        culturalFrame: selection.frame,
+        tropo: selection.tropo,
+        reason: null,
     };
+}
+
+// Zero-cost (no LLM, no network), synchronous best guess at "the concept"
+// for a quick confirm-before-you-fire UI step — used by both the cultural
+// provocation button and the concept explorer (creativity proposals #3/#4).
+// Deliberately NOT an LLM call: the whole point is to show the user
+// something to confirm/correct BEFORE spending an API call on it, so
+// guessing has to be free. Same "last significant word" heuristic
+// buildCulturalResonance already uses for its own concept derivation.
+// Returns null when there's no usable text at all — the caller is expected
+// to ask the user to type a concept from scratch in that case, not to
+// silently guess something meaningless.
+export function guessConceptFromLine({verseText, targetVerse}) {
+    const targetLine = targetVerse
+        ? `${targetVerse.before}${targetVerse.text}${targetVerse.after}`
+        : splitIntoLines(verseText || '').filter(Boolean).pop();
+    if (!targetLine || !targetLine.trim()) return null;
+    const words = significantWords(targetLine);
+    return words[words.length - 1] || null;
+}
+
+// Creativity proposal #4 — "cultural provocation" as its own standalone
+// action, not bundled inside an ARCHITECT line generation.
+//
+// FIRST VERSION of this function reused buildCulturalResonance's
+// queryRhymeCandidates → extractCulturalFrame pipeline, which turned out to
+// be the wrong shape entirely: it gated a feature that has nothing to do
+// with rhyme behind "does the target line's last word happen to have
+// high-charisma rhyme matches in the lexicon" — reported live as the button
+// always coming back with "no encontré un ángulo cultural," even for a real
+// Quijote line dense with cultural weight. That gate only ever existed
+// because extractCulturalFrame's OTHER caller (buildCulturalResonance) has
+// to pick a real word to insert into a line, so it needs a verified
+// candidate list. Nothing here gets inserted anywhere — this is read-only
+// inspiration, never written into the lyric — so that whole constraint was
+// never actually load-bearing for this use case.
+//
+// SECOND VERSION derived a "concept" internally from the target line and
+// fired straight at the model with no human check in between — reasonable
+// for correctness, but the caller (a real user) had no way to say "no,
+// that's not what I meant" before the call ran. `concept` is now a
+// REQUIRED, externally-confirmed input: the caller shows the user
+// guessConceptFromLine's guess (or asks them to type one, with no guess
+// available) and only calls this once it's confirmed. verseText/targetVerse
+// are now optional EXTRA context, still passed through when available so
+// the model can recognize a real quote/refrán the line already IS — but
+// they no longer drive what "the concept" is on their own.
+//
+// Never gated by forceMode the way buildCulturalResonance is (that gate
+// exists to avoid double-injecting into an LLM call this function doesn't
+// make) — this is a direct, on-demand tap, not something folded into a
+// turn the model is also generating.
+//
+// Returns null when there's no confirmed concept, or when the model itself
+// genuinely finds no reasonable association (asked to say so explicitly
+// rather than force one) — the caller shows an honest "couldn't find an
+// angle for this" state rather than treating null as an error.
+export async function getCulturalProvocation({concept, verseText, targetVerse, lyricDna, lang = 'es', excludeFrames = []}) {
+    if (!concept || !concept.trim()) return null;
+
+    const targetLine = targetVerse
+        ? `${targetVerse.before}${targetVerse.text}${targetVerse.after}`
+        : splitIntoLines(verseText || '').filter(Boolean).pop();
+
+    const system = `Eres un experto en refranes, tropos culturales, arquetipos estéticos y
+referencias literarias/históricas del ámbito hispanohablante, ayudando a un compositor a
+PENSAR, no escribiendo por él.
+
+Se te da un concepto ya confirmado por el propio compositor (y, si está disponible, la línea
+real de la que salió, como contexto adicional) junto a su voz propia (lyric_dna). Identifica
+UNA asociación cultural concreta y evocadora para ese concepto — puede ser un refrán, un tropo
+popular, un arquetipo estético o narrativo, o una referencia literaria/histórica real si la
+línea la evoca claramente (incluida la posibilidad de que la línea SEA, total o parcialmente,
+una cita reconocible — en ese caso nombra exactamente esa referencia y qué significa
+culturalmente, no inventes una distinta). Prioriza SIEMPRE una referencia real y
+verificable sobre una asociación vaga o genérica ("perseverancia", "el paso del tiempo")
+si hay algo más concreto disponible.
+
+Responde EXCLUSIVAMENTE con JSON: {"frame": "nombre corto de la referencia/tropo/arquetipo, o null si de verdad no hay ninguna asociación razonable", "tropo": "en qué consiste o por qué encaja, muy brevemente, o null"}.
+Sin markdown, sin explicación fuera del JSON.`;
+
+    const excludeText = excludeFrames.length
+        ? `\n\nYa se han mostrado estos ángulos en esta sesión — NO los repitas, encuentra uno distinto:\n${excludeFrames.map((f) => `- ${f}`).join('\n')}`
+        : '';
+    const contextLine = targetLine && targetLine.trim() ? `\nLínea de origen (contexto adicional): "${targetLine.trim()}"` : '';
+    const userPrompt = `Concepto confirmado: "${concept.trim()}"${contextLine}
+Voz propia del artista (lyric_dna): ${JSON.stringify(lyricDna || {})}${excludeText}`;
+
+    try {
+        const raw = await callClaude(system, userPrompt, 300);
+        const parsed = JSON.parse(raw.trim());
+        if (!parsed.frame) return null;
+        return {frame: parsed.frame, tropo: parsed.tropo || ''};
+    } catch (e) {
+        console.error('Error al generar el ángulo cultural:', e);
+        return null;
+    }
+}
+
+// Cap on how many candidate words get sent to the concept-filter LLM call
+// (below) — queryWordBank's pool can be up to WORD_BANK_FETCH_CAP (2000,
+// e.g. a concept-only request with no rhyme/letter constraint), and
+// sending all of that every turn would be needlessly slow/expensive. The
+// pool arrives common-and-cool-first, so taking the top slice keeps the
+// most useful candidates, not an arbitrary truncation.
+const WORD_BANK_CONCEPT_CANDIDATE_CAP = 500;
+
+// The one deliberately LLM-driven step in WORD_BANK's otherwise-pure-SQL
+// pipeline — same justification as extractCulturalFrame: matching a real
+// concept ("cosas relacionadas con volar") against word MEANING isn't
+// something rhyme_key/letter columns can do, and this repo has no stored
+// glosses or embeddings to query deterministically for that (see
+// scripts/seed-lexicon-kaikki.ts — glosses are read from Kaikki only to
+// compute charisma_score, then discarded). So: give the model a CLOSED,
+// already-real list of candidate words and ask it to select the subset
+// that actually relates — never to invent new ones. Validated the same way
+// extractCulturalFrame validates selectedWord: every returned word must be
+// a member of the candidate list, or it's dropped.
+export async function filterWordBankByConcept({concept, candidateWords = [], lyricDna = null, lang = 'es'}) {
+    if (!concept || !candidateWords.length) return candidateWords;
+
+    const pool = candidateWords.slice(0, WORD_BANK_CONCEPT_CANDIDATE_CAP);
+
+    const system = `Eres un filtro léxico exigente para un diccionario de rimas de un compositor.
+
+Se te da un concepto y una lista CERRADA de palabras reales (ya verificadas ortográfica y,
+si aplica, fonéticamente — no las cuestiones ni propongas otras). Tu única tarea: de esa
+lista, selecciona TODAS las palabras que tengan una relación real y directa con el concepto
+— por significado, campo semántico o asociación evidente. No selecciones una palabra solo
+porque suene parecida o comparta letras con el concepto; eso ya se filtró aparte.
+
+Ten en cuenta también la voz propia del artista (lyric_dna) si te resulta útil para juzgar
+qué asociaciones son razonables, pero el criterio principal es el significado real de la
+palabra frente al concepto pedido.
+
+Responde EXCLUSIVAMENTE con JSON: {"words": ["subset de la lista original, mismo texto exacto, o [] si ninguna encaja de verdad"]}.
+Sin markdown, sin explicación fuera del JSON.`;
+
+    const userPrompt = `Concepto: "${concept}"
+Lista cerrada de palabras candidatas: ${pool.join(', ')}
+Voz propia del artista (lyric_dna): ${JSON.stringify(lyricDna || {})}`;
+
+    try {
+        const raw = await callClaude(system, userPrompt, 1500);
+        const parsed = JSON.parse(raw.trim());
+        const poolSet = new Set(pool);
+        return Array.isArray(parsed.words) ? parsed.words.filter((w) => typeof w === 'string' && poolSet.has(w)) : [];
+    } catch (e) {
+        // A failed call degrades to "couldn't apply the concept filter this
+        // turn" — see buildWordBankFromLexicon's own handling of an empty
+        // return, which falls back to the unfiltered deterministic pool
+        // rather than manufacturing a dead end.
+        console.error('Error al filtrar el banco de palabras por concepto:', e);
+        return [];
+    }
+}
+
+// Concept-ONLY WORD_BANK requests (no rhyme, no letter filter — just "words
+// related to X") need a fundamentally different first step than
+// filterWordBankByConcept above. That function FILTERS an already-relevant
+// candidate pool (words that already share a rhyme or letter constraint
+// with the request) — but with no rhyme/letters to anchor a SQL query to,
+// the only deterministic pool available would be "top N by charisma across
+// the whole 734k-word lexicon," which has NO relationship to any given
+// concept (charisma_score measures rarity/phonetics, not topic) and
+// produced exactly the reported bug: a "random word family" completely
+// unrelated to what was asked. The fix inverts the pipeline for this case
+// specifically: let the LLM (good at semantics) PROPOSE real Spanish words
+// for the concept, then verify each one actually exists in the lexicon
+// (verifyWordsInLexicon, below) — same "never show an invented word"
+// guarantee as everywhere else in this engine, just checked AFTER
+// generation instead of filtering BEFORE it, because here there's nothing
+// meaningful to filter beforehand.
+const CONCEPT_ONLY_PROPOSAL_COUNT = 20;
+
+export async function proposeConceptWords({concept, lyricDna = null, lang = 'es'}) {
+    if (!concept) return [];
+
+    const system = `Eres un poeta y lexicógrafo ayudando a un compositor a explorar vocabulario
+para un concepto o sensación concreta — no a escribir versos por él.
+
+Dado un concepto y la voz propia del artista (lyric_dna), propón hasta ${CONCEPT_ONLY_PROPOSAL_COUNT}
+palabras REALES en español (existentes de verdad, sin inventar ni deformar ninguna) que se
+relacionen con ese concepto por significado, campo semántico o asociación evocadora — no
+necesitan rimar entre sí ni con nada. Prioriza variedad: mezcla palabras comunes y palabras
+menos comunes pero evocadoras, coherentes con esa voz si el contexto ayuda a decidir.
+
+Responde EXCLUSIVAMENTE con JSON: {"words": ["palabra1", "palabra2", "..."]}.
+Sin markdown, sin explicación fuera del JSON.`;
+
+    const userPrompt = `Concepto: "${concept}"
+Voz propia del artista (lyric_dna): ${JSON.stringify(lyricDna || {})}`;
+
+    try {
+        const raw = await callClaude(system, userPrompt, 600);
+        const parsed = JSON.parse(raw.trim());
+        return Array.isArray(parsed.words)
+            ? parsed.words.filter((w) => typeof w === 'string' && w.trim()).map((w) => w.trim().toLowerCase())
+            : [];
+    } catch (e) {
+        console.error('Error al proponer palabras para el concepto:', e);
+        return [];
+    }
+}
+
+// WORD_BANK's actual content — called from askMuse right after parsing,
+// BEFORE applyMuseVerification (which now does nothing for WORD_BANK, see
+// its own comment). Replaces parsed.wordBank.wordGroups (always [] out of
+// parseWordBank) with a real lexicon.js query result — optionally narrowed
+// by filterWordBankByConcept — never from the model's own suggestion: the
+// model's role for this mode is parsing the request (rhyme, letter filter,
+// concept), not proposing vocabulary.
+//
+// Rhyme is now OPTIONAL (see parseWordBank/queryWordBank) — a request can
+// be pure letter-filter, pure concept, a plain "dame palabras carismáticas"
+// with NONE of the three (queryWordBank's own common-and-cool sort already
+// answers that honestly — see its own comment), or any combination.
+// Reaching this function at all means the model already classified the
+// turn as WORD_BANK (an explicit vocabulary request per its own
+// instructions), so there's no "nothing was actually asked" case left to
+// short-circuit here — every combination, including all-three-empty, falls
+// through to a real query below.
+export async function buildWordBankFromLexicon(wordBank, {verseText, lang = 'es', dialect = 'central', lyricDna = null, trace = null}) {
+    const hasRhyme = Boolean(wordBank?.targetRhyme);
+    const hasLetterFilter = Boolean(wordBank?.letterFilter);
+    const hasConcept = Boolean(wordBank?.concept);
+
+    // Same word-repetition principle SURGEON/ARCHITECT already apply — a
+    // rhyme bank handing back a word already sitting in the note isn't
+    // offering anything new. minLength 2, not the usual 3: rhyme words
+    // legitimately run shorter than a full line's vocabulary.
+    const existingWords = significantWords(verseText || '', 2);
+
+    let finalRows;
+
+    if (hasConcept && !hasRhyme && !hasLetterFilter) {
+        // Concept-ONLY request — no rhyme/letters to anchor a deterministic
+        // SQL pool to. Using "top charisma across the whole lexicon" here
+        // (the old behavior) had zero real relationship to the concept and
+        // was the actual cause of the reported "random word family" bug —
+        // see proposeConceptWords' own comment for the full reasoning.
+        // Propose real words for the concept, then verify each is a real
+        // lexicon entry — same "never show an invented word" guarantee,
+        // just checked after generation instead of before it.
+        const proposed = await proposeConceptWords({concept: wordBank.concept, lyricDna, lang});
+        const {data: verified} = await verifyWordsInLexicon({words: proposed, lang});
+        const existingSet = new Set(existingWords);
+        finalRows = verified.filter((r) => !existingSet.has(r.word));
+        // No "unfiltered pool" to fall back to here (there was never a
+        // deterministic pool in the first place) — an honest empty result
+        // stays unflagged rather than reusing conceptMatched's "here's the
+        // fallback" messaging over nothing.
+        if (finalRows.length > 0) wordBank.conceptMatched = true;
+        trace?.push({
+            stage: `concept proposal + lexicon verification ("${wordBank.concept}")`,
+            count: finalRows.length,
+            rejected: proposed.filter((w) => !verified.some((r) => r.word === w)),
+        });
+    } else {
+        let rhymeKey = null;
+        if (hasRhyme) {
+            const targetKey = getWordRhymeKey(wordBank.targetRhyme, lang, dialect);
+            if (!targetKey) { wordBank.wordGroups = []; return wordBank; }
+            rhymeKey = wordBank.rhymeType === 'asonante' ? targetKey.assonant : targetKey.consonant;
+        }
+
+        const {data: rows} = await queryWordBank({
+            rhymeKey, rhymeType: wordBank.rhymeType, lang, letterFilter: wordBank.letterFilter, exclude: existingWords,
+        });
+        trace?.push({stage: 'lexicon query (real dictionary data, no model-generated words)', count: rows.length, rejected: []});
+
+        finalRows = rows;
+        if (hasConcept && rows.length) {
+            // Here (unlike the concept-only branch above) rows already came
+            // from a real rhyme/letter constraint, so this pool genuinely
+            // relates to the request — filtering it down by meaning, rather
+            // than proposing from scratch, is the right shape (and this is
+            // the path that already worked for the "ala" + "volar" case).
+            const filteredWords = await filterWordBankByConcept({
+                concept: wordBank.concept, candidateWords: rows.map((r) => r.word), lyricDna, lang,
+            });
+            if (filteredWords.length) {
+                const filteredSet = new Set(filteredWords);
+                finalRows = rows.filter((r) => filteredSet.has(r.word));
+                wordBank.conceptMatched = true;
+                trace?.push({
+                    stage: `concept filter ("${wordBank.concept}")`,
+                    count: finalRows.length,
+                    rejected: rows.filter((r) => !filteredSet.has(r.word)).map((r) => r.word),
+                });
+            } else {
+                // Graceful degrade — same principle as buildCulturalResonance's
+                // zero-fit path: a concept filter that finds nothing real
+                // doesn't get to collapse a real, non-empty rhyme/letter pool
+                // down to a dead end. Keep the deterministic pool, but flag it
+                // so the caller knows the concept itself didn't actually match
+                // (see MusePopover/MuseFloatNode's use of wordBank.conceptMatched).
+                wordBank.conceptMatched = false;
+                trace?.push({
+                    stage: `concept filter ("${wordBank.concept}") — no real matches, showing unfiltered pool`,
+                    count: rows.length, rejected: [],
+                });
+            }
+        }
+    }
+
+    // Grouped by syllable count — same shape the UI already renders
+    // (MusePopover's .mp-wb-group), just built from real data. `finalRows`
+    // is already common-and-cool-first from queryWordBank; a plain Map
+    // insertion preserves that relative order within each syllable bucket,
+    // no re-sort needed here.
+    const bySyllables = new Map();
+    for (const row of finalRows) {
+        if (!bySyllables.has(row.syllables)) bySyllables.set(row.syllables, []);
+        bySyllables.get(row.syllables).push(row.word);
+    }
+    wordBank.wordGroups = [...bySyllables.entries()]
+        .sort(([a], [b]) => a - b)
+        .map(([syllables, words]) => ({syllables, words, shortPhrases: []}));
+
+    return wordBank;
 }

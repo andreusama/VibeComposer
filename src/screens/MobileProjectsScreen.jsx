@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { setState } from '../state/store.js';
-import { loadProjectSummaries, computePreviewLayout, createProject } from './projectsData.js';
+import { loadProjectSummaries, computePreviewLayout, createProject, deleteSong } from './projectsData.js';
 import MobileScreen from '../mobile/MobileScreen.jsx';
 import MobileFab from '../mobile/MobileFab.jsx';
 import MobileTabBar from '../mobile/MobileTabBar.jsx';
@@ -35,10 +35,21 @@ function ProjectThumbnail({ nodes, links }) {
   );
 }
 
-function ProjectRow({ song, onOpen }) {
+// A <div role="button"> wrapper, not a <button>, now that the row needs a
+// second, independently-tappable delete action inside it — a button can't
+// contain another button (invalid HTML, and the nested one silently never
+// receives its own click). onKeyDown mirrors a real button's Enter/Space
+// activation so this doesn't lose keyboard accessibility for it.
+function ProjectRow({ song, onOpen, onDelete }) {
   const nodeCount = song.nodeCount || 0;
   return (
-    <button className="mp-row" onClick={onOpen}>
+    <div
+      className="mp-row"
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); } }}
+    >
       <ProjectThumbnail nodes={song.previewNodes} links={song.previewLinks} />
       <div className="mp-row-body">
         <div className="mp-row-title">{song.title || 'untitled'}</div>
@@ -46,8 +57,15 @@ function ProjectRow({ song, onOpen }) {
           {nodeCount} node{nodeCount === 1 ? '' : 's'} · {formatEdited(song.updated_at)}
         </div>
       </div>
+      <button
+        className="mp-row-delete"
+        onClick={(e) => { e.stopPropagation(); onDelete(); }}
+        title="Delete project"
+      >
+        🗑
+      </button>
       <span className="mp-row-chevron">›</span>
-    </button>
+    </div>
   );
 }
 
@@ -68,6 +86,13 @@ export default function MobileProjectsScreen({ state, justEntered }) {
   }, [songs, query]);
 
   const openSong = (song) => setState({ activeSong: song, screen: 'canvas' });
+
+  const handleDeleteProject = async (song) => {
+    if (!confirm(`Delete "${song.title || 'this project'}"? This can't be undone.`)) return;
+    const { error } = await deleteSong(song.id);
+    if (error) { setState({ projectError: error.message }); return; }
+    setState({ songs: songs.filter((s) => s.id !== song.id) });
+  };
 
   const handleNewProject = async () => {
     if (creating || !state.session?.user?.id) return;
@@ -104,7 +129,12 @@ export default function MobileProjectsScreen({ state, justEntered }) {
           <div className="thread-empty"><p>No projects yet.</p></div>
         )}
         {filtered.map((song) => (
-          <ProjectRow key={song.id} song={song} onOpen={() => openSong(song)} />
+          <ProjectRow
+            key={song.id}
+            song={song}
+            onOpen={() => openSong(song)}
+            onDelete={() => handleDeleteProject(song)}
+          />
         ))}
       </div>
 

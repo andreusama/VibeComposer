@@ -1,7 +1,11 @@
 # Creativity proposals — the app is about ideas, not autocomplete
 
-_Last reviewed: 2026-08-14. Proposal doc — nothing here is implemented, this
-is a menu to greenlight from, not a plan._
+_Last reviewed: 2026-08-17. Proposal doc — #3 and #4 are now built (see their
+own entries below for what shipped and how it grew past the original
+proposal); #1, #2, #5, #6, #7 are still just a menu to greenlight from, not
+a plan. See `context.md`'s "La Musa" section for the shipped features'
+real, current behavior — this doc stays as the historical record of what
+was proposed and why, not a living spec._
 
 ## Why this doc exists
 
@@ -72,31 +76,37 @@ after the moment it was captured.
   wherever `lyricDna` is (`SongThreadScreen.jsx`, `CanvasScreen.jsx`).
 - **Effort:** low.
 
-### 3. Concept-to-vocabulary explorer, as its own entry point
-The concept filter just built for WORD_BANK (`filterWordBankByConcept`)
-already does exactly this — real words, filtered by meaning, voice-fit-aware
-— but it's currently reachable only by phrasing a request that happens to
-include a concept alongside a rhyme/letter ask. Give it its own doorway: type
-a feeling/image/theme, get a curated, charisma-sorted word cloud, no rhyme
-required at all. This turns what's currently a WORD_BANK side-feature into
-the headline "give me cool words about X" experience the app is supposed to
-be about.
-- **Reuses:** `queryWordBank` (rhymeKey=null) + `filterWordBankByConcept`,
-  both already built and tested. Needs only a new UI entry point, no new
-  backend logic.
-- **Effort:** low.
+### 3. Concept-to-vocabulary explorer, as its own entry point — ✅ IMPLEMENTED
+Shipped as SelectionCallout's "✧ Concept" pill (mobile): select any word/
+phrase, one tap, confirm the guess (or type a different concept) before it
+fires. Grew past the original proposal in one real way: "reuse
+`filterWordBankByConcept` as-is" turned out to be wrong for a concept asked
+**with no rhyme/letters at all** — the deterministic candidate pool that
+function filters has to come from *somewhere*, and "top-N by charisma
+across the whole lexicon" (the naive choice) has zero relationship to any
+given concept, which shipped as a live bug (reported as "gives me a random
+word family") before being caught and fixed by inverting the pipeline for
+that specific case: the model *proposes* real words for the concept,
+`verifyWordsInLexicon` checks each one is real. See `context.md`'s WORD_BANK
+section for the full current behavior, including the concept+rhyme/letters
+case where the original simpler approach (filter an already-relevant pool)
+does still apply unchanged.
 
-### 4. Cultural provocation as its own SOCRATIC action
-SOCRATIC's "modo escucha" (reflection) today is 1–2 sentences and a
-question — explicitly "CERO VERSOS." Add an optional next step: "give me a
-cultural angle" surfaces ONE refrán/tropo/archetype for the current theme via
-`extractCulturalFrame`, deliberately decoupled from any mandatory word to
-insert — framed as "react to this, don't copy it." This reuses the exact
-mechanism that currently only exists to justify a single word choice inside
-an ARCHITECT call, exposed instead as a thinking prompt in its own right.
-- **Reuses:** `extractCulturalFrame`, minus the "must anchor a rhyme"
-  constraint.
-- **Effort:** medium.
+### 4. Cultural provocation as its own SOCRATIC action — ✅ IMPLEMENTED (and grew a sibling feature)
+Shipped as **ángulo cultural** — a static button on any SOCRATIC turn
+(mobile *and* desktop), confirms a concept first rather than firing
+immediately (a first version that auto-fired straight off a derived concept
+came back "no encontré nada" on real, culturally rich lines — the derivation
+itself was the bug, not the underlying idea). While building this, a
+**second**, related feature emerged from conversation and shipped alongside
+it: **genealogía de la imagen** — same confirm-first shape, but reaches for
+*universal* culture (literature/myth/art/film, several references at once)
+instead of one Spanish/Catalan-specific tropo. Mobile-only (no desktop entry
+point built for it). Both — and SOCRATIC's own ambiguity handling — also
+gained a shared **elided-subject clarification** mechanism this pass: rather
+than guess who/what an implicit subject is, the model can ask, and the
+artist's answer feeds back into a re-run. See `context.md`'s "Ángulo
+cultural & genealogía de la imagen" section for the full current shape.
 
 ### 5. "Break your own mold" mode (careful, opt-in)
 The Cultural Resonance Engine's voice-fit filter (REGLA DE ADUANA LÉXICA)
@@ -135,12 +145,14 @@ line-by-line.
 
 ## Suggested order (cheapest real wins first)
 
-1. **Low effort, pure data-surfacing, zero new AI cost:** #2, #3, #6, #7 —
-   these are almost entirely "show what's already computed," not new
-   pipelines.
-2. **Medium effort, reuse existing validated patterns:** #1, #4 — need a new
-   LLM call shape, but copy the already-proven
-   propose→validate-against-candidates pattern from `extractCulturalFrame`.
+#3 and #4 are done (see their entries above). Of what's left:
+
+1. **Low effort, pure data-surfacing, zero new AI cost:** #2, #6, #7 — these
+   are almost entirely "show what's already computed," not new pipelines.
+2. **Medium effort, reuse existing validated patterns:** #1 — needs a new
+   LLM call shape, but can copy the already-proven
+   propose→validate-against-candidates pattern from `extractCulturalFrame`
+   (and, now, from #3's propose→verify concept pipeline).
 3. **Needs the most product judgment, not the most code:** #5 — technically
    simple, but worth a deliberate conversation about framing before building,
    since it intentionally works against an existing safety rule.

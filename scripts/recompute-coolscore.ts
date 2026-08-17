@@ -257,16 +257,20 @@ function computeDensity(word: string): number {
 // calibration pass (dry-run against a real sample, check the distribution,
 // THEN pick floor/ceiling) exists to avoid. Catalan's values below were
 // derived the same way, not assumed.
-// Catalan calibrated against a real 4,000-row sample scattered across the
-// full 181,291-row Catalan lexicon (min 0.235, max 0.656, p75 0.488,
-// p90 0.510, p92 0.514) — floor set just below the observed min, ceiling
-// solved so charisma_score >= 7 selects ~p92 (roughly the top ~8% of real
-// words), matching the Spanish calibration's own selectivity target rather
-// than reusing Spanish's raw floor/ceiling numbers, which were derived from
-// a different distribution entirely.
+// Catalan recalibrated after the lexicon source itself changed (Kaikki
+// 181,291 rows → Softcatalà 878,631 rows — a much larger, differently-
+// shaped population, including far more conjugated verb forms) — reused a
+// real 4,000-row sample scattered across the full new table (min 0.264,
+// max 0.659, p90 0.501, p92 0.504, p95 0.510). Floor set just below the
+// observed min, ceiling solved so charisma_score >= 7 selects ~p92
+// (roughly the top ~8% of real words), same selectivity target as Spanish
+// and the previous Catalan calibration — reusing Spanish's raw numbers
+// blindly would have been wrong for either Catalan population, and this
+// one shifted enough from the first Catalan pass to be worth redoing
+// rather than assumed stable.
 const COOLSCORE_CALIBRATION: Record<Lang, { floor: number; ceiling: number }> = {
   es: { floor: 0.18, ceiling: 0.71 },
-  ca: { floor: 0.23, ceiling: 0.695 },
+  ca: { floor: 0.26, ceiling: 0.659 },
 };
 
 export function computeCoolScore(word: string, ranks: Map<string, number>, maxRank: number, lang: Lang = 'es') {
@@ -333,19 +337,43 @@ async function main(): Promise<void> {
   }
   console.log(`Recomputing CoolScore for ${count} existing lexicon rows (lang_code: ${langArg})...`);
 
+  // Reported live: paginating with .range(offset, offset+PAGE_SIZE-1) (an
+  // OFFSET under the hood) started timing out against the much larger
+  // post-Softcatalà table — first at offset 0, then again at offset 64000
+  // after a retry got past the first failure. That's not a transient blip,
+  // it's the standard OFFSET-pagination problem: Postgres has to scan and
+  // discard `offset` rows before it can return the next page, so the query
+  // gets more expensive the deeper it pages, and eventually crosses the
+  // statement timeout. Switched to keyset (cursor) pagination instead —
+  // `.gt('id', lastId)` is a fast indexed lookup regardless of how far into
+  // the table we already are, no scan-and-discard cost at any depth. Kept
+  // a few retries with backoff on top, for genuine transient network blips.
+  const MAX_PAGE_RETRIES = 4;
   let processed = 0;
-  for (let offset = 0; offset < (count || 0); offset += PAGE_SIZE) {
-    const { data: rows, error } = await supabase
-      .from('lexicon')
-      .select('id, word, lang_code, syllables, stress_type, rhyme_key, tags')
-      .eq('lang_code', langArg)
-      .order('id', { ascending: true })
-      .range(offset, offset + PAGE_SIZE - 1);
-    if (error) throw new Error(`Failed to fetch page at offset ${offset}: ${error.message}`);
+  let lastId = 0;
+  while (processed < (count || 0)) {
+    let rows: LexiconRow[] | null = null;
+    let lastError: { message: string } | null = null;
+    for (let attempt = 0; attempt <= MAX_PAGE_RETRIES; attempt++) {
+      const { data, error } = await supabase
+        .from('lexicon')
+        .select('id, word, lang_code, syllables, stress_type, rhyme_key, tags')
+        .eq('lang_code', langArg)
+        .gt('id', lastId)
+        .order('id', { ascending: true })
+        .limit(PAGE_SIZE);
+      if (!error) { rows = data as LexiconRow[]; lastError = null; break; }
+      lastError = error;
+      const waitMs = 1000 * 2 ** attempt;
+      console.warn(`  after id ${lastId} attempt ${attempt + 1}/${MAX_PAGE_RETRIES + 1} failed (${error.message}) — retrying in ${waitMs}ms...`);
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
+    if (lastError) throw new Error(`Failed to fetch page after id ${lastId} after ${MAX_PAGE_RETRIES + 1} attempts: ${lastError.message}`);
     if (!rows || !rows.length) break;
 
-    await processPage(supabase, rows as LexiconRow[], ranks, maxRank, langArg);
+    await processPage(supabase, rows, ranks, maxRank, langArg);
     processed += rows.length;
+    lastId = (rows[rows.length - 1] as { id: number }).id;
     console.log(`  processed ${processed}/${count}`);
   }
 

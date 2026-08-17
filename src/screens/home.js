@@ -1,6 +1,6 @@
 import { setState } from '../state/store.js';
 import {supabase} from '../utils/supabaseClient.js';
-import {loadProjectSummaries, computePreviewLayout, createProject as createProjectRow} from './projectsData.js';
+import {loadProjectSummaries, computePreviewLayout, createProject as createProjectRow, deleteSong} from './projectsData.js';
 
 // ─── Render ────────────────────────────────────────────────────────────────────
 
@@ -67,7 +67,10 @@ function renderProjectCard(song) {
       </div>
       <div class="project-card-foot">
         <span class="project-card-date">${new Date(song.updated_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
-        <button class="project-card-open" data-action="open" data-id="${song.id}">open canvas →</button>
+        <div class="project-card-actions">
+          <button class="project-card-delete" data-action="delete" data-id="${song.id}" title="Delete project">🗑</button>
+          <button class="project-card-open" data-action="open" data-id="${song.id}">open canvas →</button>
+        </div>
       </div>
     </div>
   `;
@@ -91,6 +94,18 @@ export async function attach(state, justEntered) {
     btn.addEventListener('click', () => {
       const song = (state.songs || []).find((s) => s.id === btn.dataset.id);
       if (song) setState({ activeSong: song, screen: 'canvas' });
+    });
+  });
+
+  document.querySelectorAll('[data-action="delete"]').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const song = (state.songs || []).find((s) => s.id === btn.dataset.id);
+      if (!song) return;
+      if (!confirm(`Delete "${song.title || 'this project'}"? This can't be undone.`)) return;
+      const { error } = await deleteSong(song.id);
+      if (error) { setState({ projectError: error.message }); return; }
+      setState({ songs: (state.songs || []).filter((s) => s.id !== song.id) });
     });
   });
 

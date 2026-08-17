@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "seed:lexicon": "tsx scripts/seed-lexicon-kaikki.ts",
-    "seed:lexicon:ca": "tsx scripts/seed-lexicon-kaikki-catalan.ts",
+    "seed:lexicon:ca": "tsx scripts/seed-lexicon-softcatala.ts",
     "coolscore": "tsx scripts/recompute-coolscore.ts",
     "backfill:assonant": "tsx scripts/backfill-assonant-key.ts"
   },

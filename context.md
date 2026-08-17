@@ -1,6 +1,6 @@
 # VibeComposer — Project Context
 
-_Last reviewed: 2026-08-12. This file is for future sessions (human or AI)
+_Last reviewed: 2026-08-17. This file is for future sessions (human or AI)
 picking up the project — the README is intentionally just "VibeComposer /
 Music". Replaces an earlier version of this file that described a much
 older, pre-Supabase, pre-React incarnation of the app (a single-page vanilla-
@@ -39,13 +39,15 @@ open (iOS build, Android on-device verification).
   `com.andreusama.vibecomposer`). `npm run build && npx cap sync` is the
   update loop. iOS not yet added (needs a Mac); Android build generates but
   hasn't been run on-device from this Linux dev environment yet.
-- **Testing**: Vitest. 70 tests across `museApi.test.js`, `rhyme.test.js`,
+- **Testing**: Vitest. 120 tests across `museApi.test.js`, `rhyme.test.js`,
   `baulProcessor.test.js` — logic-level (parsing, verification, rhyme/
   syllable correctness), not component/UI tests.
 - **Scripts** (`scripts/`): TypeScript, run via `tsx` (no build step, no
   project-wide TS adoption — just this one directory). `tsconfig.json` is
   minimal/non-strict, scoped to `scripts/**/*.ts` + `src/**/*.js` (so the
-  scripts can import the app's own JS utilities directly).
+  scripts can import the app's own JS utilities directly). `scripts/.cache/`
+  (downloaded dictionary dumps, gitignored) holds source data a seed script
+  would otherwise have to re-download every run.
 
 ## Screen flow
 
@@ -68,7 +70,14 @@ auth (signed-out only) → home → [canvas | song-thread] → studio (from a ch
   doesn't work cleanly inside a Capacitor WebView yet — unresolved.
 - **home** (`src/screens/home.js` desktop / `MobileProjectsScreen.jsx`
   mobile) — the projects dashboard (song list), `projectsData.js` backs
-  both.
+  both, including `deleteSong(id)` (hard delete — every child table
+  references `songs.id on delete cascade`, so nothing else needs manual
+  cleanup). Each card/row has a 🗑 next to its "open"/chevron affordance,
+  gated behind a native `confirm()` (this app's one consistent confirmation
+  pattern everywhere — no custom modal component exists). Mobile's row had
+  to change from a `<button>` wrapper to a `<div role="button">` to host
+  the delete button as an independently-tappable child without nesting
+  buttons.
 - **canvas** (`src/canvas/CanvasScreen.jsx`, desktop only) — free-form 2D
   React Flow board. Node types: `TextNoteNode` (a section/verse — see "A
   note IS a `sections` row" below), `ChordProgressionNode`,
@@ -136,8 +145,10 @@ nothing in the real product surfaces what was absorbed, only that it was —
 **Cultural Resonance Engine**: `line_audio` (voice memos, mobile long-press
 — anchored via `(section_id, line_index)` since there's no stable
 per-physical-line row to reference, same tradeoff `annotations`' char
-offsets already accept) and `lexicon` (734,753 real Spanish words from
-Kaikki.org's Wiktionary extract — see "La Musa," below).
+offsets already accept) and `lexicon` — now **bilingual**: 734,753 real
+Spanish words (Kaikki.org's Wiktionary extract) + 878,631 real Catalan
+words (Softcatalà's spell-checker word list — see "La Musa," below for
+why Catalan changed sources mid-project).
 
 RLS: every table is owned via `songs.user_id = auth.uid()`, reached
 directly or through a join, **except** `lexicon` — global reference data,
@@ -153,12 +164,21 @@ funnel) —
 
 - **SURGEON** — precise swap of a selected fragment, metric/syllable focus.
   Never touches the Cultural Resonance Engine.
-- **ARCHITECT** — a new/continuation line, freer than SURGEON.
-- **SOCRATIC** — asks back rather than generating (a genuine block, unfilled
-  narrative gap, or phonetic friction) — one question + 2-3 chips, never a
-  full lyric line.
-- **WORD_BANK** — a filtered word/short-phrase dictionary, grouped by
-  syllable count.
+- **ARCHITECT** — a new/continuation line, freer than SURGEON. The only mode
+  the Cultural Resonance Engine (below) still injects into.
+- **SOCRATIC** — asks back rather than generating. Four scenarios now (not
+  three): ambiguity/stuck, phonetic friction (a requested rhyme has no
+  natural options), reflection ("modo escucha" — now includes the **espejo
+  temático**, see below), and a fourth added this pass — **no real
+  context** (empty/near-empty note, no concrete ask either): rather than
+  force an interpretation of nothing, it just asks what the artist wants to
+  write about. Also newly instructed to recognize **elided-subject
+  ambiguity** (Spanish/Catalan drop subjects constantly — "va saborejant la
+  derrota" with no explicit subject) and ask who/what the real subject is
+  instead of offering interpretations that dodge that question.
+- **WORD_BANK** — a real, deterministic rhyme-and-vocabulary dictionary
+  (rebuilt this pass, see below) — the model's role shrank to *parsing the
+  request only*; it never proposes a single word itself anymore.
 
 Two front-ends, same `askMuse()`: desktop's `MuseFloatNode.jsx` (a
 persistent floating chat node, full conversation thread visible) and
@@ -177,38 +197,165 @@ a fanned stack — an earlier "peek the next card behind" version either
 doubled up chrome with the outer anchored panel or let the stacked card's
 text bleed through it; a single card sidesteps both.
 
-**Cultural Resonance Engine** (`museApi.js`'s `buildCulturalResonance` +
-`extractCulturalFrame`, `src/utils/lexicon.js`): for ARCHITECT/WORD_BANK
-only (never SURGEON), takes the target line's last significant word,
+### WORD_BANK — a real rhyme dictionary
+
+Rebuilt from the ground up this pass around one rule: **the model never
+generates the word list.** `parseWordBank` only extracts what was asked —
+`target_rhyme` (now optional — a request can be pure letter-filter, pure
+concept, or a bare "give me your best words" with none of the three, which
+still returns a real answer instead of nothing, see `buildWordBankFromLexicon`'s
+own reasoning), `rhyme_type` (consonant/assonant), a `letter_filter`
+(`starts_with`/`contains_chain`/`contains_letters`), and a `concept`
+(semantic filter, see below). Everything downstream of that is a real SQL
+query against `lexicon` via `src/utils/lexicon.js`'s `queryWordBank` —
+sorted **common-and-cool-first**, not raw `charisma_score` DESC (charisma's
+own rarity component actively rewards obscurity and would bury exactly the
+familiar, singable words a songwriter wants first).
+
+**Concept explorer** — words related by *meaning*, not rhyme (SelectionCallout's
+"✧ Concept" pill on mobile: select any word/phrase, one tap, confirm the
+guess or type a different one before it fires — a real reported bug came
+from auto-firing on a raw selection with zero chance to correct it). Two
+different pipelines depending on what else was asked:
+- **Rhyme/letters + concept together** (`filterWordBankByConcept`): the SQL
+  pool is already relevant (it shares the requested rhyme/letters), so the
+  model just filters that closed list down to what actually relates by
+  meaning — never proposes words outside it.
+- **Concept alone** (`proposeConceptWords` + `verifyWordsInLexicon`):
+  reported live as a real bug — using "top-N by charisma across the whole
+  734k+/878k-word lexicon" as the candidate pool (the old behavior) has
+  *zero* relationship to any given concept, and silently degraded to
+  showing an unrelated "random word family." Inverted the pipeline instead:
+  the model *proposes* real words for the concept (good at semantics), the
+  lexicon *verifies* each one is a real, non-invented entry (good at
+  never-invent-a-word) — same guarantee, checked after generation instead
+  of filtering before it, because here there's nothing meaningful to filter
+  beforehand.
+
+### Cultural Resonance Engine (ARCHITECT-only now)
+
+`museApi.js`'s `buildCulturalResonance` + `extractCulturalFrame`,
+`src/utils/lexicon.js`. **No longer touches WORD_BANK at all** (moved out
+this pass) — a single "mandatory word" selection is the right shape for
+writing *one* ARCHITECT line, but was the wrong shape for "show me every
+real rhyme," and reducing a whole dictionary down to one word or nothing
+made an empty WORD_BANK deck far more likely than it needed to be. For
+ARCHITECT specifically: takes the target line's last significant word,
 queries `lexicon` for real high-charisma (`charisma_score >= 7`) rhyme
 matches via deterministic SQL — **the model is never asked to invent or
-judge a rhyme**, it only ever receives one this module already verified —
-then makes a small separate LLM call to find a cultural trope/frame for
-that concept (genuinely interpretive, intentionally still LLM-driven,
-unlike the rhyme word itself), and injects both as a constraint into the
-main call. Degrades gracefully (flagged, not silently broken) when the
-lexicon has no high-charisma match for a given rhyme.
+judge a rhyme** — then makes a small separate LLM call to pick the one
+candidate that actually fits the artist's own voice (`lyric_dna`) and name
+a cultural trope/frame for it. This voice-fit step exists because of a real
+reported failure: a rare, high-charisma word can win purely on phonetics
+while being a total non-sequitur for the song's register (a specific
+archaeological/historical adjective surfacing in a modern urban track).
+Degrades gracefully, with a distinguishable reason (`no_rhyme_match` vs.
+`no_voice_fit`), rather than forcing a bad pick just to have picked
+something.
 
-`lexicon` was seeded from Kaikki.org's Spanish Wiktionary JSONL dump
-(`scripts/seed-lexicon-kaikki.ts`, ~1GB streamed via readline, filtered to
-noun/verb/adj, archaic/obsolete/misspelling excluded) — chosen over an
-earlier hermitdave/FrequencyWords-based attempt (`seed-lexicon.mjs`,
-deleted) because a pure frequency list has no part-of-speech or usage-
-register tags, so the "keep only real, non-archaic content words" filter
-literally isn't implementable against it, and it structurally excludes the
-rare/evocative vocabulary a "charisma" feature actually wants.
-`charisma_score` comes from `scripts/recompute-coolscore.ts`'s CoolScore
-formula (phonetics + rarity + loanword + semantic-density, weighted) —
-rarity needed a *second* real data source (hermitdave's `es_full.txt`,
-~1.2M words) backfilled in as `freq_rank`, since Kaikki (a dictionary) has
-no frequency data at all despite an earlier draft of this feature assuming
-it did. The formula's rarity term needed two corrections after real-data
-verification before it was usable: the original spec's direction was
-inverted (`1 - rank/maxRank` gave common words *higher* rarity), and linear
-rank scaling badly compressed real vocabulary against a Zipfian-distributed
-1.2M-word corpus (0% of a real sample cleared the `>=7` filter) — fixed
-with log-scaled rank + a distribution calibrated against real percentiles.
-Both scripts guard their `main()` behind an entrypoint check
+### Ángulo cultural & genealogía de la imagen — standalone reflection features
+
+Two client-forced actions (the UI already decided what's being asked, so
+neither goes through `askMuse`'s own mode-selection at all) — both confirm
+a concept first (guessed via the zero-cost, no-LLM `guessConceptFromLine`,
+or typed from scratch), then call the model directly:
+
+- **Ángulo cultural** (`getCulturalProvocation`) — mobile (SOCRATIC banner)
+  and desktop (`MuseFloatNode`'s SOCRATIC turn), a static button available
+  on any SOCRATIC response. ONE real cultural association (refrán, tropo,
+  arquetipo, or a literary/historical reference if the line evokes one
+  directly) for the given language's own cultural sphere (Spanish or
+  Catalan, not assumed interchangeable). Framed explicitly as "react to
+  this, don't copy it" — nothing ever gets inserted into the lyric.
+- **Genealogía de la imagen** (`getImageGenealogy`) — mobile only
+  (SelectionCallout's "🏛 Genealogía" pill; no desktop entry point exists
+  for it). Deliberately reaches for **universal** culture rather than one
+  language's tropes — up to 3 distinct real references (literature, myth,
+  painting, film, historical figures) so the artist can see the
+  conversation their own image is already part of (e.g. "volver a casa" in
+  an Odyssey-themed song → Homer's Odyssey, a legitimate reference despite
+  not being Spanish-speaking at all).
+
+Both — and SOCRATIC's own elided-subject handling — can return
+`{needsClarification: "..."}` instead of their normal shape when a line's
+grammatical subject is ambiguous enough that guessing would risk
+confidently answering the wrong question (Spanish/Catalan drop subjects
+constantly). The UI renders that as a plain question + text input; the
+artist's answer gets threaded back in as explicit context on the re-run,
+never silently assumed.
+
+### Seeding & CoolScore
+
+`lexicon` is now **bilingual** — Spanish (734,753 rows, unchanged this
+pass) and Catalan (878,631 rows, rebuilt this pass — see below), each
+independently seeded and scored, `.eq('lang_code', ...)` scoping every
+query that touches either so operating on one language can never corrupt
+the other (a real near-miss: `recompute-coolscore.ts` originally had *no*
+`lang_code` filter at all on its bulk update, harmless while the table was
+single-language, a real corruption risk the moment a second one existed).
+
+**Spanish** — `scripts/seed-lexicon-kaikki.ts`, Kaikki.org's Spanish
+Wiktionary JSONL dump (~1GB streamed via readline, filtered to noun/verb/
+adj, archaic/obsolete/misspelling excluded) — chosen over an earlier
+hermitdave/FrequencyWords-based attempt (`seed-lexicon.mjs`, deleted)
+because a pure frequency list has no part-of-speech/usage tags, so "keep
+only real, non-archaic content words" isn't implementable against it.
+
+**Catalan** — went through two real sources this pass, not one:
+1. First attempt: Kaikki's Catalan Wiktionary dump, same pipeline as
+   Spanish (`scripts/seed-lexicon-kaikki-catalan.ts`, since deleted/
+   retired) — only 189,604 word forms → 181,291 kept rows, and genuinely
+   incomplete (a live check found "amor," an entirely ordinary word,
+   missing outright).
+2. Replaced with **Softcatalà** (`scripts/seed-lexicon-softcatala.ts`,
+   `huggingface.co/datasets/softcatala/catalan-dictionary`, LGPL/GPL,
+   1,219,652 `form lemma pos_tag` rows, the word list behind Catalan
+   spell-checkers) — 878,631 distinct kept words, confirmed "amor" present.
+   Deliberately does **not** restrict to `form === lemma` (i.e. keeps
+   conjugated verb forms, plurals, feminine forms as independent rows) —
+   every kept form is a real, independently rhymable word, and this app's
+   own stated WORD_BANK mission is "literally all the words that match the
+   rhyme," not just dictionary headwords. Trade-off, accepted deliberately:
+   conjugations of the same verb (or agentive nouns sharing a suffix) can
+   cluster the very top of a *pure* charisma ranking with no other filter
+   applied — a real, known, low-priority cosmetic effect, not a
+   correctness bug. Softcatalà has no glosses at all, so Catalan's
+   `charisma_score` placeholder (before CoolScore recompute) drops the
+   gloss-quality signal Spanish's still uses.
+
+Both languages' real `charisma_score` comes from
+`scripts/recompute-coolscore.ts`'s CoolScore formula (phonetics + rarity +
+loanword + semantic-density, weighted) — now parameterized per language
+(`npm run coolscore -- es|ca`), each with its own frequency source
+(hermitdave's `es_full.txt`/`ca_full.txt`), its own hand-built loanword
+list (Catalan spells several loanwords differently — `futbol` not
+`fútbol`, `bàsquet` not `básquetbol`), and its own empirically-calibrated
+floor/ceiling (Catalan's distribution doesn't transfer from Spanish's
+numbers — checked directly, not assumed, both times the underlying Catalan
+word population changed). Rarity needed a real frequency source at all
+because Kaikki/Softcatalà are dictionaries, not frequency corpora — the
+Spanish corpus (~1.2M words) covers this lexicon's ~735K rows well;
+Catalan's (71,184 words) covers under 6% of its much larger 878,631-row
+table, so most Catalan rows default to maximum rarity (`freq_rank: null`)
+— a known, disclosed gap, not silently hidden (a much larger corpus,
+SUBTLEX-CAT's 278M-word subtitle corpus, was identified as the fix but not
+yet integrated). The rarity formula itself needed two corrections after
+real-data verification before it was usable: the original spec's direction
+was inverted (`1 - rank/maxRank` gave common words *higher* rarity), and
+linear rank scaling badly compressed real vocabulary against a
+Zipfian-distributed corpus (0% of a real sample cleared the `>=7` filter)
+— fixed with log-scaled rank + a distribution calibrated against real
+percentiles.
+
+`recompute-coolscore.ts` also switched from OFFSET to **keyset (cursor)
+pagination** mid-pass — reported live as real timeouts against the larger
+post-Softcatalà table (`.range(offset, ...)` gets more expensive the deeper
+it pages, a standard Postgres OFFSET problem, not a transient blip as it
+first looked). `.gt('id', lastId).order('id').limit(pageSize)` stays
+equally fast at any depth; a few retries with backoff sit on top for
+genuine transient network blips.
+
+Every seed/recompute script guards its `main()` behind an entrypoint check
 (`import.meta.url === file://${process.argv[1]}`) — they export their pure
 functions for dry-run testing, and an earlier unguarded version ran a real
 partial production update as a side effect of being imported for that
@@ -226,6 +373,16 @@ established scheme — purely content-driven (no idle/pause timer anywhere;
 "the writer needs room to think in silence" was an explicit, deliberate
 product call), surfaces as a quiet tappable gutter icon on mobile, costs no
 API call until tapped.
+
+This engine's own Catalan support long predates `lexicon` having any
+Catalan data at all — SURGEON/ARCHITECT rhyme verification and the inline
+rhyme badges worked correctly for Catalan lyrics well before WORD_BANK/
+concept-explorer features could return anything for that language (fixed
+this pass, see "Seeding & CoolScore" above). `scripts/recompute-coolscore.ts`
+reuses this file's own `LANG_RULES` (via `syllables.js`) for its Phonetics
+component now too, instead of a hand-copied, Spanish-only accented-vowel
+set that silently didn't apply to Catalan (à/è/ò aren't in Spanish's
+accent set, and Spanish's á isn't in Catalan's).
 
 Two real, previously-undetected bugs were found and fixed while building
 the Cultural Resonance Engine (both had silently existed since these files
@@ -263,11 +420,13 @@ rhyme. Both have regression tests in `rhyme.test.js`.
   version the original CoolScore spec offered as an alternative — that
   would mean ~735K words through the API, a real cost/time tradeoff that
   was flagged rather than silently done.
-- `lexicon`'s loanword detection is a small hand-built list + mechanical
-  phonotactic check (sh/th/ph/w) — real but coarse; a rare-register or
-  informal-loanword word can still pass the archaic/obsolete/misspelling
-  filter untouched (e.g. "swap," a real but slangy Spanish loanword)
-  since those tags were the only ones the original filter spec excluded.
+- `lexicon`'s loanword detection is a small hand-built list per language +
+  a shared mechanical phonotactic check (sh/th/ph/w) — real but coarse; a
+  rare-register or informal-loanword word can still pass the archaic/
+  obsolete/misspelling filter untouched (e.g. "swap," a real but slangy
+  Spanish loanword) since those tags were the only ones the original filter
+  spec excluded. Catalan's list is smaller/rougher than Spanish's — a
+  first pass, not linguistically authoritative.
 - Two separate chord-frequency lookup tables (`studio.js`,
   `songStructure.js`) predate this whole rewrite and are still
   independent — no single source of truth for "what chords exist," watch
@@ -275,3 +434,25 @@ rhyme. Both have regression tests in `rhyme.test.js`.
 - No CI, no linter config beyond whatever Vite/Vitest assume by default.
 - iOS build unstarted (needs a Mac); Android build generates but hasn't
   been run on an actual device/emulator from this Linux dev environment.
+- Catalan's frequency corpus (71,184 words) covers under 6% of the
+  878,631-row Catalan lexicon — most Catalan `charisma_score` values are
+  currently inflated by the "unranked word defaults to max rarity"
+  fallback. SUBTLEX-CAT (278M-word subtitle corpus) was identified as the
+  real fix but not yet integrated — see "Seeding & CoolScore" above.
+- A pure-charisma, no-other-filter WORD_BANK/concept query can surface a
+  cluster of near-duplicate words sharing a prefix/suffix (conjugations of
+  one verb, agentive nouns off one root) at the very top of the ranking,
+  for both languages — a known, explicitly deprioritized cosmetic effect
+  of keeping every real word form rather than restricting to dictionary
+  lemmas (a deliberate completeness-over-ranking-purity trade, not an
+  oversight).
+- **Genealogía de la imagen** has no desktop entry point at all (mobile-only
+  SelectionCallout pill) — desktop's chat-based interaction model has no
+  equivalent "select text, tap a pill" mechanism to hang it off. The
+  **concept explorer**'s dedicated one-tap pill is mobile-only too, but its
+  backend already works from desktop's free-text chat without one (just
+  type the request). A standalone, no-selection "Cool words" FabMenu entry
+  point was built and then explicitly pulled (felt too trivial as its own
+  doorway) — the `mode='concept'` plumbing it used still exists and still
+  works via SelectionCallout, so re-adding a no-selection entry point later
+  is cheap if it turns out to be wanted after all.

@@ -997,6 +997,20 @@ body::before {
 
 .project-card-open:hover { color: var(--chord); }
 
+.project-card-actions { display: flex; align-items: center; gap: var(--space-2); }
+
+.project-card-delete {
+    background: none;
+    border: none;
+    font-size: var(--fs-secondary);
+    color: var(--faint);
+    cursor: pointer;
+    padding: var(--space-1);
+    transition: color 0.12s ease;
+}
+
+.project-card-delete:hover { color: var(--rose); }
+
 /* ─── Canvas screen ───────────────────────────────────────────────────────────── */
 /* Everything below was formerly src/canvas/canvas.css, merged in so the whole
    project runs off one stylesheet. Tokens/reset already declared above are
@@ -4801,6 +4815,20 @@ body::before {
 }
 
 .mp-row-chevron { color: var(--graphite-soft); font-size: var(--fs-h2); flex-shrink: 0; }
+
+.mp-row-delete {
+    flex-shrink: 0;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    font-size: var(--fs-body);
+    color: var(--faint);
+    cursor: pointer;
+}
+.mp-row-delete:active { color: var(--rose); }
 
 /* ─── Note editor (mobile, full-screen) ───────────────────────────────────────
    ROADMAP.md Phase 2 — reached by tapping a song-thread card. Write mode

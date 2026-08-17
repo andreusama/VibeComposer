@@ -1,17 +1,29 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { NodeResizer } from '@xyflow/react';
-import { loadMuseConversation, saveMuseTurn, markMuseOptionSaved } from './museData.js';
-import { askMuse } from '../utils/museApi.js';
+import { loadMuseConversation, saveMuseTurn, markMuseOptionSaved, loadMuseProfile } from './museData.js';
+import { askMuse, getCulturalProvocation, guessConceptFromLine } from '../utils/museApi.js';
 import { recordMuseTurnAndMaybeUpdateProfile } from './museProfileUpdater.js';
 import { addAnnotation } from './canvasData.js';
-import MuseDebugPanel from './MuseDebugPanel.jsx';
-import { logDebugEvent } from './debugLog.js';
+import MuseEyePanel from './MuseEyePanel.jsx';
 
 // Display-only labels — purely cosmetic, don't affect anything the model
-// reads (see museApi.js's MUSE_TYPES/MUSE_ANGLES).
-const TYPE_LABELS = { CONTINUITY: 'continuidad', CONTRAST: 'contraste', RESOLUTION: 'resolución' };
-const ANGLE_LABELS = { raw: 'cruda', atmospheric: 'atmosférica', abstract: 'abstracta' };
-const MODE_LABELS = { SURGEON: 'cirujano', ARCHITECT: 'arquitecto', SOCRATIC: 'socrática', WORD_BANK: 'banco de palabras' };
+// reads (see museApi.js's MUSE_TYPES/MUSE_ANGLES). Keyed by lang since the
+// muse's own voice now follows lyricLanguage (see buildStaticMuseInstructions'
+// "esto NO es solo para los versos" rule) — these chrome labels shouldn't be
+// the one thing on screen still stuck in Spanish when a Catalan song is open.
+// Only es/ca are real supported languages (see museApi.js's phonetic rules).
+const TYPE_LABELS = {
+  es: { CONTINUITY: 'continuidad', CONTRAST: 'contraste', RESOLUTION: 'resolución' },
+  ca: { CONTINUITY: 'continuïtat', CONTRAST: 'contrast', RESOLUTION: 'resolució' },
+};
+const ANGLE_LABELS = {
+  es: { raw: 'cruda', atmospheric: 'atmosférica', abstract: 'abstracta' },
+  ca: { raw: 'crua', atmospheric: 'atmosfèrica', abstract: 'abstracta' },
+};
+const MODE_LABELS = {
+  es: { SURGEON: 'cirujano', ARCHITECT: 'arquitecto', SOCRATIC: 'socrática', WORD_BANK: 'banco de palabras' },
+  ca: { SURGEON: 'cirurgià', ARCHITECT: 'arquitecte', SOCRATIC: 'socràtica', WORD_BANK: 'banc de paraules' },
+};
 
 // The muse used to permanently occupy a tab in the note's side panel —
 // always docked, always taking up space, whether or not you were using it.
@@ -22,9 +34,14 @@ const MODE_LABELS = { SURGEON: 'cirujano', ARCHITECT: 'arquitecto', SOCRATIC: 's
 // know or care whether this is open.
 export default function MuseFloatNode({ id, data, selected }) {
   const {
-    songId, lineId, verseText, noteFunction, museProfile, onMuseProfileUpdated,
+    // sourceNoteId IS the block's section_id ("a note IS a sections row") —
+    // everything about the muse's own conversation/profile is keyed by it.
+    // lineId is a genuinely different, real physical line id, kept only
+    // for addAnnotation below (the annotations feature is unrelated and
+    // still line-scoped on purpose).
+    songId, sourceNoteId, lineId, verseText, noteFunction,
     lyricLanguage, lyricDialect, userId, onClose, songStructure, lyricDna,
-    pendingTargetVerse, onClearTargetVerse,
+    pendingTargetVerse, onClearTargetVerse, songTitle,
   } = data;
 
   const [conversation, setConversation] = useState([]);
@@ -33,9 +50,16 @@ export default function MuseFloatNode({ id, data, selected }) {
   const [asking, setAsking] = useState(false);
   const [error, setError] = useState(null);
   const [savedOptions, setSavedOptions] = useState(new Set());
-  // Dev-only observability toggle — never rendered in production builds,
-  // so there's no way an end user stumbles into raw prompt text or char
-  // counts. debugInfo holds the _debug object from the most recent call.
+  // LOCAL profile — what THIS block (verse/chorus/etc.) is about, not the
+  // whole song. Loaded once per sourceNoteId (this node's own concern) and
+  // kept fresh locally after every refresh, same as conversation below.
+  // The whole-song context comes from songStructure/describeSongStructure
+  // instead — real raw text, no separate song-level profile to load here.
+  const [blockProfile, setBlockProfile] = useState('');
+  // Dev-only toggle for whether THIS node's inline panel is visible —
+  // every real call is captured to the debug log regardless (see askMuse
+  // in museApi.js), this only controls local clutter. debugInfo holds the
+  // _debug object from the most recent call, for that inline rendering.
   const [debugMode, setDebugMode] = useState(false);
   const [debugInfo, setDebugInfo] = useState(null);
   // Points at whichever conversation entry is currently last, so a fresh
@@ -43,17 +67,39 @@ export default function MuseFloatNode({ id, data, selected }) {
   // long thread — re-pointed every render via the ref callback below, not
   // tracked as its own state.
   const lastEntryRef = useRef(null);
+  // session_angles_history — rhyme words and cultural frames the Cultural
+  // Resonance Engine has already surfaced while THIS node has been open
+  // (see museApi.js's buildCulturalResonance), so it never hands back the
+  // same mandatory word or refrán/tropo twice across the conversation.
+  const angleHistoryRef = useRef({ words: [], frames: [] });
+  // Creativity proposal #4 — same shape/reasoning as MusePopover's mobile
+  // version: only ever relevant to the LAST (pending) SOCRATIC turn, so one
+  // flat state is enough, no per-entry map needed. Reset on every new send.
+  const [provocation, setProvocation] = useState(null);
+  const [provocationLoading, setProvocationLoading] = useState(false);
+  const [provocationAttempted, setProvocationAttempted] = useState(false);
+  // 'idle' | 'confirm' (showing guessConceptFromLine's guess) | 'ask' (no
+  // guess, or the user said "that's not it") — same confirm-before-firing
+  // reasoning as mobile's MusePopover: a real reported bug came from firing
+  // on an unconfirmed guess with no chance to correct it.
+  const [provocationStage, setProvocationStage] = useState('idle');
+  const [provocationConceptDraft, setProvocationConceptDraft] = useState('');
+  const [provocationClarificationDraft, setProvocationClarificationDraft] = useState('');
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { data: rows, error: loadError } = await loadMuseConversation(lineId);
+      const [{ data: rows, error: loadError }, { data: profileRow }] = await Promise.all([
+        loadMuseConversation(sourceNoteId),
+        loadMuseProfile(sourceNoteId),
+      ]);
       if (cancelled) return;
       if (!loadError) setConversation(rows || []);
+      setBlockProfile(profileRow?.summary || '');
       setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [lineId]);
+  }, [sourceNoteId]);
 
   useEffect(() => {
     if (conversation.length > 0) {
@@ -66,21 +112,35 @@ export default function MuseFloatNode({ id, data, selected }) {
     if (!message || asking) return;
     setAsking(true);
     setError(null);
+    setProvocation(null);
+    setProvocationAttempted(false);
+    setProvocationStage('idle');
     try {
       const response = await askMuse({
-        verseText, noteFunction, museProfile, lyricDna, userMessage: message,
-        conversation: conversation.map((e) => ({ role: e.role, content: e.content, action_type: e.action, options: e.options })),
+        verseText, noteFunction, blockProfile, lyricDna, userMessage: message,
+        conversation: conversation.map((e) => ({ role: e.role, content: e.content, action_type: e.mode, options: e.options })),
         lang: lyricLanguage, dialect: lyricDialect,
         songStructure,
         targetVerse: pendingTargetVerse || null,
+        // debugMode only controls whether the inline panel renders for
+        // THIS node — askMuse itself always logs every real call to the
+        // debug log in dev, regardless of this toggle.
         debug: debugMode,
+        meta: { songId, songTitle, nodeLabel: noteFunction },
+        excludeRhymeWords: angleHistoryRef.current.words,
+        excludeCulturalFrames: angleHistoryRef.current.frames,
       });
+      if (response.culturalResonance?.enabled) {
+        const { mandatoryWord, culturalFrame } = response.culturalResonance;
+        if (mandatoryWord && !angleHistoryRef.current.words.includes(mandatoryWord)) {
+          angleHistoryRef.current.words.push(mandatoryWord);
+        }
+        if (culturalFrame && !angleHistoryRef.current.frames.includes(culturalFrame)) {
+          angleHistoryRef.current.frames.push(culturalFrame);
+        }
+      }
       setDebugInfo(response._debug || null);
-      // Only ever set when debugMode was on for this call — pushing to the
-      // global log is what lets DebugConsole show history across multiple
-      // calls/floats, not just whatever the last inline panel captured.
-      if (response._debug) logDebugEvent('muse', response._debug);
-      const { data: rows, error: saveError } = await saveMuseTurn(songId, lineId, response.themes, message, response);
+      const { data: rows, error: saveError } = await saveMuseTurn(songId, sourceNoteId, message, response);
       if (saveError) { setError(saveError.message); return; }
       setConversation((c) => [...c, ...rows]);
       setDraft('');
@@ -90,14 +150,14 @@ export default function MuseFloatNode({ id, data, selected }) {
 
       // Fire-and-forget — a slow or failed background profile refresh
       // should never hold up the turn that was just saved.
-      recordMuseTurnAndMaybeUpdateProfile({ songId, existingProfile: museProfile })
-        .then((result) => { if (result) onMuseProfileUpdated?.(result); });
+      recordMuseTurnAndMaybeUpdateProfile({ songId, sectionId: sourceNoteId, existingBlockProfile: blockProfile })
+        .then((result) => { if (result != null) setBlockProfile(result); });
     } catch (err) {
       setError(err.message === 'LIMIT_REACHED' ? 'daily AI limit reached — try again tomorrow' : err.message);
     } finally {
       setAsking(false);
     }
-  }, [asking, verseText, noteFunction, museProfile, lyricDna, conversation, lyricLanguage, lyricDialect, songId, lineId, onMuseProfileUpdated, songStructure, pendingTargetVerse, onClearTargetVerse, debugMode]);
+  }, [asking, verseText, noteFunction, blockProfile, lyricDna, conversation, lyricLanguage, lyricDialect, songId, sourceNoteId, songStructure, pendingTargetVerse, onClearTargetVerse, debugMode]);
 
   const handleSend = useCallback(() => send(draft), [send, draft]);
 
@@ -120,8 +180,70 @@ export default function MuseFloatNode({ id, data, selected }) {
     setSavedOptions((s) => new Set(s).add(key));
   }, [userId, lineId]);
 
+  // Creativity proposal #4 — direct call, not a trip through send()/askMuse:
+  // this is a client-forced action, not a new model turn deciding a mode.
+  // Never fires on the first click anymore — guessConceptFromLine's guess
+  // (or a blank ask if there's nothing to guess from) has to be confirmed
+  // or corrected first (provocationStage), same reasoning as mobile's
+  // MusePopover: a real reported bug came from firing on an unconfirmed
+  // guess with no chance to correct it. pendingTargetVerse is usually
+  // already cleared by the time this fires (send() clears it right after
+  // use) — guessConceptFromLine/getCulturalProvocation fall back to
+  // verseText's own last line in that case, same as buildCulturalResonance.
+  const handleCulturalProvocationStart = useCallback(() => {
+    const guess = guessConceptFromLine({ verseText, targetVerse: pendingTargetVerse || null });
+    setProvocationConceptDraft(guess || '');
+    setProvocationStage(guess ? 'confirm' : 'ask');
+  }, [verseText, pendingTargetVerse]);
+
+  const handleCulturalProvocationChange = useCallback(() => setProvocationStage('ask'), []);
+  const handleCulturalProvocationDraftChange = useCallback((e) => setProvocationConceptDraft(e.target.value), []);
+
+  // Shared by the confirm chip, the ask form's submit, AND "otro ángulo"
+  // (re-runs with the SAME already-confirmed concept — a new angle on the
+  // same topic, not a re-ask).
+  const handleCulturalProvocationRun = useCallback(async (concept, clarification = null) => {
+    setProvocationStage('idle');
+    setProvocationLoading(true);
+    try {
+      const result = await getCulturalProvocation({
+        concept, clarification, verseText, targetVerse: pendingTargetVerse || null, lyricDna,
+        lang: lyricLanguage,
+        excludeFrames: angleHistoryRef.current.frames,
+      });
+      setProvocation(result);
+      setProvocationAttempted(true);
+      if (result?.frame && !angleHistoryRef.current.frames.includes(result.frame)) {
+        angleHistoryRef.current.frames.push(result.frame);
+      }
+    } finally {
+      setProvocationLoading(false);
+    }
+  }, [verseText, pendingTargetVerse, lyricDna, lyricLanguage]);
+
+  const handleCulturalProvocationSubmit = useCallback((e) => {
+    e.preventDefault();
+    if (!provocationConceptDraft.trim()) return;
+    handleCulturalProvocationRun(provocationConceptDraft.trim());
+  }, [provocationConceptDraft, handleCulturalProvocationRun]);
+
+  // Elided-subject clarification (museApi.js's
+  // SUBJECT_RESOLUTION_INSTRUCTION) — re-runs with the SAME confirmed
+  // concept plus the artist's own answer about who/what the real subject is.
+  const handleCulturalProvocationClarificationChange = useCallback(
+    (e) => setProvocationClarificationDraft(e.target.value), []
+  );
+  const handleCulturalProvocationClarify = useCallback((e) => {
+    e.preventDefault();
+    if (!provocationClarificationDraft.trim()) return;
+    handleCulturalProvocationRun(provocationConceptDraft, provocationClarificationDraft.trim());
+  }, [provocationConceptDraft, provocationClarificationDraft, handleCulturalProvocationRun]);
+
   const lastEntry = conversation[conversation.length - 1];
-  const isPendingQuestion = lastEntry?.role === 'muse' && lastEntry.action === 'SOCRATIC';
+  const isPendingQuestion = lastEntry?.role === 'muse' && lastEntry.mode === 'SOCRATIC';
+  const modeLabels = MODE_LABELS[lyricLanguage] || MODE_LABELS.es;
+  const typeLabels = TYPE_LABELS[lyricLanguage] || TYPE_LABELS.es;
+  const angleLabels = ANGLE_LABELS[lyricLanguage] || ANGLE_LABELS.es;
 
   return (
     <div className={`muse-float${selected ? ' selected' : ''}`}>
@@ -167,18 +289,22 @@ export default function MuseFloatNode({ id, data, selected }) {
               }
               return (
                 <div ref={isLast ? lastEntryRef : null} className="muse-turn muse-turn-muse" key={entry.id}>
-                  <div className="muse-mode-label">{MODE_LABELS[entry.action] || entry.action}</div>
-                  <p className={entry.action === 'SOCRATIC' ? 'muse-question' : 'muse-answer'}>{entry.content}</p>
+                  <div className="muse-mode-label">{modeLabels[entry.mode] || entry.mode}</div>
+                  <p className={entry.mode === 'SOCRATIC' ? 'muse-question' : 'muse-answer'}>{entry.content}</p>
 
-                  {(entry.action === 'SURGEON' || entry.action === 'ARCHITECT') && entry.options?.length > 0 && (
+                  {(entry.mode === 'SURGEON' || entry.mode === 'ARCHITECT') && entry.options?.length > 0 && (
                     <div className="muse-options">
-                      {entry.options.map((opt, j) => {
+                      {/* Server-side pool is up to 6 now (see museApi.js) so
+                          mobile's swipe deck has local regeneration
+                          candidates — desktop keeps its original 3-card
+                          display by slicing here. */}
+                      {entry.options.slice(0, 3).map((opt, j) => {
                         const saved = savedOptions.has(`${entry.id}:${j}`);
                         return (
                           <div className="muse-option-row" key={j}>
                             <div className="muse-option-main">
-                              {opt.type && <span className="muse-option-type">{TYPE_LABELS[opt.type] || opt.type}</span>}
-                              {opt.angle && <span className="muse-option-angle">{ANGLE_LABELS[opt.angle] || opt.angle}</span>}
+                              {opt.type && <span className="muse-option-type">{typeLabels[opt.type] || opt.type}</span>}
+                              {opt.angle && <span className="muse-option-angle">{angleLabels[opt.angle] || opt.angle}</span>}
                               <span className="muse-option-text">{opt.text}</span>
                             </div>
                             <button
@@ -194,7 +320,7 @@ export default function MuseFloatNode({ id, data, selected }) {
                     </div>
                   )}
 
-                  {entry.action === 'SOCRATIC' && entry.options?.length > 0 && (
+                  {entry.mode === 'SOCRATIC' && entry.options?.length > 0 && (
                     <div className="muse-chip-row">
                       {entry.options.map((chip, j) => (
                         <button key={j} className="muse-chip nodrag" onClick={() => send(chip)} disabled={asking}>
@@ -204,8 +330,99 @@ export default function MuseFloatNode({ id, data, selected }) {
                     </div>
                   )}
 
-                  {entry.action === 'WORD_BANK' && entry.options?.wordGroups?.length > 0 && (
+                  {/* Creativity proposal #4 — always available on the
+                      pending SOCRATIC turn, independent of whatever dynamic
+                      chips the model itself offered this turn. */}
+                  {entry.mode === 'SOCRATIC' && isLast && (
+                    <div className="muse-provocation-block">
+                      {provocationStage === 'idle' && !provocationAttempted && !provocationLoading && (
+                        <button
+                          className="muse-chip muse-chip-cultural nodrag"
+                          onClick={handleCulturalProvocationStart}
+                        >
+                          ✧ ángulo cultural
+                        </button>
+                      )}
+                      {provocationStage === 'confirm' && (
+                        <div className="muse-provocation-ask">
+                          <p className="muse-question">¿Un ángulo cultural sobre &quot;{provocationConceptDraft}&quot;?</p>
+                          <div className="muse-chip-row">
+                            <button
+                              className="muse-chip nodrag"
+                              onClick={() => handleCulturalProvocationRun(provocationConceptDraft)}
+                            >
+                              Sí, ese
+                            </button>
+                            <button className="muse-chip nodrag" onClick={handleCulturalProvocationChange}>
+                              Es otro concepto
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                      {provocationStage === 'ask' && (
+                        <form className="muse-concept-ask" onSubmit={handleCulturalProvocationSubmit}>
+                          <p className="muse-question">¿Sobre qué concepto quieres un ángulo cultural?</p>
+                          <input
+                            className="muse-concept-input nodrag"
+                            type="text"
+                            value={provocationConceptDraft}
+                            onChange={handleCulturalProvocationDraftChange}
+                            placeholder="p. ej. la ausencia, el orgullo…"
+                          />
+                          <button className="muse-chip nodrag" type="submit" disabled={!provocationConceptDraft.trim()}>
+                            Buscar
+                          </button>
+                        </form>
+                      )}
+                      {provocationLoading && <p className="muse-provocation-loading">buscando un ángulo…</p>}
+                      {!provocationLoading && provocationAttempted && !provocation && (
+                        <p className="muse-provocation-empty">
+                          no encontré un ángulo cultural claro para &quot;{provocationConceptDraft}&quot; — prueba con otro concepto
+                        </p>
+                      )}
+                      {/* Elided-subject clarification (museApi.js's
+                          SUBJECT_RESOLUTION_INSTRUCTION) — the model asked
+                          instead of guessing who/what the real subject is. */}
+                      {!provocationLoading && provocation?.needsClarification && (
+                        <form className="muse-concept-ask" onSubmit={handleCulturalProvocationClarify}>
+                          <p className="muse-question">{provocation.needsClarification}</p>
+                          <input
+                            className="muse-concept-input nodrag"
+                            type="text"
+                            value={provocationClarificationDraft}
+                            onChange={handleCulturalProvocationClarificationChange}
+                            placeholder="p. ej. el miedo"
+                          />
+                          <button className="muse-chip nodrag" type="submit" disabled={!provocationClarificationDraft.trim()}>
+                            Aclarar
+                          </button>
+                        </form>
+                      )}
+                      {!provocationLoading && provocation?.frame && (
+                        <div className="muse-provocation">
+                          <p className="muse-provocation-frame">
+                            {provocation.frame}{provocation.tropo ? ` — ${provocation.tropo}` : ''}
+                          </p>
+                          <p className="muse-provocation-hint">reacciona a esto, no lo copies</p>
+                          <button
+                            className="muse-chip nodrag"
+                            onClick={() => handleCulturalProvocationRun(provocationConceptDraft)}
+                            disabled={provocationLoading}
+                          >
+                            otro ángulo
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {entry.mode === 'WORD_BANK' && entry.options?.wordGroups?.length > 0 && (
                     <div className="muse-word-bank">
+                      {entry.options.conceptMatched === false && (
+                        <p className="muse-word-bank-note">
+                          ninguna encajó de verdad con &quot;{entry.options.concept}&quot; — aquí tienes el resto
+                        </p>
+                      )}
                       {entry.options.wordGroups.map((group, gi) => (
                         <div className="muse-word-group" key={gi}>
                           {group.syllables != null && <span className="muse-word-group-label">{group.syllables} síl.</span>}
@@ -247,7 +464,9 @@ export default function MuseFloatNode({ id, data, selected }) {
               );
             })}
           </div>
-          {debugMode && <MuseDebugPanel debug={debugInfo} />}
+          {debugMode && (
+            <MuseEyePanel debug={debugInfo} songId={songId} songTitle={songTitle} nodeLabel={noteFunction} />
+          )}
         </div>
 
         <div className="muse-float-composer nodrag">

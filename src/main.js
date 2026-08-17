@@ -2,6 +2,9 @@ import { createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { subscribe, getState, setState } from './state/store.js';
 import CanvasScreen from './canvas/CanvasScreen.jsx';
+import SongThreadScreen from './canvas/SongThreadScreen.jsx';
+import MobileProjectsScreen from './screens/MobileProjectsScreen.jsx';
+import MuseEyeScreen from './canvas/MuseEyeScreen.jsx';
 import * as LoadingScreen     from './screens/loading.js';
 import * as StudioScreen      from './screens/studio.js';
 import * as AuthScreen        from './screens/auth.js';
@@ -38,6 +41,13 @@ let lastEffectiveScreen = null;
 // would desync React's internal tree from the real DOM.
 let reactRoot = null;
 
+// Matches style.css's own "narrow viewports (phones, half-split windows)"
+// breakpoint — below it, the canvas's free-form 2D layout doesn't work on
+// touch (see ROADMAP.md Phase 1), so the song thread's linear card list
+// takes over instead.
+const MOBILE_BREAKPOINT = 640;
+const isMobileViewport = () => window.innerWidth <= MOBILE_BREAKPOINT;
+
 function render(state) {
   if (!state.sessionChecked) {
     if (reactRoot) { reactRoot.unmount(); reactRoot = null; }
@@ -53,11 +63,30 @@ function render(state) {
 
   if (screenKey === 'canvas') {
     if (!reactRoot) reactRoot = createRoot(app);
-    reactRoot.render(createElement(CanvasScreen, {
+    const ScreenComponent = isMobileViewport() ? SongThreadScreen : CanvasScreen;
+    reactRoot.render(createElement(ScreenComponent, {
       state,
       justEntered,
       onExit: () => setState({ screen: 'home' }),
     }));
+    return;
+  }
+
+  // Full-page real-data debug viewer — dev-only, gated here too (not just
+  // at its home-screen entry point) so poking state.screen from outside
+  // this app can't reach it in a production build.
+  if (screenKey === 'museeye') {
+    if (!import.meta.env.DEV) { setState({ screen: 'home' }); return; }
+    if (!reactRoot) reactRoot = createRoot(app);
+    reactRoot.render(createElement(MuseEyeScreen, {
+      onExit: () => setState({ screen: 'home' }),
+    }));
+    return;
+  }
+
+  if (screenKey === 'home' && isMobileViewport()) {
+    if (!reactRoot) reactRoot = createRoot(app);
+    reactRoot.render(createElement(MobileProjectsScreen, { state, justEntered }));
     return;
   }
 
@@ -85,3 +114,12 @@ subscribe((state) => {
 
 setAccentFromState(getState());
 render(getState());
+
+// Only matters for browser-window/device-emulation testing crossing
+// MOBILE_BREAKPOINT — a real phone's WebView viewport doesn't resize mid-
+// session, so this is purely a dev-time convenience, not a production path.
+let resizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => render(getState()), 150);
+});

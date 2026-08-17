@@ -296,6 +296,11 @@ alter table sections
   add constraint sections_chord_progression_id_fkey
   foreign key (chord_progression_id) references chord_progressions(id) on delete set null;
 
+-- Mobile-only song-thread ordering/grouping — see migration_mobile_thread_index.sql
+-- for the full rationale. Desktop never reads or writes this column.
+alter table sections add column if not exists thread_index integer;
+create index if not exists idx_sections_thread_index on sections(song_id, thread_index);
+
 -- ─── note_links ─────────────────────────────────────────────────────────────────
 -- Generic, extensible connection between two notes. Only 'main-thread' exists
 -- today (marks which notes make up the clean-view lyric, and their order) —
@@ -495,21 +500,35 @@ alter table songs
 alter table songs drop column if exists muse_profile;
 drop table if exists muse_entries;
 
--- One row per turn in an ongoing conversation about one line — not a
--- question/answer pair, since the muse asking back for context (and the
--- user replying) can chain across several turns before landing on actual
--- options. Append-only, grows without limit, NEVER sent to the muse API in
--- full — muse_profile below is the only thing that is.
+-- One row per turn in an ongoing conversation about one BLOCK (a note —
+-- see "A 'note' IS a sections row" below; typically one verse/chorus/etc,
+-- 1-8 lines) — not a question/answer pair, since the muse asking back for
+-- context (and the user replying) can chain across several turns before
+-- landing on actual options. Append-only, grows without limit, NEVER sent
+-- to the muse API in full — muse_profile below is the only thing that is.
+-- Keyed by section_id, not line_id: a block can hold several physical
+-- lines, and the conversation is about the block as a whole, not any one
+-- of them — line_id was only ever a fragile stand-in for "this note" (its
+-- identity broke if the first line got deleted/reordered).
 create table muse_entries (
   id                   uuid primary key default gen_random_uuid(),
   song_id              uuid not null references songs(id) on delete cascade,
-  line_id              uuid not null references lines(id) on delete cascade,
-  register             text check (register in ('amor', 'amistad', 'familia', 'lugar', 'otro')),
+  section_id           uuid not null references sections(id) on delete cascade,
   role                 text not null check (role in ('user', 'muse')),
   -- 'ask' = the user's request; 'clarify' = the muse asking back for
   -- context; 'suggest' = the muse offering concrete options. Null only
   -- transiently doesn't happen — every row gets one of these on insert.
   action               text not null check (action in ('ask', 'clarify', 'suggest')),
+  -- The muse's actual mode (SURGEON/ARCHITECT/SOCRATIC/WORD_BANK) for
+  -- 'muse' rows, null for 'user' rows. Separate from `action` on purpose:
+  -- `action` is the coarse ask/clarify/suggest bucket, but the UI needs
+  -- the specific mode both to label the turn correctly and to know which
+  -- shape `options` is in (a flat suggestions array for SURGEON/ARCHITECT
+  -- vs a {wordGroups} object for WORD_BANK) — SOCRATIC and WORD_BANK both
+  -- collapse to very different `action` values ('clarify' vs 'suggest'),
+  -- and SURGEON/ARCHITECT collapse to the SAME `action` ('suggest') as
+  -- each other and as WORD_BANK, so `action` alone can't drive rendering.
+  mode                 text check (mode in ('SURGEON', 'ARCHITECT', 'SOCRATIC', 'WORD_BANK')),
   content              text not null,
   -- Only populated on action='suggest' rows — the actual candidate
   -- lines/words, kept structured (not flattened into content) so each one
@@ -519,8 +538,7 @@ create table muse_entries (
   created_at           timestamptz not null default now()
 );
 
-create index idx_muse_entries_song_register on muse_entries(song_id, register);
-create index idx_muse_entries_line on muse_entries(line_id, created_at);
+create index idx_muse_entries_section on muse_entries(section_id, created_at);
 
 alter table muse_entries enable row level security;
 
@@ -532,19 +550,31 @@ create policy muse_entries_owner on muse_entries
     exists (select 1 from songs s where s.id = muse_entries.song_id and s.user_id = auth.uid())
   );
 
--- Live profile — the only thing ever interpolated into the muse's system
--- prompt. One row per (song, register); summary is short and gets
--- OVERWRITTEN on each refresh, never appended to, so a prompt's cost never
--- grows no matter how many months of answers accumulate behind it.
+-- Live LOCAL profile — what this one BLOCK is about, not the whole song
+-- (different blocks can be about completely different things). One row
+-- per section; summary is short and gets OVERWRITTEN on each refresh,
+-- never appended to, so a prompt's cost never grows no matter how many
+-- months of answers accumulate behind it.
+--
+-- Deliberately no GLOBAL/song-level counterpart: the muse already gets the
+-- full raw song text every turn via describeSongStructure in
+-- buildDynamicMuseContext (museApi.js) — real, uncompressed, always
+-- current. An extra AI-summarized "song_summary" on top of that was pure
+-- redundancy (an LLM's cached, lossy interpretation of text the model
+-- already reads in full every call) and got removed. "Vibe" — is the
+-- artist literal or metaphorical/abstract, what's the atmosphere — is left
+-- entirely to lyric_dna (the Baúl) and the muse's own live reading of the
+-- raw text, not a separate stored field.
 create table if not exists muse_profile (
+  section_id          uuid primary key references sections(id) on delete cascade,
   song_id             uuid not null references songs(id) on delete cascade,
-  register            text not null check (register in ('amor', 'amistad', 'familia', 'lugar', 'otro')),
   summary             text not null default '',
   interaction_count   int not null default 0,
   last_summarized_at  timestamptz,
-  updated_at          timestamptz not null default now(),
-  primary key (song_id, register)
+  updated_at          timestamptz not null default now()
 );
+
+create index idx_muse_profile_song on muse_profile(song_id);
 
 drop trigger if exists trg_muse_profile_updated_at on muse_profile;
 create trigger trg_muse_profile_updated_at
@@ -561,13 +591,13 @@ create policy muse_profile_owner on muse_profile
     exists (select 1 from songs s where s.id = muse_profile.song_id and s.user_id = auth.uid())
   );
 
--- Atomic increment-and-return, so two near-simultaneous answers in the same
--- register can never race each other into an inconsistent count the way a
+-- Atomic increment-and-return, so two near-simultaneous answers on the same
+-- block can never race each other into an inconsistent count the way a
 -- client-side read-then-write would. security definer + an explicit
 -- ownership check (RLS doesn't apply inside a definer function on its own)
 -- + a pinned search_path (blocks search_path-hijacking of unqualified
 -- names) is the standard safe shape for this kind of function.
-create or replace function muse_increment_interaction(p_song_id uuid, p_register text)
+create or replace function muse_increment_interaction(p_section_id uuid, p_song_id uuid)
 returns int
 language plpgsql
 security definer
@@ -580,9 +610,9 @@ begin
     raise exception 'not authorized';
   end if;
 
-  insert into muse_profile (song_id, register, interaction_count)
-  values (p_song_id, p_register, 1)
-  on conflict (song_id, register)
+  insert into muse_profile (section_id, song_id, interaction_count)
+  values (p_section_id, p_song_id, 1)
+  on conflict (section_id)
   do update set interaction_count = muse_profile.interaction_count + 1
   returning interaction_count into v_count;
 
@@ -632,3 +662,178 @@ create policy baul_nodes_owner on baul_nodes
 -- documents), one evolving object, no register split. Never appended to —
 -- each processBaulInput call returns the full fused replacement.
 alter table songs add column if not exists lyric_dna jsonb not null default '{}'::jsonb;
+
+-- Append-only log of individual baúl absorptions — deliberately separate
+-- from lyric_dna above (which stays a single fused, never-appended-to
+-- blob). This table exists ONLY to power the dev-only Muse Eye panel's
+-- "baúl pipeline" tab (raw input -> what Claude extracted from THAT
+-- specific input -> tags), i.e. per-entry provenance. Nothing in the real
+-- product reads this — the "black box" decision (BaulFloatNode never shows
+-- WHAT was absorbed, only THAT it was) stands for every real user-facing
+-- surface; this table is the one deliberate, dev-only exception to it.
+create table if not exists baul_entries (
+  id                 uuid primary key default gen_random_uuid(),
+  song_id            uuid not null references songs(id) on delete cascade,
+  input_type         text not null check (input_type in ('text', 'audio_transcript', 'notebook_image', 'document')),
+  raw_preview        text not null default '',
+  generated_summary  text not null default '',
+  tags               text[] not null default '{}',
+  -- Real per-call telemetry, same spirit as askMuse's _debug.latencyMs —
+  -- the extraction system prompt itself is a fixed constant (see
+  -- baulProcessor.js's BAUL_SYSTEM_PROMPT), so it's shown once in the UI
+  -- rather than duplicated per row; latency is the one thing that's
+  -- actually per-call and worth persisting.
+  latency_ms         integer,
+  created_at         timestamptz not null default now()
+);
+
+create index if not exists idx_baul_entries_song on baul_entries(song_id, created_at desc);
+
+alter table baul_entries enable row level security;
+
+drop policy if exists baul_entries_owner on baul_entries;
+create policy baul_entries_owner on baul_entries
+  for all using (
+    exists (select 1 from songs s where s.id = baul_entries.song_id and s.user_id = auth.uid())
+  ) with check (
+    exists (select 1 from songs s where s.id = baul_entries.song_id and s.user_id = auth.uid())
+  );
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- line_audio — voice memos anchored to a specific physical verse line
+-- (hummed melodies, rhythmic phrasing, vocal hooks recorded via the mobile
+-- long-press gesture, see src/mobile/AudioRecorderSheet.jsx).
+--
+-- NOTE the anchor is (section_id, line_index), not a `lines` row — unlike
+-- what the table name might suggest, `lines` holds exactly ONE row per
+-- section (see canvasData.js: `insert({ section_id, position: 0, text })`,
+-- always position 0), the whole block's text as one string with embedded
+-- \n's; individual physical lines only exist as a client-side split
+-- (NoteEditorScreen's `splitIntoLines`), so there's no stable per-line row
+-- to reference. line_index is the line's position in that split at record
+-- time — the exact same "position drifts if lines are inserted/deleted
+-- above it" tradeoff `annotations.start_offset/end_offset` already accepts
+-- for the same underlying reason, not a new gap this table introduces.
+--
+-- The blob itself lives in Storage (bucket below); this row is just the
+-- pointer + metadata.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+create table if not exists line_audio (
+  id                uuid primary key default gen_random_uuid(),
+  section_id        uuid not null references sections(id) on delete cascade,
+  song_id           uuid not null references songs(id) on delete cascade,
+  line_index        integer not null,
+  storage_path      text not null,
+  duration_seconds  numeric,
+  created_by        uuid references auth.users(id),
+  created_at        timestamptz not null default now()
+);
+
+create index if not exists idx_line_audio_section on line_audio(section_id, line_index);
+
+alter table line_audio enable row level security;
+
+drop policy if exists line_audio_owner on line_audio;
+create policy line_audio_owner on line_audio
+  for all using (
+    exists (select 1 from sections sec join songs s on s.id = sec.song_id where sec.id = line_audio.section_id and s.user_id = auth.uid())
+  ) with check (
+    exists (select 1 from sections sec join songs s on s.id = sec.song_id where sec.id = line_audio.section_id and s.user_id = auth.uid())
+  );
+
+-- Storage bucket for the actual audio bytes — not publicly readable, access
+-- goes entirely through the RLS policies below (path convention:
+-- {song_id}/{section_id}/{filename}, matching line_audio.storage_path).
+insert into storage.buckets (id, name, public)
+values ('voice-memos', 'voice-memos', false)
+on conflict (id) do nothing;
+
+drop policy if exists voice_memos_owner_select on storage.objects;
+create policy voice_memos_owner_select on storage.objects
+  for select using (
+    bucket_id = 'voice-memos'
+    and exists (
+      select 1 from songs s
+      where s.id::text = (storage.foldername(name))[1] and s.user_id = auth.uid()
+    )
+  );
+
+drop policy if exists voice_memos_owner_insert on storage.objects;
+create policy voice_memos_owner_insert on storage.objects
+  for insert with check (
+    bucket_id = 'voice-memos'
+    and exists (
+      select 1 from songs s
+      where s.id::text = (storage.foldername(name))[1] and s.user_id = auth.uid()
+    )
+  );
+
+drop policy if exists voice_memos_owner_delete on storage.objects;
+create policy voice_memos_owner_delete on storage.objects
+  for delete using (
+    bucket_id = 'voice-memos'
+    and exists (
+      select 1 from songs s
+      where s.id::text = (storage.foldername(name))[1] and s.user_id = auth.uid()
+    )
+  );
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- lexicon — the Cultural Resonance Engine's deterministic rhyme source. NOT
+-- user data: one global, shared reference table (no song_id/user_id — every
+-- row here is real-world Spanish vocabulary, not anything a user wrote), so
+-- its RLS shape is deliberately the opposite of every other table in this
+-- schema: public READ (any signed-in client can query rhyme candidates),
+-- but NO public write policy at all — inserts only ever happen via
+-- scripts/seed-lexicon-kaikki.ts using the Supabase service-role key (which
+-- bypasses RLS entirely), never through the app's anon key. That's the
+-- whole reason RLS is even worth enabling here: it's a write-lock, not an
+-- ownership boundary.
+--
+-- rhyme_key is the word's stressed-vowel-onward tail (see rhyme.js's
+-- getWordRhymeKey — consonant key), computed with the SAME algorithm the
+-- live app uses to check rhymes, so a lexicon match is guaranteed to also
+-- pass the app's own wordMatchesRhyme check, not just approximately agree
+-- with it. rhyme_key_assonant is the same word's assonant key (vowels
+-- only, from the stressed syllable onward) — WORD_BANK needs both, real
+-- rhyme dictionaries distinguish "rima consonante" from "rima asonante"
+-- and this table originally only stored the former. charisma_score (1-10)
+-- is a heuristic "how evocative/poetic does this word read" proxy derived
+-- from word shape + corpus frequency at seed time (see the seed script's
+-- own comment) — NOT a linguistically validated rating; short, ultra-
+-- common function words score low, longer rarer content words score
+-- higher. Good enough to bias SELECTs toward more interesting candidates,
+-- not a claim of poetic authority — and NOT the right sort key on its own
+-- for a "show me everything, common and cool first" word bank (see
+-- src/utils/lexicon.js's queryWordBank for the actual blended sort).
+-- ─────────────────────────────────────────────────────────────────────────────
+
+create table if not exists lexicon (
+  id                  bigint generated always as identity primary key,
+  word                text not null,
+  lang_code           varchar(5) not null default 'es',
+  syllables           int not null,
+  stress_type         text check (stress_type in ('aguda', 'llana', 'esdrujula')),
+  rhyme_key           varchar(20) not null,
+  rhyme_key_assonant  varchar(20),
+  charisma_score      int not null default 5 check (charisma_score between 1 and 10),
+  freq_rank           int,
+  tags                text[] not null default '{}',
+  created_at          timestamptz not null default now(),
+  unique (word, lang_code)
+);
+
+-- Two lookup shapes: the Cultural Resonance Engine's single "give me
+-- high-charisma words matching this rhyme_key" query (ARCHITECT), and
+-- WORD_BANK's "give me everything matching this rhyme, either type" —
+-- both need an indexed path instead of a sequential scan over however many
+-- hundreds of thousands of rows the seed script imports.
+create index if not exists idx_lexicon_rhyme on lexicon(lang_code, rhyme_key, charisma_score desc);
+create index if not exists idx_lexicon_rhyme_assonant on lexicon(lang_code, rhyme_key_assonant, charisma_score desc);
+
+alter table lexicon enable row level security;
+
+drop policy if exists lexicon_public_read on lexicon;
+create policy lexicon_public_read on lexicon
+  for select using (true);

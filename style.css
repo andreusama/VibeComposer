@@ -997,6 +997,20 @@ body::before {
 
 .project-card-open:hover { color: var(--chord); }
 
+.project-card-actions { display: flex; align-items: center; gap: var(--space-2); }
+
+.project-card-delete {
+    background: none;
+    border: none;
+    font-size: var(--fs-secondary);
+    color: var(--faint);
+    cursor: pointer;
+    padding: var(--space-1);
+    transition: color 0.12s ease;
+}
+
+.project-card-delete:hover { color: var(--rose); }
+
 /* ─── Canvas screen ───────────────────────────────────────────────────────────── */
 /* Everything below was formerly src/canvas/canvas.css, merged in so the whole
    project runs off one stylesheet. Tokens/reset already declared above are
@@ -3256,6 +3270,66 @@ body::before {
 .muse-chip:hover { border-color: var(--chord); }
 .muse-chip:disabled { cursor: default; opacity: 0.6; }
 
+/* Creativity proposal #4 — cultural provocation. Amber (the muse's own
+   accent), not the chord indigo .muse-chip uses for the model's own
+   dynamic SOCRATIC chips — this is a separate, always-available affordance,
+   not one more option among those. */
+.muse-provocation-block { margin-top: var(--space-1-5); }
+.muse-chip-cultural {
+    border-color: var(--amber);
+    background: var(--chord-soft);
+    color: var(--amber);
+    margin-bottom: var(--space-1-5);
+}
+.muse-chip-cultural:hover { border-color: var(--amber); }
+.muse-provocation-loading, .muse-provocation-empty {
+    font-family: var(--font-body);
+    font-style: italic;
+    font-size: calc(var(--fs-secondary) * var(--canvas-scale));
+    color: var(--muted);
+}
+.muse-provocation {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    padding: var(--space-2-5) var(--space-3);
+    background: var(--paper);
+    border-left: 2px solid var(--amber);
+    border-radius: var(--r-sm);
+}
+.muse-provocation-frame {
+    font-family: var(--font-serif);
+    font-size: calc(var(--fs-secondary) * var(--canvas-scale));
+    color: var(--ink);
+}
+.muse-provocation-hint {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--amber);
+}
+
+/* Confirm-before-firing step (creativity proposal #4) — shared shape for
+   "is this the concept?" and the plain-input fallback when there's nothing
+   to guess from. */
+.muse-provocation-ask, .muse-concept-ask {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1-5);
+    margin-top: var(--space-1-5);
+}
+.muse-concept-input {
+    font-family: var(--font-sans);
+    font-size: calc(var(--fs-secondary) * var(--canvas-scale));
+    border: 1px solid var(--chord-line);
+    border-radius: var(--r-sm);
+    background: var(--paper);
+    padding: var(--space-1-5) var(--space-2-5);
+    color: var(--ink);
+}
+.muse-concept-input:focus { outline: none; border-color: var(--amber); }
+
 /* WORD_BANK — a dense grid of loose words, not a list of crafted lines, so
    it reads visually distinct from .muse-options (which promises a finished
    line each). Grouped by syllable count, same mono micro-label as the
@@ -3265,6 +3339,12 @@ body::before {
     flex-direction: column;
     gap: var(--space-2);
     margin-top: var(--space-1-5);
+}
+.muse-word-bank-note {
+    font-family: var(--font-body);
+    font-style: italic;
+    font-size: var(--fs-secondary);
+    color: var(--muted);
 }
 .muse-word-group-label {
     display: block;
@@ -3784,112 +3864,292 @@ body::before {
     color: var(--thread);
 }
 
-/* ─── Muse debug panel — dev-only observability (see the 🔧 toggle in
-   MuseFloatNode.jsx). Deliberately plain/utilitarian, not styled to blend
-   in with the rest of the card, so it always reads as "developer tooling,"
-   never as part of the actual product surface. ──────────────────────────── */
+/* ─── Muse Eye panel — dev-only observability (src/canvas/MuseEyePanel.jsx,
+   the 🔧 toggle in MuseFloatNode.jsx). Complete rewrite, replacing the old
+   .muse-debug-* panel — "instrument of control" (Bloomberg Terminal /
+   mission-control) rather than a bright game-HUD bar. Own near-black scale
+   scoped under .muse-eye-panel only, reusing --chord/--thread/--amber for
+   the 3 real weight categories + the 4 mode colors (SURGEON gets one new
+   scoped warn/orange, distinct from --rose which stays reserved for actual
+   errors elsewhere in the app). Deliberately never blends into the node
+   card around it — always reads as instrumentation, not product. ───────── */
 
-.muse-debug-panel {
+.muse-eye-panel {
+    --eye-bg: #0a0a0b;
+    --eye-panel-2: #17171a;
+    --eye-line: #232326;
+    --eye-line-soft: #1b1b1e;
+    --eye-text: #d4d4d8;
+    --eye-text-dim: #86868f;
+    --eye-text-faint: #4b4b52;
+    --eye-warn: #c2673f;
+    --eye-ok: #4d9a72;
     margin-top: var(--space-3);
-    padding: var(--space-2-5);
-    background: var(--paper-deep);
-    border: 1px dashed var(--graphite-soft);
+    background: var(--eye-bg);
+    border: 1px solid var(--eye-line);
     border-radius: var(--r-md);
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-}
-
-.muse-debug-bar {
-    display: flex;
-    width: 100%;
-    height: 8px;
-    border-radius: 999px;
     overflow: hidden;
-    background: var(--hairline);
-}
-.muse-debug-bar-segment { height: 100%; }
-
-.muse-debug-legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-2) var(--space-3);
-}
-.muse-debug-legend-item {
-    display: flex;
-    align-items: center;
-    gap: var(--space-1);
-    font-family: var(--font-mono);
-    font-size: 10px;
-    color: var(--graphite);
-}
-.muse-debug-legend-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    flex-shrink: 0;
-}
-
-.muse-debug-metrics {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-1-5);
-}
-.muse-debug-metric {
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-    padding: var(--space-1) var(--space-1-5);
-    background: #fff;
-    border: 1px solid var(--hairline);
-    border-radius: var(--r-sm);
-    min-width: 64px;
-}
-.muse-debug-metric-label {
-    font-family: var(--font-mono);
-    font-size: 8.5px;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    color: var(--graphite-soft);
-}
-.muse-debug-metric-value {
-    font-family: var(--font-mono);
     font-size: 11px;
-    color: var(--ink);
+    color: var(--eye-text);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
 }
+.muse-eye-panel * { box-sizing: border-box; }
 
-.muse-debug-tabs {
-    display: flex;
-    gap: var(--space-1);
-    border-bottom: 1px solid var(--hairline);
-}
-.muse-debug-tab {
-    font-family: var(--font-mono);
-    font-size: 10px;
-    color: var(--graphite-soft);
-    background: none;
-    border: none;
-    border-bottom: 2px solid transparent;
-    padding: var(--space-1) var(--space-1-5);
-    cursor: pointer;
-}
-.muse-debug-tab:hover { color: var(--ink); }
-.muse-debug-tab.active { color: var(--ink); border-bottom-color: var(--amber); }
+/* Two families, never mixed on the same element: eye-badge-* sets `color`
+   (used where the element has visible text/an icon glyph — the mode badge,
+   the pipeline type icon), eye-fill-* sets `background` (bare swatches —
+   bar segments, legend/readout dots, no text content). */
+.eye-badge-chord { color: var(--chord); }
+.eye-badge-thread { color: var(--thread); }
+.eye-badge-amber { color: var(--amber); }
+.eye-badge-warn { color: var(--eye-warn); }
+.eye-status-row { display: flex; flex-wrap: wrap; gap: 6px; padding-bottom: 6px; }
+.eye-badge { font-family: var(--font-mono); font-size: 9.5px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--eye-line); color: var(--eye-text-dim); background: var(--eye-panel-2); }
+.eye-badge-graphite { color: var(--eye-text-dim); }
+.eye-fill-chord { background: var(--chord); }
+.eye-fill-thread { background: var(--thread); }
+.eye-fill-amber { background: var(--amber); }
+.eye-fill-warn { background: var(--eye-warn); }
+.eye-fill-graphite { background: var(--eye-text-dim); }
 
-.muse-debug-code {
-    max-height: 220px;
-    overflow: auto;
-    margin: 0;
-    padding: var(--space-2);
-    background: var(--ink);
-    color: #E8E4D8;
-    border-radius: var(--r-sm);
-    font-family: var(--font-mono);
-    font-size: 10.5px;
-    line-height: 1.5;
-    white-space: pre-wrap;
-    word-break: break-word;
+.eye-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 9px 12px; border-bottom: 1px solid var(--eye-line);
+    background: linear-gradient(180deg, #131316, #0e0e10);
 }
+.eye-head-left { display: flex; align-items: center; gap: 7px; }
+.eye-dot-wrap {
+    width: 14px; height: 14px; border-radius: 50%;
+    border: 1.5px solid var(--eye-text-dim);
+    display: flex; align-items: center; justify-content: center;
+}
+.eye-dot-pulse { width: 4px; height: 4px; border-radius: 50%; background: var(--eye-ok); animation: eye-pulse 2.4s ease-in-out infinite; }
+@keyframes eye-pulse { 0%, 100% { opacity: 0.5; transform: scale(1); } 50% { opacity: 1; transform: scale(1.3); } }
+.eye-title { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--eye-text); }
+.eye-head-right { display: flex; align-items: center; gap: 10px; font-family: var(--font-mono); font-size: 10px; color: var(--eye-text-faint); }
+.eye-head-right b { color: var(--eye-text-dim); font-weight: 600; }
+
+.eye-readout { padding: 12px; border-bottom: 1px solid var(--eye-line-soft); }
+.eye-readout-bar { display: flex; height: 2px; border-radius: 1px; overflow: hidden; background: var(--eye-line); margin-bottom: 10px; }
+.eye-readout-seg { height: 100%; }
+.eye-readout-rows { display: flex; flex-direction: column; gap: 5px; }
+.eye-readout-row { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+.eye-readout-dot { width: 5px; height: 5px; border-radius: 1px; flex-shrink: 0; }
+.eye-readout-label { color: var(--eye-text-dim); flex: 1; }
+.eye-readout-val { font-family: var(--font-mono); font-size: 10.5px; color: var(--eye-text-faint); }
+.eye-readout-val b { color: var(--eye-text); font-weight: 500; }
+
+.eye-metrics { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid var(--eye-line-soft); }
+.eye-metric { padding: 9px 10px; border-right: 1px solid var(--eye-line-soft); min-width: 0; }
+.eye-metric:last-child { border-right: none; }
+.eye-metric-label { font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--eye-text-faint); margin-bottom: 3px; }
+.eye-metric-value { font-family: var(--font-mono); font-size: 12px; color: var(--eye-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.eye-status-ok { color: var(--eye-ok); }
+.eye-status-warn { color: var(--eye-warn); }
+
+.eye-tabs { display: flex; border-bottom: 1px solid var(--eye-line); }
+.eye-tab {
+    flex: 1; text-align: center; padding: 8px 4px; font-family: var(--font-mono); font-size: 9.5px;
+    letter-spacing: 0.04em; text-transform: uppercase; color: var(--eye-text-faint); cursor: pointer;
+    background: none; border: none; border-bottom: 1.5px solid transparent;
+}
+.eye-tab.active { color: var(--eye-text); border-bottom-color: var(--chord); }
+.eye-tab-count { font-size: 8.5px; color: var(--eye-text-faint); margin-left: 3px; }
+
+.eye-code {
+    font-family: var(--font-mono); font-size: 10.8px; line-height: 1.65; color: var(--eye-text-dim);
+    padding: 12px; margin: 0; white-space: pre-wrap; max-height: 220px; overflow-y: auto;
+}
+.eye-code-k { color: #7c93d8; }
+.eye-code-s { color: var(--amber); }
+
+.eye-musa-active-row { display: flex; align-items: center; gap: 9px; padding: 12px; border-bottom: 1px solid var(--eye-line-soft); flex-wrap: wrap; }
+.eye-active-badge {
+    display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;
+    letter-spacing: 0.04em; text-transform: uppercase; padding: 4px 10px; border-radius: 4px; border: 1px solid currentColor; background: color-mix(in srgb, currentColor 10%, transparent);
+}
+.eye-musa-active-desc { font-size: 10.5px; color: var(--eye-text-faint); }
+
+.eye-mode-legend { display: flex; flex-direction: column; border-bottom: 1px solid var(--eye-line-soft); }
+.eye-legend-row { display: flex; align-items: center; gap: 9px; padding: 7px 12px; border-top: 1px solid var(--eye-line-soft); }
+.eye-legend-row:first-child { border-top: none; }
+.eye-legend-row.current { background: var(--eye-panel-2); }
+.eye-legend-dot { width: 7px; height: 7px; border-radius: 2px; flex-shrink: 0; }
+.eye-legend-name { font-family: var(--font-mono); font-size: 10.5px; color: var(--eye-text); width: 64px; flex-shrink: 0; }
+.eye-legend-desc { font-size: 10.5px; color: var(--eye-text-faint); flex: 1; }
+.eye-legend-tag { font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--eye-text); background: var(--eye-line); padding: 2px 5px; border-radius: 3px; }
+
+.eye-ctx { padding: 12px; border-bottom: 1px solid var(--eye-line-soft); }
+.eye-ctx-label { font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--eye-text-faint); margin: 10px 0 7px; }
+.eye-ctx-label:first-child { margin-top: 0; }
+.eye-ctx-label-n { color: var(--amber); }
+.eye-ctx-line { display: flex; align-items: baseline; gap: 8px; padding: 3px 0; font-size: 11px; }
+.eye-ctx-line .eye-ctx-tag { font-family: var(--font-mono); font-size: 9px; color: var(--eye-text-faint); width: 26px; flex-shrink: 0; }
+.eye-ctx-line.n .eye-ctx-tag { color: var(--amber); }
+.eye-ctx-line .eye-ctx-txt { color: var(--eye-text-dim); flex: 1; }
+.eye-ctx-line.n .eye-ctx-txt { color: var(--eye-text); font-weight: 500; }
+.eye-ctx-line .eye-ctx-meta { font-family: var(--font-mono); font-size: 9.5px; color: var(--eye-text-faint); flex-shrink: 0; }
+
+.eye-output { padding: 0 12px 12px; }
+.eye-output-label { font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--eye-text-faint); margin: 10px 0 7px; }
+.eye-suggestion { display: flex; align-items: flex-start; gap: 8px; padding: 6px 0; font-size: 11px; color: var(--eye-text-dim); border-top: 1px solid var(--eye-line-soft); }
+.eye-suggestion:first-child { border-top: none; }
+.eye-suggestion .eye-idx { font-family: var(--font-mono); color: var(--eye-text-faint); flex-shrink: 0; }
+
+.eye-funnel { padding: 10px 12px; border-top: 1px solid var(--eye-line-soft); }
+.eye-funnel-title { font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--eye-text-faint); margin-bottom: 6px; }
+.eye-funnel-row { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 10.5px; color: var(--eye-text-dim); padding: 2px 0; }
+.eye-funnel-count { color: var(--amber); font-weight: 600; }
+
+.eye-empty, .eye-empty-sm { color: var(--eye-text-faint); font-size: 10.5px; }
+.eye-pipe-empty { padding: 12px; }
+
+.eye-pipeline { max-height: 260px; overflow-y: auto; }
+.eye-pipe-refresh-row { display: flex; justify-content: flex-end; padding: 6px 12px 0; }
+.eye-pipe-refresh { font-family: var(--font-mono); font-size: 9.5px; color: var(--eye-text-faint); background: none; border: 1px solid var(--eye-line); border-radius: 3px; padding: 2px 7px; cursor: pointer; }
+.eye-pipe-refresh:hover { color: var(--eye-text); border-color: var(--eye-text-faint); }
+.eye-pipe-row { border-bottom: 1px solid var(--eye-line-soft); }
+.eye-pipe-head { width: 100%; display: flex; align-items: center; gap: 8px; padding: 9px 12px; cursor: pointer; background: none; border: none; text-align: left; color: inherit; }
+.eye-pipe-head:hover { background: var(--eye-panel-2); }
+.eye-pipe-type { width: 18px; height: 18px; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 9px; flex-shrink: 0; background: color-mix(in srgb, currentColor 12%, transparent); }
+.eye-pipe-preview { flex: 1; font-size: 11px; color: var(--eye-text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.eye-pipe-chev { color: var(--eye-text-faint); font-size: 9px; transition: transform 0.15s ease; }
+.eye-pipe-row.open .eye-pipe-chev { transform: rotate(90deg); }
+.eye-pipe-body { padding: 0 12px 12px; }
+.eye-pipe-stage { display: flex; gap: 8px; padding: 7px 0; border-top: 1px solid var(--eye-line-soft); }
+.eye-pipe-stage:first-child { border-top: none; }
+.eye-pipe-stage-label { font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--eye-text-faint); width: 52px; flex-shrink: 0; padding-top: 1px; }
+.eye-pipe-stage-content { flex: 1; font-size: 11px; color: var(--eye-text-dim); line-height: 1.5; }
+.eye-pipe-stage-content.raw { font-family: var(--font-mono); font-size: 10.5px; }
+.eye-pipe-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 2px; }
+.eye-pipe-tag { font-family: var(--font-mono); font-size: 9.5px; padding: 2px 7px; border-radius: 3px; background: var(--eye-panel-2); border: 1px solid var(--eye-line); color: var(--eye-text-dim); }
+
+.eye-foot { padding: 7px 12px; font-family: var(--font-mono); font-size: 9px; color: var(--eye-text-faint); display: flex; justify-content: space-between; gap: 8px; }
+.eye-foot span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.eye-comment { padding: 10px 12px; border-top: 1px solid var(--eye-line-soft); display: flex; flex-direction: column; gap: 6px; }
+.eye-comment-nested { padding: 8px 0 0; margin-top: 4px; }
+.eye-comment-label { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--eye-text-faint); }
+.eye-comment-saved { color: var(--eye-ok); text-transform: none; letter-spacing: normal; font-size: 9.5px; }
+.eye-comment-input {
+    width: 100%; background: var(--eye-bg); border: 1px solid var(--eye-line); border-radius: var(--r-sm);
+    padding: 7px 9px; font-family: var(--font-sans); font-size: 11px; color: var(--eye-text); resize: vertical;
+}
+.eye-comment-input:focus { outline: none; border-color: var(--amber); }
+.eye-comment-actions { display: flex; gap: 6px; }
+.eye-comment-save {
+    font-family: var(--font-mono); font-size: 10px; color: var(--eye-bg); background: var(--amber);
+    border: none; border-radius: var(--r-sm); padding: 4px 10px; cursor: pointer; font-weight: 600;
+}
+.eye-comment-save:disabled { opacity: 0.35; cursor: default; }
+.eye-comment-delete {
+    font-family: var(--font-mono); font-size: 10px; color: var(--eye-text-faint); background: none;
+    border: 1px solid var(--eye-line); border-radius: var(--r-sm); padding: 4px 10px; cursor: pointer;
+}
+.eye-comment-delete:hover { color: var(--eye-warn); border-color: var(--eye-warn); }
+
+/* MuseEyePanel rendered standalone (MuseEyeScreen, not inside a canvas
+   node) — same card, just not floating inside a draggable node anymore. */
+.muse-eye-panel-standalone { margin-top: 0; max-width: 700px; }
+
+/* ─── Muse Eye screen — full-page real-data history viewer
+   (src/canvas/MuseEyeScreen.jsx), reached from the projects screen's 👁
+   button. Same --eye-* design language as the inline panel above (that's
+   the whole point — one consistent instrument look, not a second one). ── */
+
+.muse-eye-screen {
+    --eye-bg: #0a0a0b;
+    --eye-panel-2: #17171a;
+    --eye-line: #232326;
+    --eye-line-soft: #1b1b1e;
+    --eye-text: #d4d4d8;
+    --eye-text-dim: #86868f;
+    --eye-text-faint: #4b4b52;
+    --eye-warn: #c2673f;
+    --eye-ok: #4d9a72;
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    background: var(--eye-bg);
+    color: var(--eye-text);
+    font-family: var(--font-sans);
+    overflow-y: auto;
+}
+.muse-eye-screen * { box-sizing: border-box; }
+
+.eyescr-topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: var(--space-3); padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--eye-line);
+    background: linear-gradient(180deg, #131316, #0e0e10);
+    position: sticky; top: 0; z-index: 1;
+}
+.eyescr-brand { display: flex; align-items: center; gap: var(--space-3); }
+.eyescr-brand h1 { font-size: var(--fs-utility); font-weight: 600; margin: 0; color: var(--eye-text); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.08em; }
+.eyescr-brand p { font-size: var(--fs-micro); color: var(--eye-text-faint); margin: 2px 0 0; font-family: var(--font-mono); }
+.eyescr-back {
+    width: 30px; height: 30px; border-radius: 50%;
+    background: none; border: 1px solid var(--eye-line); color: var(--eye-text-dim);
+    font-size: 18px; cursor: pointer; line-height: 1;
+}
+.eyescr-back:hover { color: var(--eye-text); border-color: var(--eye-text-faint); }
+.eyescr-clear {
+    font-family: var(--font-mono); font-size: 10px; color: var(--eye-text-faint);
+    background: none; border: 1px solid var(--eye-line); border-radius: var(--r-sm);
+    padding: 4px 10px; cursor: pointer;
+}
+.eyescr-clear:hover { color: var(--eye-text); border-color: var(--eye-text-faint); }
+
+.eyescr-topbar-actions { display: flex; align-items: center; gap: var(--space-2); }
+.eyescr-new-mock {
+    font-family: var(--font-mono); font-size: 10px; color: var(--amber);
+    background: color-mix(in srgb, var(--amber) 10%, transparent); border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent);
+    border-radius: var(--r-sm); padding: 4px 10px; cursor: pointer;
+}
+.eyescr-new-mock:hover { background: color-mix(in srgb, var(--amber) 18%, transparent); }
+.eyescr-new-mock:disabled { opacity: 0.5; cursor: default; }
+
+.eyescr-empty { padding: var(--space-8); text-align: center; color: var(--eye-text-faint); font-size: var(--fs-secondary); }
+.eyescr-empty-hint { font-size: var(--fs-micro); max-width: 440px; margin: var(--space-2) auto 0; line-height: 1.6; }
+
+.eyescr-body { display: grid; grid-template-columns: 280px 1fr; gap: var(--space-3); padding: var(--space-3) var(--space-4); align-items: start; }
+@media (max-width: 800px) { .eyescr-body { grid-template-columns: 1fr; } }
+
+.eyescr-list { display: flex; flex-direction: column; gap: 4px; max-height: calc(100vh - 100px); overflow-y: auto; }
+.eyescr-list-item {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+    background: var(--eye-panel-2); border: 1px solid var(--eye-line); border-radius: var(--r-sm);
+    padding: var(--space-2); cursor: pointer; text-align: left; color: var(--eye-text-dim);
+}
+.eyescr-list-item.active { border-color: var(--amber); background: color-mix(in srgb, var(--amber) 8%, var(--eye-panel-2)); }
+.eyescr-list-mode { font-family: var(--font-mono); font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--amber); }
+.eyescr-list-song { font-size: 11px; color: var(--eye-text); }
+.eyescr-list-time { font-family: var(--font-mono); font-size: 9.5px; color: var(--eye-text-faint); }
+
+.eyescr-detail { min-width: 0; }
+
+.eyescr-view-tabs { display: flex; gap: var(--space-1); padding: 0 var(--space-4); border-bottom: 1px solid var(--eye-line); }
+.eyescr-view-tab {
+    font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--eye-text-faint); background: none; border: none; border-bottom: 2px solid transparent;
+    padding: var(--space-2) var(--space-1); cursor: pointer;
+}
+.eyescr-view-tab.active { color: var(--eye-text); border-bottom-color: var(--amber); }
+.eyescr-view-tab-count { color: var(--eye-text-faint); }
+.eyescr-view-body { padding: var(--space-3) var(--space-4); }
+
+.eyescr-complaints-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-3); }
+.eyescr-complaints-count { font-family: var(--font-mono); font-size: 11px; color: var(--eye-text-faint); }
+.eyescr-complaints-list { display: flex; flex-direction: column; gap: var(--space-2); max-width: 720px; }
+.eyescr-complaint-card { background: var(--eye-panel-2); border: 1px solid var(--eye-line); border-radius: var(--r-md); padding: var(--space-3); }
+.eyescr-complaint-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.eyescr-complaint-mode { font-family: var(--font-mono); font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--amber); }
+.eyescr-complaint-where { font-size: 11px; color: var(--eye-text-dim); }
+.eyescr-complaint-time { font-family: var(--font-mono); font-size: 9.5px; color: var(--eye-text-faint); margin-left: auto; }
+.eyescr-complaint-delete { background: none; border: none; color: var(--eye-text-faint); cursor: pointer; font-size: 12px; padding: 0; }
+.eyescr-complaint-delete:hover { color: var(--eye-warn); }
+.eyescr-complaint-excerpt { font-size: 11px; color: var(--eye-text-faint); font-style: italic; margin: 0 0 6px; }
+.eyescr-complaint-comment { font-size: 12.5px; color: var(--eye-text); line-height: 1.5; margin: 0; white-space: pre-wrap; }
 
 /* ─── Debug console — global overlay, opened with ` (backtick), the "open a
    dev console" muscle memory games and dev tools have already trained
@@ -3941,6 +4201,20 @@ body::before {
     cursor: pointer;
 }
 .debug-console-clear:hover { color: #fff; border-color: rgba(255, 255, 255, 0.4); }
+
+.debug-console-head-actions { display: flex; align-items: center; gap: var(--space-1-5); }
+
+.debug-console-lab {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--amber);
+    background: none;
+    border: 1px solid rgba(184, 132, 42, 0.4);
+    border-radius: var(--r-sm);
+    padding: 2px 8px;
+    cursor: pointer;
+}
+.debug-console-lab:hover { background: rgba(184, 132, 42, 0.15); }
 
 .debug-console-body {
     flex: 1;
@@ -4036,3 +4310,1896 @@ body::before {
     .note-variant-actions { flex-direction: row; justify-content: flex-end; }
     .note-variant-actions button { flex: 1; min-height: 32px; }
 }
+
+/* ─── Mobile screen shell (shared) ────────────────────────────────────────────
+   Every mobile screen (SongThreadScreen, MobileProjectsScreen, more to come)
+   mounts via <MobileScreen> (src/mobile/MobileScreen.jsx) rather than
+   redeclaring this. `position: fixed; inset: 0` on purpose, not `height:
+   100%` — #app/body have no fixed height of their own (body only sets
+   min-height, for the desktop screens' normal document scroll), so a
+   percentage height here would just grow to fit all the content instead of
+   the real viewport, which is exactly what let the bottom-anchored tab bar/
+   FAB drift down to the bottom of the *content* instead of the *screen*.
+   Fixed-to-viewport is also what makes the child `overflow-y: auto` region
+   actually scroll internally instead of the whole page scrolling. */
+.mobile-screen {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+}
+
+/* The floating "+" — one shared button (src/mobile/MobileFab.jsx) instead of
+   each screen hardcoding its own; what the tap does differs per screen. */
+.mobile-fab {
+    position: absolute;
+    right: calc(var(--space-5) + env(safe-area-inset-right));
+    bottom: calc(var(--space-5) + env(safe-area-inset-bottom));
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--paper);
+    border: none;
+    font-size: var(--fs-h2);
+    line-height: 1;
+    box-shadow: var(--sh-3);
+    cursor: pointer;
+    z-index: 5;
+}
+.mobile-fab:disabled { opacity: 0.6; cursor: default; }
+/* Set via the <MobileFab aboveTabBar> prop on screens that also mount
+   <MobileTabBar> below it, so it clears the bar instead of sitting on it. */
+.mobile-fab-above-tabbar { bottom: calc(80px + env(safe-area-inset-bottom)); }
+
+/* Top-level nav (src/mobile/MobileTabBar.jsx) — mounted only on screens that
+   sit at the root of a tab (Projects), not on drill-down screens. */
+.mobile-tabbar {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    display: flex;
+    border-top: 1px solid var(--hairline);
+    background: rgba(251, 249, 244, 0.92);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    padding: var(--space-2) 0 calc(var(--space-2) + env(safe-area-inset-bottom));
+}
+
+.mobile-tab {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    font-family: var(--font-sans);
+    font-size: var(--fs-eyebrow);
+    color: var(--graphite-soft);
+}
+.mobile-tab-icon { font-size: var(--fs-h2); line-height: 1; }
+.mobile-tab-active { color: var(--ink); }
+
+/* ─── Song thread (mobile) ────────────────────────────────────────────────────
+   ROADMAP.md Phase 1 — replaces the canvas below MOBILE_BREAKPOINT (main.js).
+   First screen actually built against a real device viewport, not just a
+   resized desktop window, so it's also the first to account for
+   env(safe-area-inset-*) — iPhone notch/home-indicator, Android gesture bar. */
+
+.thread-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: calc(var(--space-3) + env(safe-area-inset-top)) var(--space-4) var(--space-3);
+    border-bottom: 1px solid var(--hairline);
+    background: var(--bg);
+    flex-shrink: 0;
+}
+
+.thread-back {
+    font-family: var(--font-sans);
+    font-size: var(--fs-h2);
+    line-height: 1;
+    background: none;
+    border: none;
+    color: var(--ink);
+    cursor: pointer;
+    padding: var(--space-1) var(--space-1-5);
+}
+
+.thread-title-block { flex: 1; min-width: 0; }
+
+.thread-title {
+    font-family: var(--font-serif);
+    font-weight: 600;
+    font-size: var(--fs-h2);
+    color: var(--ink);
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.thread-title-input {
+    display: block;
+    width: 100%;
+    font-family: var(--font-serif);
+    font-weight: 600;
+    font-size: var(--fs-h2);
+    color: var(--ink);
+    border: none;
+    border-bottom: 1px solid var(--thread);
+    background: none;
+    padding: 0;
+}
+.thread-title-input:focus { outline: none; }
+
+.thread-lang-pill {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.thread-lang-btn {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    background: none;
+    border: none;
+    padding: 0;
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    color: var(--muted);
+    cursor: pointer;
+}
+.thread-lang-chevron { font-size: var(--fs-eyebrow); color: var(--muted); }
+
+.thread-menu-btn {
+    flex-shrink: 0;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: var(--bg-deep);
+    border: none;
+    color: var(--ink);
+    font-size: var(--fs-body);
+    line-height: 1;
+    cursor: pointer;
+}
+
+.thread-menu-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 45;
+}
+
+.thread-menu {
+    position: absolute;
+    top: calc(var(--space-3) + env(safe-area-inset-top) + 40px);
+    right: var(--space-4);
+    width: min(260px, calc(100vw - 2 * var(--space-4)));
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    box-shadow: var(--sh-3);
+    overflow: hidden;
+}
+
+.thread-menu-item {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-3);
+    background: none;
+    border: none;
+    border-bottom: 1px solid var(--hairline);
+    text-align: left;
+    font: inherit;
+    cursor: pointer;
+    color: var(--ink);
+}
+.thread-menu-item:last-child { border-bottom: none; }
+.thread-menu-item:disabled { color: var(--graphite-soft); cursor: default; }
+.thread-menu-item:first-child { background: var(--thread-soft); }
+
+.thread-menu-main { flex: 1; min-width: 0; }
+.thread-menu-label { font-family: var(--font-sans); font-weight: 600; font-size: var(--fs-secondary); }
+.thread-menu-sublabel { font-family: var(--font-sans); font-size: var(--fs-eyebrow); color: var(--muted); margin-top: 1px; }
+.thread-menu-icon { margin-left: auto; }
+.thread-menu-danger { color: var(--rose); }
+.thread-menu-danger .thread-menu-label { color: var(--rose); }
+
+.lang-sheet-group { padding-bottom: var(--space-3); }
+.lang-sheet-group-label {
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    padding: var(--space-1) 0;
+}
+.lang-sheet-option {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    background: none;
+    border: none;
+    border-bottom: 1px solid var(--hairline);
+    padding: var(--space-2-5) 0;
+    font-family: var(--font-sans);
+    font-size: var(--fs-body);
+    color: var(--ink);
+    text-align: left;
+    cursor: pointer;
+}
+.lang-sheet-option.active { color: var(--thread); font-weight: 600; }
+.lang-sheet-check { color: var(--thread); }
+
+.thread-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--space-4) var(--space-4) calc(var(--space-8) + env(safe-area-inset-bottom));
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+}
+
+.thread-status {
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    color: var(--muted);
+    text-align: center;
+    padding: var(--space-6) 0;
+}
+.thread-status-error { color: var(--rose); }
+
+.thread-empty {
+    text-align: center;
+    color: var(--muted);
+    font-family: var(--font-sans);
+    padding: var(--space-8) 0;
+}
+
+.thread-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.thread-insert {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: var(--space-2) 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.thread-insert:disabled { cursor: default; }
+
+.thread-insert-dot {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 1px dashed var(--graphite-soft);
+    color: var(--graphite-soft);
+    font-family: var(--font-sans);
+    font-size: var(--fs-label);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.15s, border-color 0.15s;
+}
+.thread-insert:hover .thread-insert-dot,
+.thread-insert:focus-visible .thread-insert-dot {
+    color: var(--thread);
+    border-color: var(--thread);
+}
+
+/* A slot with 2+ variants — horizontal scroll-snap carousel, classic
+   iPhone page dots below (current filled, rest hollow). No index/count
+   text anywhere here on purpose — thread_index is internal, not
+   user-facing (confirmed explicitly, not assumed). */
+.thread-slot { width: 100%; }
+.thread-slot-scroll {
+    display: flex;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    overscroll-behavior-x: contain;
+    /* Hides the native scrollbar without disabling scroll — this is a
+       swipeable card stack, not a document that happens to overflow. */
+    scrollbar-width: none;
+}
+.thread-slot-scroll::-webkit-scrollbar { display: none; }
+.thread-slot-page {
+    flex: 0 0 100%;
+    width: 100%;
+    scroll-snap-align: center;
+}
+.thread-slot-dots {
+    display: flex;
+    justify-content: center;
+    gap: 6px;
+    padding-top: var(--space-2);
+}
+.thread-slot-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--hairline);
+    transition: background-color 0.15s;
+}
+.thread-slot-dot.active { background: var(--ink); }
+
+.thread-card {
+    width: 100%;
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-lg);
+    box-shadow: var(--sh-1);
+    padding: var(--space-4);
+    display: block;
+    text-align: left;
+    font: inherit;
+    cursor: pointer;
+}
+
+.thread-card-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2-5);
+    margin-bottom: var(--space-2-5);
+}
+
+.thread-card-type {
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--thread);
+    background: var(--thread-soft);
+    border-radius: var(--radius-pill);
+    padding: 3px 10px;
+}
+
+.thread-card-chords {
+    font-family: var(--font-mono);
+    font-size: var(--fs-utility);
+    letter-spacing: 0.02em;
+    color: var(--chord);
+}
+
+/* Only ever holds the empty-state placeholder now — real content renders
+   through .thread-card-preview below instead, so nothing here needs
+   clamping. */
+.thread-card-text {
+    font-family: var(--font-body);
+    font-size: var(--fs-body);
+    color: var(--ink);
+    margin: 0 0 var(--space-2-5);
+}
+.thread-card-empty { color: var(--faint); font-style: italic; }
+
+/* Each real verse line is its own block-level .ln (see SongThreadCard) —
+   the fix for the old version fusing two different lines into one run-on
+   sentence, since HTML collapses embedded \n to plain whitespace by
+   default and the old single-<p>-with-line-clamp truncation cut by
+   wrapped-character-width, not by the lyric's actual line breaks.
+   --tc-line-h is a custom property specifically so the 3-line cutoff
+   stays proportional if the font-size ever changes here — max-height is
+   computed from it, not hardcoded, per the design ref's own note about
+   why a bare 78px would need manual recalculation later. */
+.thread-card-preview {
+    --tc-line-h: 23.925px; /* 16.5px * 1.45 */
+    position: relative;
+    font-family: var(--font-body);
+    font-size: 16.5px;
+    line-height: 1.45;
+    color: var(--ink);
+    max-height: calc(3 * var(--tc-line-h));
+    overflow: hidden;
+    margin-bottom: var(--space-1-5);
+}
+.thread-card-preview .ln { display: block; }
+/* The "how much more is there" signal — a fade, not "…", so the card is
+   honest about there being more content without guessing at how much from
+   a truncation mark alone. Only present when a line is actually cut off. */
+.thread-card-preview-fade::after {
+    content: '';
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    height: 18px;
+    background: linear-gradient(to bottom, rgba(255, 255, 255, 0), var(--surface));
+    pointer-events: none;
+}
+.thread-card-more {
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    color: var(--graphite-soft);
+    margin-bottom: var(--space-2-5);
+}
+
+.thread-card-foot {
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    color: var(--muted);
+}
+
+
+/* ─── Mobile Projects screen ──────────────────────────────────────────────────
+   ROADMAP.md design ref #1, screen 01 — replaces home.js's desktop grid below
+   MOBILE_BREAKPOINT (main.js). Own `mp-` prefix for content that's actually
+   specific to this screen; shell/FAB/tab-bar come from the shared
+   .mobile-screen/.mobile-fab/.mobile-tabbar classes above. */
+
+.mp-header {
+    flex-shrink: 0;
+    padding: calc(var(--space-4) + env(safe-area-inset-top)) var(--space-4) var(--space-3);
+    border-bottom: 1px solid var(--hairline);
+    background: var(--bg);
+}
+
+.mp-title {
+    font-family: var(--font-serif);
+    font-weight: 600;
+    font-size: var(--fs-h1);
+    color: var(--ink);
+    margin: 0 0 var(--space-3);
+}
+
+.mp-search {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    background: var(--bg-deep);
+    border-radius: var(--r-md);
+    padding: var(--space-2-5) var(--space-3);
+}
+.mp-search-icon { color: var(--muted); font-size: var(--fs-utility); }
+.mp-search input {
+    flex: 1;
+    border: none;
+    background: none;
+    font-family: var(--font-sans);
+    font-size: var(--fs-body);
+    color: var(--ink);
+}
+.mp-search input:focus { outline: none; }
+
+.mp-body {
+    flex: 1;
+    overflow-y: auto;
+    padding-bottom: calc(96px + env(safe-area-inset-bottom));
+}
+
+.mp-row {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-4);
+    background: none;
+    border: none;
+    border-bottom: 1px solid var(--hairline);
+    cursor: pointer;
+    text-align: left;
+}
+
+.mp-thumb {
+    flex-shrink: 0;
+    width: 44px;
+    height: 44px;
+    border-radius: var(--r-sm);
+    background: var(--thread-soft);
+    overflow: hidden;
+}
+.mp-thumb-svg { width: 100%; height: 100%; }
+.mp-thumb-svg line { stroke: var(--thread); stroke-width: 3; opacity: 0.5; }
+.mp-thumb-svg circle { fill: var(--thread); opacity: 0.7; }
+
+.mp-row-body { flex: 1; min-width: 0; }
+.mp-row-title {
+    font-family: var(--font-serif);
+    font-weight: 600;
+    font-size: var(--fs-body);
+    color: var(--ink);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.mp-row-meta {
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    color: var(--muted);
+    margin-top: 2px;
+}
+
+.mp-row-chevron { color: var(--graphite-soft); font-size: var(--fs-h2); flex-shrink: 0; }
+
+.mp-row-delete {
+    flex-shrink: 0;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    font-size: var(--fs-body);
+    color: var(--faint);
+    cursor: pointer;
+}
+.mp-row-delete:active { color: var(--rose); }
+
+/* ─── Note editor (mobile, full-screen) ───────────────────────────────────────
+   ROADMAP.md Phase 2 — reached by tapping a song-thread card. Write mode
+   only for now; the text-selection toolbar and rhyme popover (design ref
+   #3, states 2-3) aren't built yet. */
+
+.ne-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: calc(var(--space-3) + env(safe-area-inset-top)) var(--space-4) var(--space-3);
+    border-bottom: 1px solid var(--hairline);
+    flex-shrink: 0;
+}
+.ne-back {
+    font-family: var(--font-sans);
+    font-size: var(--fs-h2);
+    line-height: 1;
+    background: none;
+    border: none;
+    color: var(--ink);
+    cursor: pointer;
+    padding: var(--space-1) var(--space-1-5);
+}
+.ne-custom-label {
+    font-family: var(--font-sans);
+    font-size: var(--fs-label);
+    border: none;
+    border-bottom: 1px solid var(--hairline);
+    background: none;
+    flex: 1;
+    min-width: 0;
+}
+.ne-menu {
+    margin-left: auto;
+    background: none;
+    border: none;
+    color: var(--graphite);
+    font-size: var(--fs-label);
+    cursor: pointer;
+    padding: var(--space-1) var(--space-2);
+}
+.ne-done {
+    background: none;
+    border: none;
+    color: var(--chord);
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: var(--fs-body);
+    cursor: pointer;
+}
+
+.ne-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--space-3) var(--space-4) calc(var(--space-8) + env(safe-area-inset-bottom));
+}
+
+.ne-row {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2-5);
+    border-radius: var(--r-md);
+    padding: 2px var(--space-2);
+    margin: 0 calc(var(--space-2) * -1);
+    transition: opacity 0.15s, background-color 0.15s, box-shadow 0.15s;
+}
+/* The gap between rows lives here, not in .ne-line-input's own padding —
+   each line reads as its own paragraph-like block (Apple Notes' rhythm:
+   a blank-line-sized gap between entries, not just generous leading
+   inside one), and using a sibling margin instead of padding means the
+   very last row doesn't carry a dangling gap before the toolbar. */
+.ne-row + .ne-row { margin-top: 22px; }
+.ne-row-dimmed { opacity: 0.25; }
+
+/* Live the instant the wake-word + comma/colon is typed (see
+   MUSE_COMMAND_RE) — the row visually becomes a message-to-the-muse
+   container instead of a lyric line: amber (the muse's color everywhere
+   else in this app), a real border so it reads as its own vessel, not
+   just tinted text. Auto-grows exactly like every other row (same
+   useLayoutEffect resize), so "ampliable" falls out for free. */
+.ne-row-muse {
+    background: var(--amber-soft);
+    box-shadow: inset 0 0 0 1px var(--amber);
+}
+.ne-row-muse .ne-line-input { color: var(--amber); font-style: italic; }
+.ne-row-muse .ne-line-input::placeholder { color: var(--amber); opacity: 0.6; }
+.ne-gutter-muse-icon { color: var(--amber); font-size: var(--fs-label); }
+
+.ne-gutter {
+    flex-shrink: 0;
+    width: 22px;
+    padding-top: calc(var(--space-2) + 2px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+}
+.ne-gutter-count {
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    color: var(--graphite-soft);
+}
+.ne-gutter-letter {
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    font-weight: 600;
+    color: var(--thread);
+}
+.ne-gutter-letter.assonant { color: var(--amber); text-transform: lowercase; }
+
+/* Content-driven Socratic nudge (rhyme.js's detectRhymeFriction) — a small
+   tap target, quiet until noticed, deliberately NOT an animated/attention-
+   grabbing pulse: no idle timer anywhere on this screen, so nothing about
+   this should read as urgent. */
+.ne-gutter-friction {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--thread);
+    opacity: 0.55;
+    font-size: var(--fs-label);
+    cursor: pointer;
+}
+.ne-gutter-friction:active { opacity: 1; }
+
+/* Voice-memo badge (LineAudioBadge) — reuses the gutter's existing narrow
+   column, same visual weight as the muse-icon/friction dot above it. */
+.ne-gutter-audio {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--muted);
+    font-size: 11px;
+    letter-spacing: -0.02em;
+    cursor: pointer;
+}
+
+/* A suggestion card mid vertical-drag is being previewed in place — a
+   dashed outline reads as "not committed yet" without needing extra copy. */
+.ne-row-preview {
+    box-shadow: inset 0 0 0 1px var(--thread);
+    border-radius: var(--r-md);
+}
+.ne-row-preview .ne-line-input { color: var(--thread); }
+
+.ne-line-input {
+    flex: 1;
+    min-width: 0;
+    resize: none;
+    border: none;
+    background: none;
+    font-family: var(--font-body);
+    /* 17px — iOS Dynamic Type's default body size, not this app's own
+       --fs-lyric-lead (18px) — a deliberate platform-convention match, not
+       a token substitution. */
+    font-size: 17px;
+    /* Tighter than the 1.5 used elsewhere on purpose — Notes' internal
+       leading (within one wrapped entry) is closer than a "composition
+       editor" default; the paragraph-like separation between different
+       lines comes from .ne-row + .ne-row's margin above, not from this. */
+    line-height: 1.29;
+    color: var(--ink);
+    padding: 4px 0;
+    overflow: hidden;
+}
+.ne-line-input:focus { outline: none; }
+.ne-line-input::placeholder { color: var(--faint); }
+
+/* ─── Tools sheet (mobile) ────────────────────────────────────────────────────
+   Folds in NoteSidePanel.jsx's variants/notes/history — see ROADMAP.md
+   Phase 2's note on why there's no separate "node detail bottom sheet". */
+
+.ts-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(29, 28, 26, 0.35);
+    z-index: 40;
+    display: flex;
+    align-items: flex-end;
+}
+
+.ts-sheet {
+    width: 100%;
+    max-height: 80vh;
+    background: var(--bg);
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+    box-shadow: var(--sh-3);
+    padding: var(--space-2) var(--space-4) calc(var(--space-4) + env(safe-area-inset-bottom));
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+}
+
+.ts-grabber {
+    width: 36px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--hairline);
+    margin: var(--space-1) auto var(--space-3);
+    flex-shrink: 0;
+}
+
+.ts-list { display: flex; flex-direction: column; }
+
+.ts-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-3) 0;
+    border-bottom: 1px solid var(--hairline);
+    background: none;
+    border-left: none;
+    border-right: none;
+    border-top: none;
+    width: 100%;
+    text-align: left;
+    font: inherit;
+}
+.ts-row-disclosure { cursor: pointer; }
+.ts-row-disclosure:disabled { opacity: 0.5; cursor: default; }
+
+/* The one genuinely new row in this sheet — a subtle fill so it reads as
+   deliberate, not an accidental leftover from the rows that got removed. */
+.ts-row-featured {
+    background: var(--thread-soft);
+    border-radius: var(--r-md);
+    padding: var(--space-3);
+    margin-bottom: var(--space-1);
+    border-bottom: none;
+}
+.ts-row-icon { font-size: var(--fs-body); flex-shrink: 0; }
+
+.ts-row-main { flex: 1; min-width: 0; }
+.ts-row-label { font-family: var(--font-sans); font-weight: 600; font-size: var(--fs-body); color: var(--ink); }
+.ts-row-sublabel { font-family: var(--font-sans); font-size: var(--fs-secondary); color: var(--muted); margin-top: 2px; }
+.ts-row-count { font-family: var(--font-mono); font-size: var(--fs-utility); color: var(--muted); margin-left: auto; }
+.ts-chevron { color: var(--graphite-soft); font-size: var(--fs-h2); }
+
+.ts-toggle { position: relative; flex-shrink: 0; }
+.ts-toggle input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.ts-toggle-track {
+    display: block;
+    width: 44px;
+    height: 26px;
+    border-radius: 13px;
+    background: var(--hairline);
+    transition: background-color 0.15s;
+}
+.ts-toggle-thumb {
+    display: block;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: var(--sh-1);
+    margin: 2px;
+    transition: transform 0.15s;
+}
+.ts-toggle input:checked ~ .ts-toggle-track { background: var(--thread); }
+.ts-toggle input:checked ~ .ts-toggle-track .ts-toggle-thumb { transform: translateX(18px); }
+
+.ts-run {
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    font-weight: 600;
+    color: var(--thread);
+    background: var(--thread-soft);
+    border: none;
+    border-radius: var(--radius-pill);
+    padding: var(--space-1-5) var(--space-3);
+    cursor: pointer;
+}
+
+.ts-repeat-results { padding: 0 0 var(--space-3); }
+.ts-repeat-results ul { list-style: none; }
+.ts-repeat-results li { font-family: var(--font-sans); font-size: var(--fs-secondary); color: var(--ink); padding: var(--space-1) 0; }
+
+.ts-repeat-scope-hint {
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    color: var(--muted);
+    margin-bottom: var(--space-3);
+}
+
+.ts-empty { font-family: var(--font-sans); font-size: var(--fs-secondary); color: var(--muted); padding: var(--space-3) 0; }
+
+.ts-sub-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding-bottom: var(--space-2);
+    border-bottom: 1px solid var(--hairline);
+    margin-bottom: var(--space-3);
+}
+.ts-sub-head h2 { font-family: var(--font-serif); font-size: var(--fs-h2); font-weight: 600; color: var(--ink); }
+.ts-back {
+    background: none; border: none; cursor: pointer;
+    font-size: var(--fs-h2); color: var(--ink); line-height: 1;
+    padding: 0 var(--space-1);
+}
+
+.ts-tab { display: flex; flex-direction: column; gap: var(--space-3); padding-bottom: var(--space-3); }
+
+.ts-variant-row, .ts-history-row {
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    padding: var(--space-2-5);
+}
+.ts-variant-text {
+    width: 100%;
+    border: none;
+    background: none;
+    font-family: var(--font-body);
+    font-size: var(--fs-body);
+    color: var(--ink);
+    resize: vertical;
+    min-height: 44px;
+}
+.ts-row-actions { display: flex; gap: var(--space-2); justify-content: flex-end; margin-top: var(--space-2); }
+.ts-row-actions button {
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    background: var(--bg-deep);
+    border: none;
+    border-radius: var(--r-sm);
+    padding: var(--space-1-5) var(--space-2-5);
+    cursor: pointer;
+    color: var(--ink);
+}
+
+.ts-add-row { display: flex; gap: var(--space-2); }
+.ts-add-row input, .ts-add-row select {
+    flex: 1;
+    font-family: var(--font-sans);
+    font-size: var(--fs-body);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-sm);
+    padding: var(--space-2);
+    background: var(--surface);
+}
+.ts-add-row button {
+    background: var(--ink);
+    color: var(--paper);
+    border: none;
+    border-radius: var(--r-sm);
+    padding: 0 var(--space-3);
+    cursor: pointer;
+}
+.ts-add-col { display: flex; flex-direction: column; gap: var(--space-2); }
+.ts-add-col textarea {
+    font-family: var(--font-sans);
+    font-size: var(--fs-body);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-sm);
+    padding: var(--space-2);
+    min-height: 60px;
+    background: var(--surface);
+}
+
+.ts-annotation-row { display: flex; gap: var(--space-2); background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--r-md); padding: var(--space-2-5); }
+.ts-annotation-row.resolved { opacity: 0.55; }
+.ts-annotation-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--graphite-soft); flex-shrink: 0; margin-top: 6px; }
+.ts-annotation-dot.duda { background: var(--rose); }
+.ts-annotation-dot.idea { background: var(--amber); }
+.ts-annotation-dot.referencia { background: var(--chord); }
+.ts-annotation-main { flex: 1; min-width: 0; }
+.ts-annotation-category { font-family: var(--font-mono); font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.ts-annotation-body { font-family: var(--font-sans); font-size: var(--fs-body); color: var(--ink); margin-top: 2px; }
+
+.ts-history-text { font-family: var(--font-body); font-size: var(--fs-body); color: var(--ink); }
+.ts-history-meta { display: flex; align-items: center; justify-content: space-between; margin-top: var(--space-2); font-family: var(--font-sans); font-size: var(--fs-eyebrow); color: var(--muted); }
+
+/* ─── Mobile muse: selection callout + popover ────────────────────────────────
+   ROADMAP.md Phase 2 — built against explicit mobile-HCI directives: 48dp
+   minimum touch targets with 8px gaps (Fitts's Law), popovers docked in the
+   lower 35-40% of the screen (thumb zone, Hoober 2013), suggestions capped
+   at 3 (Hick-Hyman). `mp-` prefix here means "muse popover", not the old
+   "mobile projects" usage earlier in this file — scoped by context, no
+   actual class collision since those are all `mp-row`/`mp-thumb`/etc. */
+
+.sel-callout {
+    position: fixed;
+    z-index: 55;
+    display: flex;
+    flex-wrap: wrap; /* 4 pills (Rhyme/Concept/Genealogía/Ask muse) wrap to a second row on narrow phones instead of overflowing */
+    max-width: min(280px, calc(100vw - 16px));
+    gap: 8px;
+    background: var(--ink);
+    border-radius: var(--r-md);
+    padding: 6px;
+    box-shadow: var(--sh-3);
+}
+.sel-callout-btn {
+    min-height: 48px;
+    min-width: 48px;
+    padding: 0 var(--space-3);
+    background: none;
+    border: none;
+    color: var(--paper);
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+    border-radius: var(--r-sm);
+}
+.sel-callout-btn:active { background: rgba(255, 255, 255, 0.15); }
+
+/* Invisible on purpose — unlike the old dimming .mp-backdrop, nothing here
+   blocks the rest of the screen; it exists only to catch an outside tap
+   and close .mp-anchored. Non-intrusive per the redesign brief: the deck/
+   banner floats directly under the line it's about instead of taking over
+   the screen. */
+.mp-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    background: transparent;
+}
+
+/* Positioned via inline style from MusePopover's anchorStyle() — directly
+   under (or, near the bottom of the viewport, above) the verse line the
+   turn is about. ONE unified card (single background/radius/shadow), same
+   as the original popover — head and content share this one surface.
+   Splitting it into a separate pill per content type looked "raro"
+   (washed-out, disconnected) in practice; keeping the single emergent
+   square with its shadow is the right call. Safe now that the deck only
+   ever renders one card at a time (no stacked card behind to double up
+   against or bleed through — see .mp-deck-card below). */
+.mp-anchored {
+    position: fixed;
+    z-index: 61;
+    max-width: calc(100vw - var(--space-4) * 2);
+    max-height: min(48vh, 420px);
+    overflow-y: auto;
+    background: var(--bg);
+    border-radius: var(--r-lg);
+    box-shadow: var(--sh-3);
+    padding: var(--space-3);
+}
+
+.mp-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding-bottom: var(--space-2);
+    margin-bottom: var(--space-2);
+    border-bottom: 1px solid var(--hairline);
+}
+.mp-head-target {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--font-body);
+    font-style: italic;
+    font-size: var(--fs-secondary);
+    color: var(--muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.mp-close {
+    min-width: 48px;
+    min-height: 48px;
+    background: none;
+    border: none;
+    color: var(--graphite);
+    font-size: var(--fs-body);
+    cursor: pointer;
+}
+
+.mp-loading { display: flex; justify-content: center; padding: var(--space-6) 0; }
+.mp-spinner {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 2px solid var(--hairline);
+    border-top-color: var(--thread);
+    animation: mp-spin 0.7s linear infinite;
+}
+@keyframes mp-spin { to { transform: rotate(360deg); } }
+.mp-error { color: var(--rose); font-family: var(--font-sans); font-size: var(--fs-secondary); padding: var(--space-3) 0; }
+
+/* SOCRATIC — ambient, non-modal banner: one question, 2-3 thumb chips
+   (capped at 3 regardless of how many the model returns, per Hick-Hyman:
+   never present more choices than the user can scan at a glance). This IS
+   the "Socratic as default mode" surface — always the same lightweight
+   shape, anchored right under the line in question, never a full-screen
+   takeover. */
+.mp-banner { display: flex; flex-direction: column; gap: var(--space-2); }
+.mp-question {
+    font-family: var(--font-body);
+    font-size: var(--fs-body);
+    color: var(--ink);
+    margin: 0;
+}
+.mp-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.mp-chip {
+    min-height: 48px;
+    padding: 0 var(--space-3-5);
+    background: var(--thread-soft);
+    color: var(--thread);
+    border: none;
+    border-radius: var(--radius-pill);
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: var(--fs-secondary);
+    cursor: pointer;
+}
+.mp-chip:disabled { opacity: 0.55; cursor: default; }
+
+/* Creativity proposal #4 — cultural provocation. Amber, not thread green:
+   deliberately distinct from the model's own dynamic SOCRATIC chips, since
+   this is a separate, always-available affordance rather than one more
+   option among the model's own. */
+.mp-chip-cultural { background: var(--amber-soft); color: var(--amber); align-self: flex-start; }
+.mp-provocation-loading, .mp-provocation-empty {
+    font-family: var(--font-body);
+    font-style: italic;
+    font-size: var(--fs-secondary);
+    color: var(--muted);
+    margin: 0;
+}
+.mp-provocation {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1-5);
+    padding: var(--space-3);
+    background: var(--amber-soft);
+    border-radius: var(--r-md);
+}
+.mp-provocation-frame {
+    font-family: var(--font-body);
+    font-size: var(--fs-body);
+    color: var(--ink);
+    margin: 0;
+}
+.mp-provocation-hint {
+    font-family: var(--font-sans);
+    font-size: var(--fs-micro);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--amber);
+    margin: 0;
+}
+
+/* Confirm-before-firing step (creativity proposals #3/#4) — shared shape
+   for "is this the concept?" (mp-question + mp-chips, reused as-is) and the
+   plain-input fallback when there's nothing to guess from. */
+.mp-provocation-ask { display: flex; flex-direction: column; gap: var(--space-2); }
+.mp-concept-ask { display: flex; flex-direction: column; gap: var(--space-2); }
+.mp-concept-input {
+    min-height: 48px;
+    padding: 0 var(--space-3);
+    background: var(--bg-deep);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    color: var(--ink);
+}
+.mp-concept-input:focus { outline: none; border-color: var(--amber); }
+
+/* Genealogía de la imagen — several distinct reference cards at once
+   (unlike ángulo cultural's single .mp-provocation frame), each with its
+   own real, named source. Amber accent kept consistent with the muse's
+   other cultural-reflection features, but a plain left-rule card rather
+   than a filled block so 2-3 of them in a row don't turn into a wall of
+   color the way stacked .mp-provocation blocks would. */
+.mp-genealogy { display: flex; flex-direction: column; gap: var(--space-2); }
+.mp-genealogy-ref {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-0-5);
+    padding: var(--space-2) var(--space-3);
+    border-left: 2px solid var(--amber);
+    background: var(--bg-deep);
+    border-radius: var(--r-sm);
+}
+.mp-genealogy-title {
+    font-family: var(--font-body);
+    font-size: var(--fs-secondary);
+    font-weight: 600;
+    color: var(--ink);
+    margin: 0;
+}
+.mp-genealogy-source { font-weight: 400; color: var(--muted); font-style: italic; }
+.mp-genealogy-connection {
+    font-family: var(--font-body);
+    font-size: var(--fs-secondary);
+    color: var(--graphite);
+    margin: 0;
+}
+
+/* SURGEON/ARCHITECT — exactly ONE card at a time, not a fanned stack: an
+   earlier version peeked the next candidate out from behind the front one,
+   which either doubled up chrome with .mp-anchored (when the front card had
+   no background of its own) or let the stacked card's text bleed straight
+   through it (once the front card was made opaque again). Rendering a
+   single card sidesteps both — nothing else is on screen to double up
+   against or bleed through. Discarding just swaps the next queued
+   candidate into this same slot (MusePopover.jsx's handleDiscard). */
+.mp-deck { position: relative; }
+.mp-deck-empty {
+    font-family: var(--font-body);
+    font-style: italic;
+    font-size: var(--fs-secondary);
+    color: var(--muted);
+    text-align: center;
+    padding: var(--space-4) 0;
+}
+.mp-deck-card {
+    position: relative;
+    /* Invisible at rest (no background/shadow of its own — .mp-anchored
+       already provides the one visible surface), but shaped + padded all
+       the same, so the swipe color tint (inline style, MusePopover.jsx)
+       reads as a rounded, breathing-room highlight rather than a flush
+       square block jammed against the panel's own rounded corners. */
+    border-radius: var(--r-md);
+    padding: var(--space-2);
+    touch-action: none;
+    transition: transform 0.15s, opacity 0.15s;
+    will-change: transform, opacity;
+}
+.mp-card-type {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--thread);
+    background: var(--thread-soft);
+    border-radius: var(--radius-pill);
+    padding: 2px 8px;
+    margin-bottom: var(--space-1-5);
+}
+.mp-card-text { font-family: var(--font-body); font-size: var(--fs-body); color: var(--ink); line-height: 1.4; }
+.mp-card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: var(--space-2-5); }
+.mp-card-btn {
+    flex: 1;
+    min-width: 88px;
+    min-height: 48px;
+    border-radius: var(--r-sm);
+    border: 1px solid var(--hairline);
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: var(--fs-secondary);
+    cursor: pointer;
+}
+.mp-card-btn-primary { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+
+/* WORD_BANK — horizontal-scrolling pill rows, one per syllable-count group.
+   overscroll-behavior-x contains the scroll so it doesn't chain into the
+   popover's own vertical scroll when a row is dragged past its edge. */
+.mp-wordbank { display: flex; flex-direction: column; gap: var(--space-3); }
+.mp-wb-note {
+    font-family: var(--font-body);
+    font-style: italic;
+    font-size: var(--fs-secondary);
+    color: var(--muted);
+    margin-bottom: var(--space-1);
+}
+.mp-wb-label {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin-bottom: var(--space-1-5);
+}
+.mp-wb-row {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x mandatory;
+    touch-action: pan-x; /* axis-locks the drag to this row so it can't fight the popover's vertical scroll */
+    padding-bottom: 2px;
+    padding-inline: 2px;
+    -webkit-mask-image: linear-gradient(to right, transparent, black 20px, black calc(100% - 20px), transparent);
+    mask-image: linear-gradient(to right, transparent, black 20px, black calc(100% - 20px), transparent);
+}
+.mp-wb-pill {
+    flex-shrink: 0;
+    min-height: 48px;
+    padding: 0 var(--space-3);
+    display: flex;
+    align-items: center;
+    background: var(--amber-soft);
+    color: var(--amber);
+    border: none;
+    border-radius: var(--radius-pill);
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: var(--fs-secondary);
+    white-space: nowrap;
+    cursor: pointer;
+    scroll-snap-align: start;
+}
+.mp-wb-phrase { background: var(--bg-deep); color: var(--ink); }
+
+/* ─── Audio recorder sheet (AudioRecorderSheet.jsx) ──────────────────────────
+   Reuses the .ts-backdrop/.ts-grabber shell (ToolsSheet) — opened by a
+   400ms long-press on a line, see NoteEditorScreen's LineRow. Recording
+   starts the instant it mounts, so the content here is deliberately just
+   the live state (pulse/timer) and two actions, not a form. */
+
+.ar-sheet {
+    width: 100%;
+    background: var(--bg);
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+    box-shadow: var(--sh-3);
+    padding: var(--space-3) var(--space-4) calc(var(--space-5) + env(safe-area-inset-bottom));
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-3);
+}
+.ar-status {
+    font-family: var(--font-body);
+    font-size: var(--fs-body);
+    color: var(--muted);
+    text-align: center;
+    margin: var(--space-4) 0;
+}
+.ar-error { color: var(--rose); }
+.ar-pulse-wrap { display: flex; justify-content: center; padding: var(--space-2) 0; }
+.ar-pulse {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--rose);
+    opacity: 0.85;
+}
+.ar-pulse-live { animation: ar-pulse-anim 1.1s ease-in-out infinite; }
+@keyframes ar-pulse-anim {
+    0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(200, 60, 60, 0.35); }
+    50% { transform: scale(1.15); box-shadow: 0 0 0 10px rgba(200, 60, 60, 0); }
+}
+.ar-timer { font-family: var(--font-mono); font-size: var(--fs-h2); color: var(--ink); margin: 0; }
+.ar-actions { display: flex; gap: var(--space-3); width: 100%; }
+.ar-btn-cancel, .ar-btn-stop {
+    flex: 1;
+    min-height: 52px;
+    border-radius: var(--r-md);
+    border: 1px solid var(--hairline);
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: var(--fs-secondary);
+    cursor: pointer;
+}
+.ar-btn-stop { background: var(--rose); color: var(--paper); border-color: var(--rose); }
+.ar-btn-cancel:disabled, .ar-btn-stop:disabled { opacity: 0.5; }
+
+/* ─── Voice-memo badge + mini player (LineAudioBadge.jsx) ────────────────────
+   Same anchored, non-modal presentation as .mp-scrim/.mp-anchored — reuses
+   .mp-scrim directly, adds its own small floating panel since a memo list
+   is a different shape than a suggestion deck or chip row. */
+
+.la-player {
+    position: fixed;
+    z-index: 61;
+    min-width: 220px;
+    max-width: calc(100vw - var(--space-4) * 2);
+    background: var(--bg);
+    border-radius: var(--r-md);
+    box-shadow: var(--sh-3);
+    padding: var(--space-2-5);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+.la-row { display: flex; align-items: center; gap: var(--space-2); }
+.la-play-btn {
+    flex-shrink: 0;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: none;
+    background: var(--thread-soft);
+    color: var(--thread);
+    font-size: var(--fs-secondary);
+    cursor: pointer;
+}
+.la-play-btn:disabled { opacity: 0.4; }
+.la-waveform-canvas { flex: 1; min-width: 0; height: 28px; color: var(--thread); }
+.la-duration { flex-shrink: 0; font-family: var(--font-mono); font-size: var(--fs-micro); color: var(--muted); }
+
+/* ─── FAB menu (shared) ────────────────────────────────────────────────────────
+   One FAB that expands into pills instead of a fixed icon bar (note editor)
+   or scattered insert affordances (song thread) — src/mobile/FabMenu.jsx.
+   Positioned absolutely, same containing block as .mobile-fab
+   (.mobile-screen's position:fixed). */
+
+.fab-menu-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 58;
+    background: rgba(29, 28, 26, 0.35);
+}
+
+.fab-menu-btn {
+    position: absolute;
+    right: calc(var(--space-5) + env(safe-area-inset-right));
+    bottom: calc(var(--space-5) + env(safe-area-inset-bottom));
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--paper);
+    border: none;
+    font-size: var(--fs-h2);
+    line-height: 1;
+    box-shadow: var(--sh-3);
+    cursor: pointer;
+    z-index: 62;
+    transition: transform 0.2s;
+}
+/* Same "+" glyph, just rotated — reads as a close "×" without swapping
+   icons or adding a second element to keep in sync. */
+.fab-menu-btn.open { transform: rotate(45deg); }
+
+.fab-menu-pills {
+    position: absolute;
+    right: calc(var(--space-5) + env(safe-area-inset-right));
+    bottom: calc(84px + env(safe-area-inset-bottom));
+    z-index: 61;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: var(--space-3);
+}
+
+.fab-menu-pill {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-height: 48px;
+    padding: 0 var(--space-3-5);
+    border-radius: var(--radius-pill);
+    border: none;
+    background: var(--surface);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: var(--fs-secondary);
+    white-space: nowrap;
+    box-shadow: var(--sh-2);
+    cursor: pointer;
+    animation: fab-pill-in 0.22s ease-out backwards;
+}
+.fab-menu-pill:disabled { opacity: 0.55; cursor: default; }
+
+/* Same dark-void identity as the desktop Baúl/black-hole node
+   (.baul-blackhole's radial gradient, var(--amber) sparkle) — a golden
+   spark on black reads as the same feature wherever it shows up. */
+.fab-menu-pill-dark {
+    background: linear-gradient(180deg, #242320, #0e0d0b);
+    color: #fff;
+}
+.fab-menu-pill-dark .fab-menu-pill-icon { color: var(--amber); }
+
+/* Small colored circle behind a light pill's icon — Tools (indigo/chord,
+   matches the desktop chord-progression identity) and Variant (thread
+   green, matches the main-thread edge color) each get their own accent so
+   the three pills stay visually distinct at a glance, not just by label. */
+.fab-menu-pill-icon-chord,
+.fab-menu-pill-icon-thread,
+.fab-menu-pill-icon-amber {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+}
+.fab-menu-pill-icon-chord { background: var(--chord-soft); color: var(--chord); }
+.fab-menu-pill-icon-thread { background: var(--thread-soft); color: var(--thread); }
+/* "Cool words" pill (creativity proposal #3) — same amber identity as
+   WORD_BANK's own pills (.mp-wb-pill), so the FabMenu entry visually
+   promises what it actually opens. */
+.fab-menu-pill-icon-amber { background: var(--amber-soft); color: var(--amber); }
+
+@keyframes fab-pill-in {
+    from { opacity: 0; transform: translateY(8px) scale(0.9); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ─── Variant choice sheet ────────────────────────────────────────────────────
+   Reuses the .ts-backdrop/.ts-sheet/.ts-grabber shell (ToolsSheet) — its
+   own two big tappable options underneath. */
+
+.vc-hint {
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    color: var(--muted);
+    margin-bottom: var(--space-3);
+}
+
+.vc-option {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3);
+    margin-bottom: var(--space-2-5);
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    text-align: left;
+    cursor: pointer;
+}
+.vc-option-icon {
+    flex-shrink: 0;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: var(--thread-soft);
+    color: var(--thread);
+    font-size: var(--fs-body);
+}
+.vc-option-body { display: flex; flex-direction: column; }
+.vc-option-title { font-family: var(--font-sans); font-weight: 600; font-size: var(--fs-body); color: var(--ink); }
+.vc-option-sub { font-family: var(--font-sans); font-size: var(--fs-secondary); color: var(--muted); margin-top: 2px; }
+
+/* ─── Baúl sheet (mobile) ──────────────────────────────────────────────────────
+   ROADMAP.md Phase 3, design ref 2026-08-11 — "tap to attach" instead of
+   desktop's draggable BaulFloatNode, same processBaulInput/saveLyricDna
+   calls underneath (see src/mobile/BaulSheet.jsx). The mockup's own --gold
+   token is just this app's existing --amber under another name — reused,
+   not duplicated. */
+
+.baul-sheet-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 58;
+    background: rgba(29, 28, 26, 0.35);
+    display: flex;
+    align-items: flex-end;
+}
+
+.baul-sheet {
+    position: relative;
+    width: 100%;
+    max-height: 88vh;
+    overflow-y: auto;
+    background: var(--paper);
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+    box-shadow: var(--sh-3);
+}
+
+.baul-sheet-body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: var(--space-2) var(--space-4) calc(var(--space-6) + env(safe-area-inset-bottom));
+    text-align: center;
+    transition: opacity 0.15s;
+}
+.baul-sheet-body-dimmed { opacity: 0.4; }
+
+/* Same dark-void identity as desktop's .baul-blackhole (radial gradient,
+   amber sparkle) — a dome shape here instead of a circle, matching the
+   design ref, but unmistakably the same feature. */
+.baul-hero {
+    width: 104px;
+    height: 92px;
+    background: radial-gradient(circle at 36% 28%, #2e2c27, #17160f 72%);
+    border-radius: 52px 52px 14px 14px;
+    box-shadow: var(--sh-3);
+    margin-bottom: var(--space-3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.baul-hero-spark { color: var(--amber); font-size: 20px; }
+
+.attach-title { font-family: var(--font-serif); font-weight: 600; font-size: var(--fs-h2); color: var(--ink); margin-bottom: var(--space-1); }
+.attach-sub { font-family: var(--font-sans); font-size: var(--fs-secondary); color: var(--muted); max-width: 280px; line-height: 1.5; margin-bottom: var(--space-4); }
+.baul-saved-hint { font-family: var(--font-sans); font-size: var(--fs-secondary); color: var(--thread); font-weight: 600; margin-bottom: var(--space-3); }
+.baul-error { font-family: var(--font-sans); font-size: var(--fs-secondary); color: var(--rose); margin-bottom: var(--space-3); }
+
+.attach-option {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-3-5);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    margin-bottom: var(--space-2-5);
+    background: var(--surface);
+    text-align: left;
+    cursor: pointer;
+}
+.attach-option:disabled { opacity: 0.5; cursor: default; }
+.attach-option .tt { font-family: var(--font-sans); font-size: var(--fs-body); font-weight: 500; color: var(--ink); flex: 1; }
+.aic {
+    width: 34px;
+    height: 34px;
+    border-radius: var(--r-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: var(--fs-utility);
+}
+.aic-thread { background: var(--thread-soft); color: var(--thread); }
+.aic-chord { background: var(--chord-soft); color: var(--chord); }
+.aic-amber { background: var(--amber-soft); color: var(--amber); }
+.aic-graphite { background: var(--bg-deep); color: var(--graphite); }
+
+.baul-file-input { display: none; }
+
+.divider-row { display: flex; align-items: center; gap: var(--space-2-5); width: 100%; margin: var(--space-3) 0 var(--space-2-5); }
+.divider-row .line { flex: 1; height: 1px; background: var(--hairline); }
+.divider-row .label { font-family: var(--font-mono); font-size: var(--fs-micro); color: var(--graphite-soft); letter-spacing: 0.05em; text-transform: uppercase; }
+
+.clear-option {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-3-5);
+    border: 1px solid #e9c9c4;
+    border-radius: var(--r-md);
+    background: var(--rose-soft);
+    text-align: left;
+    cursor: pointer;
+}
+.clear-option:disabled { opacity: 0.5; cursor: default; }
+.clear-option .aic { background: var(--surface); }
+.clear-icon { color: var(--rose); font-size: var(--fs-utility); }
+.clear-option-body { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.clear-option .tt { font-family: var(--font-sans); font-size: var(--fs-body); font-weight: 600; color: var(--rose); }
+.clear-option .ss { font-family: var(--font-sans); font-size: var(--fs-eyebrow); color: var(--rose); opacity: 0.8; margin-top: 1px; }
+
+/* Floats above the (now-dimmed) main sheet body rather than replacing it —
+   matches the design ref's "two separate native-style cards" pattern. */
+.confirm-sheet {
+    position: absolute;
+    left: var(--space-3);
+    right: var(--space-3);
+    bottom: calc(var(--space-4) + env(safe-area-inset-bottom));
+    z-index: 5;
+}
+.confirm-card {
+    background: rgba(251, 249, 244, 0.96);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-radius: var(--r-lg);
+    overflow: hidden;
+    margin-bottom: var(--space-2-5);
+    box-shadow: var(--sh-3);
+}
+.confirm-text { padding: var(--space-4) var(--space-4) var(--space-3-5); text-align: center; border-bottom: 1px solid var(--hairline); }
+.confirm-text .tt { font-family: var(--font-serif); font-weight: 600; font-size: var(--fs-body); color: var(--ink); margin-bottom: var(--space-1); }
+.confirm-text .ss { font-family: var(--font-sans); font-size: var(--fs-secondary); color: var(--graphite); line-height: 1.5; }
+.confirm-btn {
+    width: 100%;
+    text-align: center;
+    padding: var(--space-3-5);
+    font-family: var(--font-sans);
+    font-size: var(--fs-lyric-lead);
+    background: none;
+    border: none;
+    cursor: pointer;
+}
+.confirm-btn.destructive { color: var(--rose); font-weight: 600; }
+.confirm-btn:disabled { opacity: 0.5; cursor: default; }
+.confirm-cancel {
+    width: 100%;
+    background: rgba(251, 249, 244, 0.96);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: none;
+    border-radius: var(--r-lg);
+    text-align: center;
+    padding: var(--space-3-5);
+    font-family: var(--font-sans);
+    font-size: var(--fs-lyric-lead);
+    font-weight: 600;
+    color: var(--chord);
+    cursor: pointer;
+    box-shadow: var(--sh-2);
+}
+
+.baul-note-back { align-self: flex-start; margin-bottom: var(--space-2); }
+.baul-note-input {
+    width: 100%;
+    min-height: 100px;
+    font-family: var(--font-body);
+    font-size: var(--fs-body);
+    color: var(--ink);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    padding: var(--space-3);
+    margin-bottom: var(--space-3);
+    background: var(--surface);
+    resize: vertical;
+}
+.baul-note-submit {
+    width: 100%;
+    min-height: 48px;
+    background: var(--ink);
+    color: var(--paper);
+    border: none;
+    border-radius: var(--r-md);
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: var(--fs-body);
+    cursor: pointer;
+}
+.baul-note-submit:disabled { opacity: 0.5; cursor: default; }
+
+/* ─── Tempo pulse (mobile, shared) ────────────────────────────────────────────
+   src/mobile/TempoPulse.jsx — same component in the song-thread header
+   (next to the language pill) and the note editor header. The dot's
+   animation-duration is set inline per instance (60000/bpm ms) — this
+   file only defines the pulse itself, not its rate. */
+.tempo-pulse {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-left: var(--space-2);
+    font-family: var(--font-mono);
+    font-size: var(--fs-eyebrow);
+    color: var(--amber);
+    vertical-align: middle;
+}
+/* Only the song-thread header's copy is a real <button> (onClick wired) —
+   plain background/border reset so it doesn't look like a form control,
+   just a slightly-larger tap target around the same dot+number. */
+.tempo-pulse-btn { background: none; border: none; padding: 2px; cursor: pointer; }
+.tempo-pulse-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--amber);
+    animation: tempo-pulse-beat 500ms ease-in-out infinite;
+}
+@keyframes tempo-pulse-beat {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.35; transform: scale(0.7); }
+}
+
+.tempo-sheet-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: var(--space-2);
+    margin-bottom: var(--space-4);
+}
+.tempo-sheet-input {
+    width: 100px;
+    font-family: var(--font-serif);
+    font-size: var(--fs-display);
+    font-weight: 600;
+    color: var(--ink);
+    text-align: right;
+    border: none;
+    border-bottom: 2px solid var(--hairline);
+    background: none;
+}
+.tempo-sheet-input:focus { outline: none; border-color: var(--amber); }
+.tempo-sheet-unit {
+    font-family: var(--font-mono);
+    font-size: var(--fs-label);
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+.tempo-sheet-save {
+    width: 100%;
+    min-height: 48px;
+    background: var(--ink);
+    color: var(--paper);
+    border: none;
+    border-radius: var(--r-md);
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: var(--fs-body);
+    cursor: pointer;
+}
+.tempo-sheet-save:disabled { opacity: 0.5; cursor: default; }
+
+/* ─── Mock playground — dev-only, mock-song-only (src/canvas/MockPlayground.jsx)
+   Direct read/write on lyric_dna + muse_profile, the two things a mock song
+   can't get any other way without burning a real API call. Same --eye-*
+   dark-instrument language as MuseEyePanel/MuseEyeScreen, floating
+   bottom-right so it never collides with DebugConsole (bottom, full-width). */
+.mockpg-toggle {
+    position: fixed; right: var(--space-3); bottom: var(--space-3); z-index: 1500;
+    font-family: var(--font-mono); font-size: 11px; color: var(--amber);
+    background: #0a0a0b; border: 1px solid color-mix(in srgb, var(--amber) 45%, transparent);
+    border-radius: var(--radius-pill); padding: 6px 14px; cursor: pointer;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+.mockpg-toggle:hover { background: color-mix(in srgb, var(--amber) 12%, #0a0a0b); }
+
+.mockpg-panel {
+    --eye-bg: #0a0a0b; --eye-panel-2: #17171a; --eye-line: #232326; --eye-line-soft: #1b1b1e;
+    --eye-text: #d4d4d8; --eye-text-dim: #86868f; --eye-text-faint: #4b4b52; --eye-ok: #4d9a72; --eye-warn: #c2673f;
+    position: fixed; right: var(--space-3); bottom: var(--space-3); z-index: 1500;
+    width: 340px; max-height: 70vh; overflow-y: auto;
+    background: var(--eye-bg); color: var(--eye-text); border: 1px solid var(--eye-line);
+    border-radius: var(--r-md); box-shadow: 0 12px 36px rgba(0, 0, 0, 0.4);
+    font-family: var(--font-sans); padding: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2-5);
+}
+.mockpg-panel.dragging { user-select: none; }
+.mockpg-head { display: flex; align-items: center; justify-content: space-between; cursor: grab; }
+.mockpg-panel.dragging .mockpg-head { cursor: grabbing; }
+.mockpg-title { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--amber); }
+.mockpg-close { background: none; border: none; color: var(--eye-text-faint); cursor: pointer; font-size: 13px; }
+.mockpg-close:hover { color: var(--eye-text); }
+.mockpg-summary { font-size: 10.5px; color: var(--eye-text-faint); line-height: 1.5; }
+.mockpg-field { display: flex; flex-direction: column; gap: 4px; }
+.mockpg-field-label { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--eye-text-dim); }
+.mockpg-saved { color: var(--eye-ok); text-transform: none; letter-spacing: normal; }
+.mockpg-textarea {
+    width: 100%; background: var(--eye-panel-2); border: 1px solid var(--eye-line); border-radius: var(--r-sm);
+    padding: 7px 9px; font-family: var(--font-mono); font-size: 10.5px; line-height: 1.5; color: var(--eye-text); resize: vertical;
+}
+.mockpg-textarea:focus { outline: none; border-color: var(--amber); }
+.mockpg-error { font-size: 10.5px; color: var(--eye-warn); }
+.mockpg-save {
+    align-self: flex-start; font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+    color: var(--eye-bg); background: var(--amber); border: none; border-radius: var(--r-sm); padding: 5px 11px; cursor: pointer;
+}
+
+/* ─── Muse Lab — Golden Set / A-B prompt testing pipeline
+   (src/canvas/MuseLabView.jsx), the "lab" tab inside MuseEyeScreen. Lives
+   inside .muse-eye-screen, so the --eye-* custom properties are already in
+   scope — no need to redeclare them here. ──────────────────────────────── */
+
+.lab-view { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-3) var(--space-4); }
+
+.lab-usage-row { display: flex; justify-content: space-between; align-items: center; font-family: var(--font-mono); font-size: 10.5px; color: var(--eye-text-faint); }
+.lab-usage b { color: var(--eye-text-dim); }
+.lab-model { color: var(--eye-text-faint); }
+
+.lab-grid { display: grid; grid-template-columns: 1fr; gap: var(--space-3); }
+@media (min-width: 1100px) { .lab-grid { grid-template-columns: 340px 1fr 340px; align-items: start; } }
+
+.lab-col {
+    display: flex; flex-direction: column; gap: var(--space-2);
+    background: var(--eye-panel-2); border: 1px solid var(--eye-line); border-radius: var(--r-md);
+    padding: var(--space-3); max-height: calc(100vh - 220px); overflow-y: auto;
+}
+.lab-col-title { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--eye-text-faint); }
+
+.lab-case-list { display: flex; flex-direction: column; gap: 4px; }
+.lab-case-btn {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left;
+    background: var(--eye-bg); border: 1px solid var(--eye-line); border-radius: var(--r-sm);
+    padding: var(--space-1-5) var(--space-2); cursor: pointer;
+}
+.lab-case-btn.active { border-color: var(--amber); background: color-mix(in srgb, var(--amber) 8%, var(--eye-bg)); }
+.lab-case-label { font-size: 11px; color: var(--eye-text); font-weight: 600; }
+.lab-case-expect { font-family: var(--font-mono); font-size: 9px; color: var(--eye-text-faint); }
+.lab-case-desc { font-size: 10.5px; color: var(--eye-text-faint); line-height: 1.5; margin: 0; }
+
+.lab-hr { height: 1px; background: var(--eye-line); border: none; margin: 0; }
+
+.lab-tabs { display: flex; gap: var(--space-1); }
+.lab-tab {
+    font-family: var(--font-mono); font-size: 10px; color: var(--eye-text-faint);
+    background: none; border: none; border-bottom: 1.5px solid transparent; padding: 3px 4px; cursor: pointer;
+}
+.lab-tab.active { color: var(--eye-text); border-bottom-color: var(--amber); }
+
+.lab-textarea, .lab-input {
+    width: 100%; background: var(--eye-bg); border: 1px solid var(--eye-line); border-radius: var(--r-sm);
+    padding: 7px 9px; font-family: var(--font-sans); font-size: 11px; color: var(--eye-text); resize: vertical;
+}
+.lab-textarea:focus, .lab-input:focus { outline: none; border-color: var(--amber); }
+.lab-mono { font-family: var(--font-mono); font-size: 10.5px; }
+.lab-prompt-view {
+    font-family: var(--font-mono); font-size: 10.5px; line-height: 1.55; color: var(--eye-text-dim);
+    background: var(--eye-bg); border: 1px solid var(--eye-line); border-radius: var(--r-sm);
+    padding: var(--space-2); white-space: pre-wrap; max-height: 260px; overflow-y: auto; margin: 0;
+}
+.lab-prompt-edit { max-height: 260px; overflow-y: auto; }
+
+.lab-error { font-size: 10.5px; color: var(--eye-warn); }
+
+.lab-row-between { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+
+.lab-btn {
+    font-family: var(--font-mono); font-size: 11px; font-weight: 600; color: var(--eye-bg);
+    background: var(--amber); border: none; border-radius: var(--r-sm); padding: 6px 12px; cursor: pointer;
+}
+.lab-btn:disabled { opacity: 0.4; cursor: default; }
+.lab-btn-b { background: var(--chord); color: #fff; }
+.lab-btn-ghost {
+    font-family: var(--font-mono); font-size: 10px; color: var(--eye-text-faint);
+    background: none; border: 1px solid var(--eye-line); border-radius: var(--r-sm); padding: 4px 9px; cursor: pointer;
+}
+.lab-btn-ghost:hover { color: var(--eye-text); border-color: var(--eye-text-faint); }
+.lab-btn-ghost:disabled { opacity: 0.4; cursor: default; }
+.lab-btn-icon { background: none; border: none; color: var(--eye-text-faint); cursor: pointer; font-size: 11px; padding: 0 2px; }
+.lab-btn-icon:hover { color: var(--eye-warn); }
+
+.lab-mode-row { display: flex; flex-wrap: wrap; gap: 4px; }
+.lab-mode-btn {
+    font-family: var(--font-mono); font-size: 10px; color: var(--eye-text-dim);
+    background: var(--eye-bg); border: 1px solid var(--eye-line); border-radius: var(--radius-pill);
+    padding: 4px 9px; cursor: pointer;
+}
+.lab-mode-btn.active { border-color: var(--amber); color: var(--amber); background: color-mix(in srgb, var(--amber) 10%, var(--eye-bg)); }
+
+.lab-run-row { display: flex; gap: var(--space-1-5); }
+.lab-progress { font-family: var(--font-mono); font-size: 10.5px; color: var(--amber); }
+
+.lab-compare { display: grid; grid-template-columns: 1fr; gap: var(--space-2); }
+.lab-compare.split { grid-template-columns: 1fr 1fr; }
+.lab-compare-col { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+
+.lab-funnel { background: var(--eye-bg); border: 1px solid var(--eye-line); border-radius: var(--r-sm); padding: var(--space-2); display: flex; flex-direction: column; gap: 6px; }
+.lab-funnel-head { display: flex; justify-content: space-between; align-items: center; }
+.lab-funnel-title { font-family: var(--font-mono); font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--eye-text-faint); }
+.lab-survival { font-family: var(--font-mono); font-size: 10px; color: var(--eye-ok); font-weight: 600; }
+.lab-funnel-step { display: flex; flex-direction: column; gap: 3px; padding-top: 5px; border-top: 1px solid var(--eye-line-soft); }
+.lab-funnel-step:first-child { border-top: none; padding-top: 0; }
+.lab-funnel-step-head { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 10.5px; color: var(--eye-text-dim); }
+.lab-funnel-step-count { color: var(--amber); font-weight: 600; }
+.lab-funnel-rejected { display: flex; flex-wrap: wrap; gap: 4px; }
+.lab-rejected-chip { font-family: var(--font-mono); font-size: 9px; color: var(--eye-warn); background: color-mix(in srgb, var(--eye-warn) 10%, transparent); border: 1px solid color-mix(in srgb, var(--eye-warn) 30%, transparent); border-radius: 3px; padding: 1px 5px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.lab-result-card { background: var(--eye-bg); border: 1px solid var(--eye-line); border-radius: var(--r-sm); padding: var(--space-2); display: flex; flex-direction: column; gap: 6px; }
+.lab-result-head { display: flex; flex-wrap: wrap; gap: 5px; }
+.lab-badge { font-family: var(--font-mono); font-size: 9.5px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--eye-line); color: var(--eye-text-dim); background: var(--eye-panel-2); }
+.lab-badge-good { color: var(--eye-ok); border-color: color-mix(in srgb, var(--eye-ok) 50%, transparent); }
+.lab-badge-warn { color: var(--eye-warn); border-color: color-mix(in srgb, var(--eye-warn) 50%, transparent); }
+.lab-badge-version { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 40%, transparent); }
+.lab-result-excerpt { font-size: 12px; color: var(--eye-text); line-height: 1.5; margin: 0; }
+
+.lab-tag-row { display: flex; flex-wrap: wrap; gap: 4px; }
+.lab-tag-btn { font-size: 9.5px; border: 1px solid var(--eye-line); background: none; color: var(--eye-text-faint); border-radius: var(--radius-pill); padding: 2px 8px; cursor: pointer; }
+.lab-tag-btn.active { color: var(--amber); border-color: var(--amber); }
+
+.lab-snapshot-list { display: flex; flex-direction: column; gap: var(--space-1-5); max-height: 170px; overflow-y: auto; }
+.lab-snapshot-row { display: flex; align-items: center; gap: var(--space-1-5); background: var(--eye-bg); border: 1px solid var(--eye-line); border-radius: var(--r-sm); padding: var(--space-1-5) var(--space-2); }
+.lab-snapshot-info { display: flex; flex-direction: column; flex: 1; min-width: 0; gap: 1px; }
+.lab-snapshot-label { font-size: 11px; color: var(--eye-text); }
+.lab-snapshot-score { font-family: var(--font-mono); font-size: 9.5px; color: var(--amber); }
+.lab-snapshot-notes { font-size: 10px; color: var(--eye-text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.lab-stats-summary { font-family: var(--font-mono); font-size: 10px; color: var(--eye-text-faint); }
+.lab-tag-stats { display: flex; flex-wrap: wrap; gap: var(--space-2); font-family: var(--font-mono); font-size: 10.5px; }
+.lab-stat-good { color: var(--eye-ok); }
+.lab-stat-bad { color: var(--eye-warn); }
+
+.lab-mode-stats { display: flex; flex-direction: column; gap: 4px; }
+.lab-mode-stat-row { display: flex; align-items: center; gap: var(--space-2); font-size: 11px; background: var(--eye-bg); border: 1px solid var(--eye-line); border-radius: var(--r-sm); padding: 4px 8px; }
+.lab-stat-count { color: var(--eye-text-faint); font-family: var(--font-mono); font-size: 10px; }
+.lab-stat-latency { margin-left: auto; color: var(--eye-text-faint); font-family: var(--font-mono); font-size: 10px; }
+
+.lab-history-list { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow-y: auto; }
+.lab-history-row { display: flex; align-items: center; gap: 6px; font-size: 10.5px; background: var(--eye-bg); border: 1px solid var(--eye-line); border-radius: var(--r-sm); padding: 4px 8px; }
+.lab-history-case { color: var(--eye-text-dim); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lab-history-tag { font-family: var(--font-mono); font-size: 9px; color: var(--amber); }
+
+.lab-empty-sm { color: var(--eye-text-faint); font-size: 10.5px; }
+

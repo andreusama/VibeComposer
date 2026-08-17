@@ -98,7 +98,8 @@ describe('processBaulInput', () => {
       inputType: 'audio_transcript',
     });
 
-    expect(result).toEqual(FUSED_ADN);
+    expect(result.adnLirico).toEqual(FUSED_ADN);
+    expect(result.entry.inputType).toBe('audio_transcript');
 
     expect(fetch).toHaveBeenCalledTimes(1);
     const [url, options] = fetch.mock.calls[0];
@@ -138,7 +139,7 @@ describe('processBaulInput', () => {
     // A clean fallback: the caller's ADN comes back exactly as it went in,
     // never a corrupted/blank merge — this is the "actualización limpia"
     // guarantee even when the model misbehaves.
-    expect(result).toEqual(existingAdn);
+    expect(result.adnLirico).toEqual(existingAdn);
   });
 
   it('falls back to an empty ADN shape (not null/undefined) when there is no prior ADN and parsing fails', async () => {
@@ -150,7 +151,12 @@ describe('processBaulInput', () => {
       inputType: 'text',
     });
 
-    expect(result).toEqual(emptyAdnLirico());
+    expect(result.adnLirico).toEqual(emptyAdnLirico());
+    // A failed parse still logs a real entry — empty summary/tags, not a
+    // crash or a dropped log row (see parseBaulEntryMeta's best-effort
+    // philosophy in baulProcessor.js).
+    expect(result.entry).toMatchObject({ inputType: 'text', rawPreview: 'primera entrada, algo caótica', generatedSummary: '', tags: [] });
+    expect(typeof result.entry.latencyMs).toBe('number');
   });
 
   it('rejects an unknown inputType before ever calling the API', async () => {

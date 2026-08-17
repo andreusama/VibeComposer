@@ -14,6 +14,7 @@ import InspirationBlackHoleNode from './InspirationBlackHoleNode.jsx';
 import BaulFloatNode from './BaulFloatNode.jsx';
 import NoteSidePanel from './NoteSidePanel.jsx';
 import DebugConsole from './DebugConsole.jsx';
+import MockPlayground, { isMockSong } from './MockPlayground.jsx';
 import { setState } from '../state/store.js';
 import { supabase } from '../utils/supabaseClient.js';
 import { beginSave, endSave, subscribeSaveStatus } from './saveStatus.js';
@@ -25,12 +26,11 @@ import {
   loadOutputNodes, createOutputNode, deleteOutputNode, saveOutputPosition, setOutputPluggedNote,
   saveSongTitle, saveSongLyricSettings,
   loadTempoNodes, createTempoNode, saveTempoBpm, saveTempoPosition, deleteTempoNode,
-  resolveMainThreadPath,
+  resolveMainThreadPath, summarizeProgression,
   loadBaulNodes, createBaulNode, saveBaulNodePosition, deleteBaulNode,
   loadLyricDna,
 } from './canvasData.js';
 import { DIALECTS } from '../utils/rhyme.js';
-import { loadMuseProfile } from './museData.js';
 
 const NODE_TYPES = {
   textNote: TextNoteNode, chordProgression: ChordProgressionNode,
@@ -233,12 +233,6 @@ function resolveNoteLinkDirection(connection) {
   return {}; // neither handle is part of this family (chord/tempo handles) — not our concern
 }
 
-function summarizeProgression(cp) {
-  if (!cp?.progression?.length) return null;
-  const chords = cp.progression.map((c) => c.chord).filter(Boolean);
-  return chords.length ? chords.join(' · ') : null;
-}
-
 // A connected note's full current text for the muse's song-wide context —
 // every main-thread note is short (a handful of lyric lines), so there's no
 // need for a separate summarization pass (no extra LLM call just to
@@ -392,30 +386,10 @@ export default function CanvasScreen({ state, onExit }) {
     if (song?.id) { beginSave(); Promise.resolve(saveSongLyricSettings(song.id, language, dialect)).finally(endSave); }
   }, [song?.id]);
 
-  // The muse's per-project profile — a single evolving JSON, same
-  // load/update pattern as lyricDna below. Kept in local state so the
-  // background profile refresh (see museProfileUpdater.js) can hand back
-  // the updated profile without needing a reload for the *next* question
-  // to read it.
-  const [museProfile, setMuseProfile] = useState({});
-
-  useEffect(() => {
-    if (!song?.id) { setMuseProfile({}); return; }
-    let cancelled = false;
-    (async () => {
-      const { data } = await loadMuseProfile(song.id);
-      if (cancelled) return;
-      setMuseProfile(data?.muse_profile || {});
-    })();
-    return () => { cancelled = true; };
-  }, [song?.id]);
-
-  const handleMuseProfileUpdated = useCallback((nextProfile) => setMuseProfile(nextProfile), []);
-
-  // The baúl's fused ADN Lírico — deliberately separate from museProfile
-  // above (see baulProcessor.js / schema.sql for why). One evolving object
-  // per song, overwritten wholesale by BaulFloatNode after each
-  // processBaulInput call.
+  // The baúl's fused ADN Lírico — this is the only "vibe" source at the
+  // song level now (see baulProcessor.js / schema.sql for why). One
+  // evolving object per song, overwritten wholesale by BaulFloatNode after
+  // each processBaulInput call.
   const [lyricDna, setLyricDna] = useState(null);
 
   useEffect(() => {
@@ -494,8 +468,6 @@ export default function CanvasScreen({ state, onExit }) {
           sourceNoteId: note.id,
           lineId: note.lines?.[0]?.id,
           userId: state.session?.user?.id,
-          museProfile,
-          onMuseProfileUpdated: handleMuseProfileUpdated,
           lyricLanguage,
           lyricDialect,
           onClose: handleNodeDeleted,
@@ -504,7 +476,7 @@ export default function CanvasScreen({ state, onExit }) {
         },
       }];
     });
-  }, [song?.id, state.session?.user?.id, museProfile, handleMuseProfileUpdated, lyricLanguage, lyricDialect, handleNodeDeleted, handleClearMuseTarget]);
+  }, [song?.id, state.session?.user?.id, lyricLanguage, lyricDialect, handleNodeDeleted, handleClearMuseTarget]);
 
   // The black hole itself needs to show processing/success/error even if
   // its float panel is closed or off-screen — a status line inside the
@@ -1034,10 +1006,10 @@ export default function CanvasScreen({ state, onExit }) {
             verseText: sourceNote?.lines?.[0]?.text || '',
             noteFunction: sourceNote?.custom_label || sourceNote?.type || '',
             songStructure,
-            museProfile,
             lyricDna,
             lyricLanguage,
             lyricDialect,
+            songTitle,
           },
         };
       }
@@ -1049,7 +1021,7 @@ export default function CanvasScreen({ state, onExit }) {
       }
       return n;
     });
-  }, [nodes, edges, lyricLanguage, lyricDialect, museProfile, lyricDna]);
+  }, [nodes, edges, lyricLanguage, lyricDialect, lyricDna]);
 
   const handleSignOut = useCallback(async () => {
     if (!confirm('Sign out?')) return;
@@ -1101,6 +1073,14 @@ export default function CanvasScreen({ state, onExit }) {
 
         <CanvasContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} onAdd={handleContextAdd} />
         {import.meta.env.DEV && <DebugConsole />}
+        {import.meta.env.DEV && isMockSong(song) && (
+          <MockPlayground
+            songId={song.id}
+            lyricDna={lyricDna}
+            onLyricDnaUpdated={setLyricDna}
+            noteCount={nodes.filter((n) => n.type === 'textNote').length}
+          />
+        )}
 
         {loadError && <div className="canvas-error">{loadError}</div>}
 

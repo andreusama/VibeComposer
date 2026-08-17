@@ -23,12 +23,22 @@
 //     of each group's first appearance. A key that never recurs isn't a
 //     rhyme, it's free verse — no letter.
 
-import { LANG_RULES, stripToLetters, normalizeY, silenceGuQu } from './syllables.js';
+import { LANG_RULES, stripToLetters, normalizeY, silenceGuQu, ACCENT_VOWELS, ACCENT_LETTERS } from './syllables.js';
 
 export const DIALECTS = {
   es: ['central'],
   ca: ['oriental', 'occidental'],
 };
+
+// Built from the same shared ACCENT_VOWELS/ACCENT_LETTERS constants
+// syllables.js's stripToLetters uses — see its comment for why these can't
+// be hand-copied literals (á went missing from four of these
+// independently). Vowel-only matching uses ACCENT_VOWELS (ñ/ç aren't
+// vowels); general letter-boundary trimming uses the full ACCENT_LETTERS.
+const VOWEL_RUN_RE = new RegExp(`[aeiou${ACCENT_VOWELS}]+`, 'g');
+const VOWEL_RE = new RegExp(`[aeiou${ACCENT_VOWELS}]`);
+const wordBoundaryTrimRe = () => new RegExp(`^[^a-z${ACCENT_LETTERS}]+|[^a-z${ACCENT_LETTERS}]+$`, 'gi');
+const nonLetterRe = () => new RegExp(`[^a-z${ACCENT_LETTERS}]`, 'gi');
 
 // Written accents that mark STRESS. Catalan's diaeresis (ï, ü) is excluded
 // on purpose — it marks a hiatus, not necessarily the stressed syllable,
@@ -61,9 +71,8 @@ function cleanWord(rawWord, lang) {
 function findSyllableNuclei(clean, lang) {
   const rules = LANG_RULES[lang] || LANG_RULES.es;
   const nuclei = [];
-  const runRe = /[aeiouàèéíïòóúü]+/g;
   let match;
-  while ((match = runRe.exec(clean))) {
+  while ((match = VOWEL_RUN_RE.exec(clean))) {
     const run = match[0];
     let pieceStart = match.index;
     let pieceText = run[0];
@@ -136,8 +145,6 @@ function normalizeAssonantVowel(v, lang, dialect) {
   return v;
 }
 
-const VOWEL_RE = /[aeiouàèéíïòóúü]/;
-
 // The two rhyme keys for one word: everything from the stressed vowel
 // onward (consonant rhyme), and just the vowels from that point, per-
 // language normalized (assonant rhyme).
@@ -161,7 +168,7 @@ function rhymeKeys(rawWord, lang, dialect) {
 function wordsOf(line) {
   return (line || '').trim().split(/\s+/).filter(Boolean).map((raw) => ({
     raw,
-    clean: raw.toLowerCase().replace(/^[^a-zàèéíïòóúüñç]+|[^a-zàèéíïòóúüñç]+$/gi, ''),
+    clean: raw.toLowerCase().replace(wordBoundaryTrimRe(), ''),
   }));
 }
 
@@ -170,6 +177,26 @@ function wordsOf(line) {
 // by this module's own rules, and to check a candidate word against that —
 // the same primitives classifyStanzaRhymes already uses internally, just
 // exposed for a single word instead of a whole stanza.
+
+// Standard aguda/llana/esdrújula classification (which syllable, counting
+// from the end, carries the stress) — reuses the exact same stress-finding
+// logic the rhyme keys themselves are built on (findSyllableNuclei/
+// findStress above), so a word's stress_type always agrees with its own
+// rhyme_key. Used by scripts/seed-lexicon-kaikki.ts; exposed here rather than
+// duplicated so the seed data and the live app can never drift apart.
+export function classifyWordStress(rawWord, lang = 'es') {
+  const clean = cleanWord(rawWord, lang);
+  if (!clean) return null;
+  const nuclei = findSyllableNuclei(clean, lang);
+  if (!nuclei.length) return null;
+  const stressIdx = findStress(clean, lang);
+  if (stressIdx === null) return null;
+  const stressedNucleusIndex = nuclei.findIndex((n) => stressIdx >= n.start && stressIdx < n.start + n.text.length);
+  const fromEnd = nuclei.length - 1 - stressedNucleusIndex; // 0 = last syllable
+  if (fromEnd === 0) return 'aguda';
+  if (fromEnd === 1) return 'llana';
+  return 'esdrujula';
+}
 
 // The rhyme key a *line* ends on — its last word's tail, by the same rule
 // classifyStanzaRhymes uses to group lines.
@@ -182,7 +209,7 @@ export function getLineRhymeKey(line, lang = 'es', dialect = 'central') {
 // The rhyme key of a single bare word (e.g. one the user typed as "rhyme
 // with this"), not a whole line.
 export function getWordRhymeKey(word, lang = 'es', dialect = 'central') {
-  const clean = (word || '').toLowerCase().replace(/[^a-zàèéíïòóúüñç]/gi, '');
+  const clean = (word || '').toLowerCase().replace(nonLetterRe(), '');
   return clean ? rhymeKeys(clean, lang, dialect) : null;
 }
 
@@ -261,6 +288,20 @@ export function classifyStanzaRhymes(lines, lang = 'es', dialect = 'central') {
     type: typeByIndex.get(i) ?? null,
     internalRhymeWords: findInternalRhymes(entry.words, lang, dialect),
   }));
+}
+
+// Content-driven Socratic trigger (deliberately NOT a "user paused typing"
+// timer — the writer needs room to think in silence, that's a real product
+// call, not an oversight). A line "breaks" the stanza's established scheme
+// when sibling lines already form a real rhyme group — classifyStanzaRhymes
+// only assigns a type once 2+ lines share a key, so any OTHER line with a
+// non-null type already proves a scheme exists — but this line joined none
+// of them. Pure and local: no API call, just whether to show the gutter
+// nudge; the actual SOCRATIC call only fires if the user taps it.
+export function detectRhymeFriction(rhymeLines, index) {
+  const entry = rhymeLines[index];
+  if (!entry || !entry.line?.trim() || entry.type) return false;
+  return rhymeLines.some((other, i) => i !== index && other.type);
 }
 
 // Lightweight heuristic, not a full echo/Leonine classification (see

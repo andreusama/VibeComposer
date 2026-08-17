@@ -49,7 +49,23 @@ export async function composeProgression(vibeProfile) {
 const DAILY_LIMIT = 100;
 const TODAY = new Date().toDateString();
 
+// Read-only — MuseEyePanel's header shows this so debugging doesn't blindly
+// eat into the same daily budget as real chord-generation/muse usage in
+// production (they share one counter, see checkAndIncrementLimit below).
+export function getUsageRemaining() {
+  const stored = JSON.parse(localStorage.getItem('vc_usage') || '{}');
+  const count = stored.date === TODAY ? stored.count : 0;
+  return { used: count, remaining: Math.max(0, DAILY_LIMIT - count), limit: DAILY_LIMIT };
+}
+
 export function checkAndIncrementLimit() {
+  // No cap while running the local dev server (`npm run dev`) — the
+  // production build (`npm run build`/`vite preview`) still enforces the
+  // real limit below; import.meta.env.DEV is false there. Requested
+  // explicitly to stop local development/testing from tripping the same
+  // daily counter real users share.
+  if (import.meta.env.DEV) return;
+
   const stored = JSON.parse(localStorage.getItem('vc_usage') || '{}');
   
   if (stored.date !== TODAY) {

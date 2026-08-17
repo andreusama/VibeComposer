@@ -57,18 +57,29 @@ export async function loadCanvasData(songId) {
   return { notes, progressions: progressions || [], links: links || [], error: null };
 }
 
-export async function createNote(songId, { x, y }) {
+// `threadIndex`/`text` are mobile-only extras (see migration_mobile_thread_index.sql)
+// — desktop callers just omit them and get the exact same behavior as
+// before. `text` lets a variant start with a copy of its origin note's
+// text instead of always creating blank.
+export async function createNote(songId, { x, y }, { threadIndex, text = '', type = 'verse', customLabel } = {}) {
   const { data: section, error } = await supabase
     .from('sections')
-    .insert({ song_id: songId, type: 'verse', canvas_x: x, canvas_y: y })
+    .insert({
+      song_id: songId, type, custom_label: customLabel ?? null, canvas_x: x, canvas_y: y,
+      ...(threadIndex != null ? { thread_index: threadIndex } : {}),
+    })
     .select().single();
   if (error) return { error };
 
   const { data: line, error: lineError } = await supabase
-    .from('lines').insert({ section_id: section.id, position: 0, text: '' }).select().single();
+    .from('lines').insert({ section_id: section.id, position: 0, text }).select().single();
   if (lineError) return { error: lineError };
 
   return { note: { ...section, lines: [line] } };
+}
+
+export async function saveNoteThreadIndex(noteId, threadIndex) {
+  return supabase.from('sections').update({ thread_index: threadIndex }).eq('id', noteId);
 }
 
 export async function deleteNote(noteId) {
@@ -214,6 +225,30 @@ export async function loadLyricDna(songId) {
   return supabase.from('songs').select('lyric_dna').eq('id', songId).single();
 }
 
+// ─── Baúl entry log — dev-only audit trail, see schema.sql's baul_entries
+// comment. Never read by anything user-facing; only MuseEyePanel's baúl
+// tab. Best-effort by design: callers should never let a logging failure
+// block the real absorb/save flow (see BaulFloatNode/BaulSheet's .catch).
+
+export async function insertBaulEntry(songId, { inputType, rawPreview, generatedSummary, tags, latencyMs }) {
+  return supabase.from('baul_entries').insert({
+    song_id: songId, input_type: inputType, raw_preview: rawPreview,
+    generated_summary: generatedSummary, tags, latency_ms: latencyMs ?? null,
+  });
+}
+
+export async function loadBaulEntries(songId, limit = 50) {
+  return supabase.from('baul_entries').select('*').eq('song_id', songId)
+    .order('created_at', { ascending: false }).limit(limit);
+}
+
+// Mirrors handleClear's intent ("the muse forgets them too") — clearing
+// the baúl should clear its log too, or the debug panel would keep
+// showing a pipeline history for material that's supposedly forgotten.
+export async function clearBaulEntries(songId) {
+  return supabase.from('baul_entries').delete().eq('song_id', songId);
+}
+
 // ─── Output nodes ───────────────────────────────────────────────────────────
 // A song can hold several — variants/mixes of the same song ("radio edit",
 // "acoustic") — each a sink a note plugs into to render its own final
@@ -290,6 +325,12 @@ function findChainStart(notes, links, fromId) {
   return current;
 }
 
+export function summarizeProgression(cp) {
+  if (!cp?.progression?.length) return null;
+  const chords = cp.progression.map((c) => c.chord).filter(Boolean);
+  return chords.length ? chords.join(' · ') : null;
+}
+
 // A linear walk from the start of the chain to wherever it ends — no fork
 // or merge choices to resolve, since a note only ever has one child.
 export function resolveMainThreadPath(notes, links, startNoteId) {
@@ -352,6 +393,18 @@ export async function promoteVariant(noteId, lineId, variant, currentText) {
   if (delError) return { error: delError };
 
   return supabase.from('lines').update({ text: variant.text }).eq('id', lineId);
+}
+
+// Mobile's Tools drawer only ever wants annotations, never the legacy
+// variants/history that loadNoteDetail bundles alongside them for
+// desktop's NoteSidePanel — a dedicated, lighter query instead of pulling
+// (and silently querying) two tables the mobile UI no longer exposes.
+// Whole-verse comments are annotations with null start/end_offset;
+// selection-anchored comments (not built yet) are the same table with
+// real offsets — both come back from this one call, callers filter by
+// offset presence for whichever they need.
+export async function loadAnnotations(lineId) {
+  return supabase.from('annotations').select('*').eq('line_id', lineId).order('created_at');
 }
 
 export async function addAnnotation(lineId, authorId, body, category) {

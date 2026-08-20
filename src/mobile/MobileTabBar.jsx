@@ -3,14 +3,14 @@
 // which use a back button instead. `tabs` is caller-supplied so this stays
 // generic rather than hardcoding "Projects"/"Profile" itself.
 export default function MobileTabBar({ tabs, active }) {
-  return (
-    <div className="mobile-tabbar">
-      {tabs.map((t) => (
-        <div key={t.key} className={`mobile-tab${t.key === active ? ' mobile-tab-active' : ''}`}>
-          <span className="mobile-tab-icon">{t.icon}</span>
-          <span>{t.label}</span>
-        </div>
-      ))}
-    </div>
-  );
+  //return (
+    //<div className="mobile-tabbar">
+    //  {tabs.map((t) => (
+    //    <div key={t.key} className={`mobile-tab${t.key === active ? ' mobile-tab-active' : ''}`}>
+    //      <span className="mobile-tab-icon">{t.icon}</span>
+    //      <span>{t.label}</span>
+    //    </div>
+    //  ))}
+    //</div>
+  //);
 }

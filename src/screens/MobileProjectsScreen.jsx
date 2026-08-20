@@ -76,7 +76,7 @@ export default function MobileProjectsScreen({ state, justEntered }) {
 
   useEffect(() => {
     if (!justEntered) return;
-    loadProjectSummaries().then(({ songs, error }) => setState({ songs, projectError: error }));
+    loadProjectSummaries().then(({ songs, error }) => setState({ songs, projectError: error, songsLoaded: true }));
   }, [justEntered]);
 
   const filtered = useMemo(() => {
@@ -109,36 +109,42 @@ export default function MobileProjectsScreen({ state, justEntered }) {
 
   return (
     <MobileScreen className="mp-screen">
-      <div className="mp-header">
-        <h1 className="mp-title">Projects</h1>
-        <div className="mp-search">
-          <span className="mp-search-icon">⌕</span>
-          <input
-            type="text"
-            placeholder="Search"
-            autoComplete="off"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </div>
-      </div>
-
       <div className="mp-body">
-        {state.projectError && <p className="thread-status thread-status-error">{state.projectError}</p>}
-        {!state.projectError && filtered.length === 0 && (
-          <div className="thread-empty"><p>No projects yet.</p></div>
+        <div className="mp-header glass">
+          <h1 className="mp-title">Projects</h1>
+          <div className="mp-search">
+            <span className="mp-search-icon">⌕</span>
+            <input
+              type="text"
+              placeholder="Search"
+              autoComplete="off"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+        </div>
+
+        {!state.songsLoaded ? (
+          <div className="mp-loading"><span className="mp-spinner" /></div>
+        ) : (
+          <>
+            {state.projectError && <p className="thread-status thread-status-error">{state.projectError}</p>}
+            {!state.projectError && filtered.length === 0 && (
+              <div className="thread-empty"><p>No projects yet.</p></div>
+            )}
+            {filtered.map((song) => (
+              <ProjectRow
+                key={song.id}
+                song={song}
+                onOpen={() => openSong(song)}
+                onDelete={() => handleDeleteProject(song)}
+              />
+            ))}
+          </>
         )}
-        {filtered.map((song) => (
-          <ProjectRow
-            key={song.id}
-            song={song}
-            onOpen={() => openSong(song)}
-            onDelete={() => handleDeleteProject(song)}
-          />
-        ))}
       </div>
 
-      <MobileFab onClick={handleNewProject} pending={creating} title="new project" aboveTabBar />
+      <MobileFab onClick={handleNewProject} pending={creating} title="New project" aboveTabBar />
 
       {/* "Profile" has no screen behind it yet — tab shown for the design's
           bottom-nav chrome, not wired to anything until that phase exists. */}

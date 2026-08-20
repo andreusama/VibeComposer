@@ -30,13 +30,30 @@ function haptic(pattern) {
 // same "measure once at open time" approach SelectionCallout already uses
 // for its pill — not a live-tracked anchor, so it doesn't fight scrolling
 // mid-interaction. Falls back to placing the panel ABOVE the line if there
-// isn't room below in the current viewport.
+// isn't room below in the current viewport — `placement` drives both the
+// pointer's direction and which edge it attaches to (see PopoverPointer).
 function anchorStyle(anchorRect, estimatedHeight = 260) {
-  if (!anchorRect) return {};
+  if (!anchorRect) return { style: {}, placement: 'below' };
   const fitsBelow = anchorRect.bottom + estimatedHeight + 12 <= window.innerHeight;
   return fitsBelow
-    ? { top: anchorRect.bottom + 8, left: anchorRect.left, width: anchorRect.width }
-    : { bottom: window.innerHeight - anchorRect.top + 8, left: anchorRect.left, width: anchorRect.width };
+    ? { style: { top: anchorRect.bottom + 8, left: anchorRect.left, width: anchorRect.width }, placement: 'below' }
+    : { style: { bottom: window.innerHeight - anchorRect.top + 8, left: anchorRect.left, width: anchorRect.width }, placement: 'above' };
+}
+
+// A small diamond "pico" connecting the popover back to the exact line it's
+// about — the origin-line amber highlight (.ne-row-muse-origin) is the
+// other half of that same signal, never just one alone (design ref: "dos
+// señales a la vez"). Rendered as its own position: fixed element, sibling
+// to .mp-anchored rather than a pseudo-element on it — .mp-anchored has its
+// own overflow-y: auto for long content, which would clip a pointer poking
+// out past its edge if it lived inside that box.
+function PopoverPointer({ anchorRect, style, placement }) {
+  if (!anchorRect) return null;
+  const left = (style.left ?? 0) + 24;
+  const edgeStyle = placement === 'below'
+    ? { top: (style.top ?? 0) - 9 }
+    : { bottom: (style.bottom ?? 0) - 9 };
+  return <div className={`mp-pointer mp-pointer-${placement}`} style={{ left, ...edgeStyle }} />;
 }
 
 // A single swipeable card — deliberately only ever ONE rendered at a time
@@ -494,7 +511,7 @@ export default function MusePopover({
     onClose();
   }, [targetVerse, onReplace, onInsertBelow, onClose]);
 
-  const style = anchorStyle(anchorRect);
+  const { style, placement } = anchorStyle(anchorRect);
 
   return (
     <>
@@ -502,7 +519,8 @@ export default function MusePopover({
           blocks the rest of the screen; this only exists to catch an
           outside tap and close. */}
       <div className="mp-scrim" onClick={onClose} />
-      <div className="mp-anchored" style={style} onClick={(e) => e.stopPropagation()}>
+      <PopoverPointer anchorRect={anchorRect} style={style} placement={placement} />
+      <div className={`mp-anchored mp-anchored-${placement}`} style={style} onClick={(e) => e.stopPropagation()}>
         <div className="mp-head">
           <span className="mp-head-target">{targetVerse ? `“${targetVerse.text}”` : 'the muse'}</span>
           <button className="mp-close" onClick={onClose} title="close">✕</button>

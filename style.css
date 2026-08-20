@@ -103,6 +103,40 @@
     --radius-pill: 99px;
 }
 
+/* ─── Liquid glass ────────────────────────────────────────────────────────────
+   Scoped deliberately narrow: only what actually FLOATS over other content —
+   nav bars, the FAB, transient popovers. Never a content surface (thread
+   cards, the note editor's own writing textarea) — those stay opaque
+   Manuscript paper, full contrast, always, so the lyrics never fight a
+   blurred background for legibility. Three tints because three different
+   floating surfaces sit over three different backdrops: neutral paper-glass
+   for nav chrome, dark glass for the ink-colored FAB, warm amber-glass for
+   the muse (matching her existing color everywhere else in this app). The
+   inset top highlight is what actually reads as "glass" instead of just
+   "translucent" — a thin catch-light along the upper edge, the way a real
+   pane of glass or acrylic panel picks up light from above. */
+.glass {
+    background: rgba(251, 249, 244, 0.68);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), var(--sh-2);
+}
+.glass-dark {
+    background: rgba(29, 28, 26, 0.72);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), var(--sh-2);
+}
+.glass-amber {
+    background: rgba(251, 241, 225, 0.74);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.55);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), var(--sh-2);
+}
+
 /* Anchors the rem scale at exactly 16px, explicitly — so no intermediate
    container accidentally redefining font-size in % or em could ever make
    the --fs-* variables above drift from the table they're named after. */
@@ -4339,14 +4373,18 @@ body::before {
     width: 56px;
     height: 56px;
     border-radius: 50%;
-    background: var(--ink);
     color: var(--paper);
-    border: none;
     font-size: var(--fs-h2);
     line-height: 1;
-    box-shadow: var(--sh-3);
     cursor: pointer;
     z-index: 5;
+    /* glass-dark — see FabMenu's own .fab-menu-btn for why this is inlined
+       rather than the shared .glass-dark class (border-radius:50%). */
+    background: rgba(29, 28, 26, 0.72);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), var(--sh-3);
 }
 .mobile-fab:disabled { opacity: 0.6; cursor: default; }
 /* Set via the <MobileFab aboveTabBar> prop on screens that also mount
@@ -4359,11 +4397,15 @@ body::before {
     position: absolute;
     left: 0; right: 0; bottom: 0;
     display: flex;
-    border-top: 1px solid var(--hairline);
-    background: rgba(251, 249, 244, 0.92);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
     padding: var(--space-2) 0 calc(var(--space-2) + env(safe-area-inset-bottom));
+    /* glass — edge-to-edge, not a floating card (a bottom tab bar spans
+       full width by convention), so no border-radius/margin like the other
+       glass surfaces, but the same material otherwise. */
+    background: rgba(251, 249, 244, 0.68);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border-top: 1px solid rgba(255, 255, 255, 0.6);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
 }
 
 .mobile-tab {
@@ -4385,17 +4427,37 @@ body::before {
    resized desktop window, so it's also the first to account for
    env(safe-area-inset-*) — iPhone notch/home-indicator, Android gesture bar. */
 
+/* Liquid glass, floating over scrolling content — moved from being a fixed
+   flex-sibling above .thread-body to being that scroll container's own
+   FIRST CHILD, position: sticky. That's what actually makes the cards pass
+   BEHIND it (visible, blurred) as you scroll, instead of just recoloring a
+   bar that was never part of the scrolling content to begin with. The
+   cards themselves stay plain opaque paper — glass is for chrome that
+   floats, never for the lyrics you're trying to read. */
 .thread-header {
+    position: sticky;
+    top: env(safe-area-inset-top);
+    z-index: 5;
     display: flex;
     align-items: center;
     gap: var(--space-3);
-    padding: calc(var(--space-3) + env(safe-area-inset-top)) var(--space-4) var(--space-3);
-    border-bottom: 1px solid var(--hairline);
-    background: var(--bg);
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--r-lg);
+    margin-bottom: var(--space-4);
     flex-shrink: 0;
 }
 
+/* Apple HIG's baseline touch-target minimum is 44x44pt — this used to be a
+   naked glyph sized by padding alone (21x30px, well under it, on the one
+   control that leaves the screen). Explicit min-width/height + flex
+   centering keeps the glyph's visual size unchanged while giving it a real
+   tap target, same fix applied to .thread-menu-btn below. */
 .thread-back {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
     font-family: var(--font-sans);
     font-size: var(--fs-h2);
     line-height: 1;
@@ -4403,7 +4465,6 @@ body::before {
     border: none;
     color: var(--ink);
     cursor: pointer;
-    padding: var(--space-1) var(--space-1-5);
 }
 
 .thread-title-block { flex: 1; min-width: 0; }
@@ -4438,13 +4499,26 @@ body::before {
     align-items: center;
     gap: 4px;
 }
+/* Real tap target was 15px tall (padding: 0) — the worst offender on this
+   screen, and not a trivial one: it opens a full language/dialect sheet,
+   a genuine navigation action, not just inline disclosure text. Not
+   pushed all the way to the 44pt HIG minimum (that would visually bloat a
+   secondary sub-label under the title) — 36px is the same middle ground
+   Apple's own compact secondary controls use, a deliberate step short of
+   the primary-control minimum, not an oversight. The header has no fixed
+   height, so this grows it slightly rather than needing any overlap tricks.
+   The header has no fixed height, so it just grows to fit — no overlap
+   risk with the card list below, unlike an invisible-hitbox trick would
+   have had this close to the header's bottom edge. */
 .thread-lang-btn {
     display: flex;
     align-items: center;
     gap: 2px;
     background: none;
     border: none;
-    padding: 0;
+    padding: 10px 4px;
+    margin-left: -4px;
+    min-height: 36px;
     font-family: var(--font-sans);
     font-size: var(--fs-secondary);
     color: var(--muted);
@@ -4454,8 +4528,11 @@ body::before {
 
 .thread-menu-btn {
     flex-shrink: 0;
-    width: 34px;
-    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
     border-radius: 50%;
     background: var(--bg-deep);
     border: none;
@@ -4538,7 +4615,7 @@ body::before {
 .thread-body {
     flex: 1;
     overflow-y: auto;
-    padding: var(--space-4) var(--space-4) calc(var(--space-8) + env(safe-area-inset-bottom));
+    padding: calc(var(--space-4) + env(safe-area-inset-top)) var(--space-4) calc(var(--space-8) + env(safe-area-inset-bottom));
     display: flex;
     flex-direction: column;
     align-items: stretch;
@@ -4566,11 +4643,18 @@ body::before {
     align-items: center;
 }
 
+/* The visual dot stays a deliberately small, quiet affordance (20px) — the
+   button's real hit area is padded out to the 44x44pt HIG minimum around
+   it, same "small visual mark, larger invisible tap zone" pattern iOS's
+   own chrome uses, rather than growing the dot itself and making it feel
+   like a bigger, louder action than "insert a section here" should read. */
 .thread-insert {
     background: none;
     border: none;
     cursor: pointer;
-    padding: var(--space-2) 0;
+    padding: var(--space-3);
+    min-width: 44px;
+    min-height: 44px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -4732,11 +4816,20 @@ body::before {
    specific to this screen; shell/FAB/tab-bar come from the shared
    .mobile-screen/.mobile-fab/.mobile-tabbar classes above. */
 
+/* Same sticky-glass technique as .thread-header/.ne-header — first child
+   of the scroll container (.mp-body), not a fixed sibling above it, so the
+   project rows genuinely pass behind it while scrolling. Explicit side
+   margin here (unlike those two) since .mp-body has no horizontal padding
+   of its own for the rows to inherit — .mp-row is meant to run edge to
+   edge, so the header supplies its own floating-card inset instead. */
 .mp-header {
+    position: sticky;
+    top: env(safe-area-inset-top);
+    z-index: 5;
     flex-shrink: 0;
-    padding: calc(var(--space-4) + env(safe-area-inset-top)) var(--space-4) var(--space-3);
-    border-bottom: 1px solid var(--hairline);
-    background: var(--bg);
+    margin: var(--space-3) var(--space-4);
+    padding: var(--space-4) var(--space-4) var(--space-3);
+    border-radius: var(--r-lg);
 }
 
 .mp-title {
@@ -4769,6 +4862,7 @@ body::before {
 .mp-body {
     flex: 1;
     overflow-y: auto;
+    padding-top: env(safe-area-inset-top);
     padding-bottom: calc(96px + env(safe-area-inset-bottom));
 }
 
@@ -4818,6 +4912,7 @@ body::before {
 
 .mp-row-delete {
     flex-shrink: 0;
+    min-width: 44px;
     min-height: 44px;
     display: flex;
     align-items: center;
@@ -4835,15 +4930,54 @@ body::before {
    only for now; the text-selection toolbar and rhyme popover (design ref
    #3, states 2-3) aren't built yet. */
 
+/* Liquid glass, sticky — same technique as .thread-header (see its own
+   comment): moved to be .ne-body's first child so the writing surface
+   genuinely scrolls behind it instead of just being recolored in place.
+   The lines you're actually writing stay plain matte paper underneath —
+   glass is for the chrome floating above them, never the words themselves. */
 .ne-header {
+    position: sticky;
+    top: env(safe-area-inset-top);
+    z-index: 5;
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    padding: calc(var(--space-3) + env(safe-area-inset-top)) var(--space-4) var(--space-3);
-    border-bottom: 1px solid var(--hairline);
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--r-lg);
+    margin-bottom: var(--space-3);
     flex-shrink: 0;
 }
+/* Was reusing desktop's .canvas-note-type verbatim — that class's font-size
+   is deliberately multiplied by --canvas-scale, a React Flow zoom-level
+   token that only makes sense on the infinite canvas. This screen has no
+   canvas/zoom at all, but --canvas-scale is a fluid, viewport-width-based
+   :root value clamped to a MINIMUM of 0.82 at any width under 480px — so
+   on every phone-width viewport this select silently rendered at
+   10px * 0.82 = 8.2px, an accident of token reuse, not a deliberate small
+   size. Same visual language as the pill badges elsewhere (thread cards,
+   desktop canvas), fixed size instead, with real padding for a proper tap
+   target on what's a genuinely consequential control (changes the note's
+   whole section type). */
+.ne-type-select {
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--thread);
+    background: var(--thread-soft);
+    border: none;
+    border-radius: 20px;
+    padding: 10px 14px;
+    min-height: 36px;
+    cursor: pointer;
+}
+
 .ne-back {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
     font-family: var(--font-sans);
     font-size: var(--fs-h2);
     line-height: 1;
@@ -4851,7 +4985,6 @@ body::before {
     border: none;
     color: var(--ink);
     cursor: pointer;
-    padding: var(--space-1) var(--space-1-5);
 }
 .ne-custom-label {
     font-family: var(--font-sans);
@@ -4862,16 +4995,36 @@ body::before {
     flex: 1;
     min-width: 0;
 }
-.ne-menu {
+/* Was "···" (ellipsis) wired straight to delete — the ellipsis glyph is
+   the system-wide signal for "show me a menu," and this had no menu
+   behind it, it deleted the note on tap (behind a confirm()). Tapping the
+   universal "more options" icon and getting an immediate destructive
+   action instead of a menu is a real convention break, not a styling
+   nit. Simplest correct fix: use the same 🗑 this app already uses for
+   delete everywhere else (MobileProjectsScreen, home.js) instead of
+   inventing a menu for a single action — consistent icon language instead
+   of a false "more options" promise. */
+.ne-delete {
     margin-left: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
     background: none;
     border: none;
-    color: var(--graphite);
-    font-size: var(--fs-label);
+    color: var(--faint);
+    font-size: var(--fs-body);
     cursor: pointer;
-    padding: var(--space-1) var(--space-2);
 }
+.ne-delete:active { color: var(--rose); }
+
 .ne-done {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
     background: none;
     border: none;
     color: var(--chord);
@@ -4884,7 +5037,7 @@ body::before {
 .ne-body {
     flex: 1;
     overflow-y: auto;
-    padding: var(--space-3) var(--space-4) calc(var(--space-8) + env(safe-area-inset-bottom));
+    padding: calc(var(--space-3) + env(safe-area-inset-top)) var(--space-4) calc(var(--space-8) + env(safe-area-inset-bottom));
 }
 
 .ne-row {
@@ -4896,12 +5049,12 @@ body::before {
     margin: 0 calc(var(--space-2) * -1);
     transition: opacity 0.15s, background-color 0.15s, box-shadow 0.15s;
 }
-/* The gap between rows lives here, not in .ne-line-input's own padding —
-   each line reads as its own paragraph-like block (Apple Notes' rhythm:
-   a blank-line-sized gap between entries, not just generous leading
-   inside one), and using a sibling margin instead of padding means the
-   very last row doesn't carry a dangling gap before the toolbar. */
-.ne-row + .ne-row { margin-top: 22px; }
+/* Tighter than the original "blank-line-sized gap" (was 22px) — per
+   design ref, lines should read as one continuous stanza, closer together
+   than Apple Notes' paragraph rhythm. Still a sibling margin, not padding
+   inside .ne-line-input, so the last row doesn't carry a dangling gap
+   before the toolbar. */
+.ne-row + .ne-row { margin-top: 8px; }
 .ne-row-dimmed { opacity: 0.25; }
 
 /* Live the instant the wake-word + comma/colon is typed (see
@@ -4917,6 +5070,14 @@ body::before {
 .ne-row-muse .ne-line-input { color: var(--amber); font-style: italic; }
 .ne-row-muse .ne-line-input::placeholder { color: var(--amber); opacity: 0.6; }
 .ne-gutter-muse-icon { color: var(--amber); font-size: var(--fs-label); }
+
+/* The other half of the popover→line connection (.mp-pointer is the
+   first) — same amber as the muse's own header, so origin and direction
+   are never signaled by just one of the two at a time (design ref: "dos
+   señales a la vez, nunca una sola"). Plain tint, not .ne-row-muse's
+   italic/bordered treatment — this is the artist's own line, not a
+   message to the muse, so the text itself stays exactly as written. */
+.ne-row-muse-origin { background: var(--amber-soft); }
 
 .ne-gutter {
     flex-shrink: 0;
@@ -4955,16 +5116,75 @@ body::before {
 }
 .ne-gutter-friction:active { opacity: 1; }
 
-/* Voice-memo badge (LineAudioBadge) — reuses the gutter's existing narrow
-   column, same visual weight as the muse-icon/friction dot above it. */
-.ne-gutter-audio {
+/* Voice-memo slot — the right-side mirror of .ne-gutter: same fixed 22px
+   width on EVERY row regardless of whether that line has a recording, so
+   adding/removing a memo never shifts the textarea's own width. Only
+   .ne-audio-badge inside it is conditionally rendered. */
+.ne-audio-slot {
+    flex-shrink: 0;
+    width: 22px;
+    display: flex;
+    justify-content: center;
+}
+/* The visible mark is a small solid dot (blue, this app's --chord color —
+   distinct from the gutter's thread-green rhyme/syllable marks, since this
+   is an unrelated kind of attachment, not a lyric-craft metric) — the
+   button itself is padded out well beyond the dot for a real tap target,
+   same "small visual mark, larger invisible tap zone" pattern as
+   .thread-insert's own dot. */
+.ne-audio-badge {
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     background: none;
     border: none;
     padding: 0;
-    color: var(--muted);
-    font-size: 11px;
-    letter-spacing: -0.02em;
     cursor: pointer;
+}
+.ne-audio-badge-dot {
+    min-width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--chord);
+    color: #fff;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    line-height: 14px;
+    text-align: center;
+}
+
+/* The undo snackbar for a muse-accepted line replacement — see
+   handlePopoverReplace's comment in NoteEditorScreen.jsx. z-index above the
+   FAB (62) so it's never hidden behind it if the two ever overlap, though
+   centered vs. the FAB's right-anchored position keeps that unlikely. */
+.ne-undo-toast {
+    position: fixed;
+    left: 50%;
+    bottom: calc(96px + env(safe-area-inset-bottom));
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    background: var(--ink);
+    color: var(--paper);
+    padding: var(--space-3) var(--space-4);
+    border-radius: 999px;
+    box-shadow: var(--sh-3);
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    z-index: 63;
+    white-space: nowrap;
+}
+.ne-undo-toast button {
+    background: none;
+    border: none;
+    color: var(--amber);
+    font-weight: 600;
+    font-size: var(--fs-secondary);
+    cursor: pointer;
+    padding: 0;
 }
 
 /* A suggestion card mid vertical-drag is being previewed in place — a
@@ -4982,10 +5202,16 @@ body::before {
     border: none;
     background: none;
     font-family: var(--font-body);
-    /* 17px — iOS Dynamic Type's default body size, not this app's own
-       --fs-lyric-lead (18px) — a deliberate platform-convention match, not
-       a token substitution. */
-    font-size: 17px;
+    /* 1.0625rem (17px at the default root size) — iOS Dynamic Type's
+       default body size, not this app's own --fs-lyric-lead (18px) — a
+       deliberate platform-convention match, not a token substitution.
+       rem, not a bare 17px: this is the app's actual primary writing
+       surface, and a fixed px was the one text element in the whole app
+       that wouldn't scale with the reader's own OS/browser text-size
+       preference the way every --fs-* token elsewhere already does (HIG's
+       "Text views" page: "adopt Dynamic Type so your text still looks
+       good if people change text size"). */
+    font-size: 1.0625rem;
     /* Tighter than the 1.5 used elsewhere on purpose — Notes' internal
        leading (within one wrapped entry) is closer than a "composition
        editor" default; the paragraph-like separation between different
@@ -5260,16 +5486,45 @@ body::before {
    square with its shadow is the right call. Safe now that the deck only
    ever renders one card at a time (no stacked card behind to double up
    against or bleed through — see .mp-deck-card below). */
+/* Warm amber glass, not the neutral .glass tint — this panel IS the muse
+   (amber is her color everywhere else in this app: the gutter's muse icon,
+   .ne-row-muse, the desktop float node), and unlike the nav headers it has
+   nothing structural to scroll behind — it's a genuinely transient popover
+   that appears floating over the canvas, the textbook case the design ref
+   called out as "already floats conceptually, so the material should
+   match the behavior." */
 .mp-anchored {
     position: fixed;
     z-index: 61;
     max-width: calc(100vw - var(--space-4) * 2);
     max-height: min(48vh, 420px);
     overflow-y: auto;
-    background: var(--bg);
     border-radius: var(--r-lg);
-    box-shadow: var(--sh-3);
     padding: var(--space-3);
+    background: rgba(251, 241, 225, 0.78);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.55);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), var(--sh-3);
+}
+
+/* The "pico" connecting the panel back to its origin line — a rotated
+   square, half hidden under the panel's own edge (z-index below .mp-
+   anchored's 61) so only the outward-pointing triangle tip shows, the
+   standard speech-bubble-caret trick. A separate position: fixed element
+   rather than a pseudo-element of .mp-anchored itself, since that panel
+   scrolls (overflow-y: auto) and would clip anything poking past its own
+   box. Same glass material as the panel so the seam reads as one surface. */
+.mp-pointer {
+    position: fixed;
+    z-index: 60;
+    width: 18px;
+    height: 18px;
+    transform: rotate(45deg);
+    background: rgba(251, 241, 225, 0.78);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.55);
 }
 
 .mp-head {
@@ -5643,15 +5898,20 @@ body::before {
     width: 56px;
     height: 56px;
     border-radius: 50%;
-    background: var(--ink);
     color: var(--paper);
-    border: none;
     font-size: var(--fs-h2);
     line-height: 1;
-    box-shadow: var(--sh-3);
     cursor: pointer;
     z-index: 62;
     transition: transform 0.2s;
+    /* glass-dark, inlined rather than the shared .glass-dark class — this
+       rule already owns position/sizing and needs its own border-radius:50%
+       (a circle, not the pill/card radius the utility assumes elsewhere). */
+    background: rgba(29, 28, 26, 0.72);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), var(--sh-3);
 }
 /* Same "+" glyph, just rotated — reads as a close "×" without swapping
    icons or adding a second element to keep in sync. */
@@ -5675,24 +5935,34 @@ body::before {
     min-height: 48px;
     padding: 0 var(--space-3-5);
     border-radius: var(--radius-pill);
-    border: none;
-    background: var(--surface);
     color: var(--ink);
     font-family: var(--font-sans);
     font-weight: 600;
     font-size: var(--fs-secondary);
     white-space: nowrap;
-    box-shadow: var(--sh-2);
     cursor: pointer;
     animation: fab-pill-in 0.22s ease-out backwards;
+    /* glass, inlined rather than the shared .glass class — needs its own
+       border-radius (pill, not .glass's card radius) and box-shadow (no
+       inset highlight collides with fab-pill-in's own entrance animation
+       cleanly at var(--radius-pill), so this keeps the plain elevation
+       shadow the surface already had). */
+    background: rgba(251, 249, 244, 0.72);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), var(--sh-2);
 }
 .fab-menu-pill:disabled { opacity: 0.55; cursor: default; }
 
 /* Same dark-void identity as the desktop Baúl/black-hole node
    (.baul-blackhole's radial gradient, var(--amber) sparkle) — a golden
-   spark on black reads as the same feature wherever it shows up. */
+   spark on black reads as the same feature wherever it shows up, now as
+   dark glass instead of a flat gradient. */
 .fab-menu-pill-dark {
-    background: linear-gradient(180deg, #242320, #0e0d0b);
+    background: rgba(20, 19, 17, 0.75);
+    border-color: rgba(255, 255, 255, 0.14);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), var(--sh-2);
     color: #fff;
 }
 .fab-menu-pill-dark .fab-menu-pill-icon { color: var(--amber); }

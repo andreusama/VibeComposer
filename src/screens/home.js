@@ -12,27 +12,33 @@ export function render(state) {
       ${import.meta.env.DEV ? `<button class="icon-btn" id="btn-muse-eye" title="Muse Eye — real debug history">👁</button>` : ''}
       <h1>vibe composer</h1>
       <span class="tagline">your projects</span>
-      <button class="header-action ghost-btn" id="btn-sign-out">sign out</button>
+      <button class="header-action ghost-btn" id="btn-sign-out">Sign out</button>
     </div>
     <div class="body">
 
       ${state.projectError ? `<div class="error-banner">${state.projectError}</div>` : ''}
 
-      <div class="projects-toolbar">
-        <span class="projects-count">${songs.length} project${songs.length === 1 ? '' : 's'}</span>
-        <div class="projects-search">
-          <span class="projects-search-icon">⌕</span>
-          <input type="text" id="project-search" placeholder="search projects" autocomplete="off" />
+      ${!state.songsLoaded ? `
+        <div class="loading-center">
+          <div class="spinner"></div>
         </div>
-      </div>
+      ` : `
+        <div class="projects-toolbar">
+          <span class="projects-count">${songs.length} project${songs.length === 1 ? '' : 's'}</span>
+          <div class="projects-search">
+            <span class="projects-search-icon">⌕</span>
+            <input type="text" id="project-search" placeholder="search projects" autocomplete="off" />
+          </div>
+        </div>
 
-      <div class="projects-grid" id="project-list">
-        <button class="project-new-card" id="btn-new-project">
-          <span class="project-new-icon">+</span>
-          <span>new project</span>
-        </button>
-        ${songs.map(renderProjectCard).join('')}
-      </div>
+        <div class="projects-grid" id="project-list">
+          <button class="project-new-card" id="btn-new-project">
+            <span class="project-new-icon">+</span>
+            <span>New project</span>
+          </button>
+          ${songs.map(renderProjectCard).join('')}
+        </div>
+      `}
 
     </div>
   `;
@@ -69,7 +75,7 @@ function renderProjectCard(song) {
         <span class="project-card-date">${new Date(song.updated_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
         <div class="project-card-actions">
           <button class="project-card-delete" data-action="delete" data-id="${song.id}" title="Delete project">🗑</button>
-          <button class="project-card-open" data-action="open" data-id="${song.id}">open canvas →</button>
+          <button class="project-card-open" data-action="open" data-id="${song.id}">Open canvas →</button>
         </div>
       </div>
     </div>
@@ -81,14 +87,14 @@ function renderProjectCard(song) {
 export async function attach(state, justEntered) {
   document.getElementById('btn-sign-out').addEventListener('click', async () => {
     await supabase.auth.signOut();
-    setState({ session: null, songs: [], activeSong: null, screen: 'home' });
+    setState({ session: null, songs: [], songsLoaded: false, activeSong: null, screen: 'home' });
   });
 
   document.getElementById('btn-muse-eye')?.addEventListener('click', () => {
     setState({ screen: 'museeye' });
   });
 
-  document.getElementById('btn-new-project').addEventListener('click', () => createProject(state));
+  document.getElementById('btn-new-project')?.addEventListener('click', () => createProject(state));
 
   document.querySelectorAll('[data-action="open"]').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -129,7 +135,7 @@ export async function attach(state, justEntered) {
 
 async function loadSongs() {
   const { songs, error } = await loadProjectSummaries();
-  setState({ songs, projectError: error });
+  setState({ songs, projectError: error, songsLoaded: true });
 }
 
 async function createProject(state) {

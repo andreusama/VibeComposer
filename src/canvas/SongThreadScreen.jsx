@@ -327,6 +327,11 @@ export default function SongThreadScreen({ state, onExit }) {
   const [baulOpen, setBaulOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [titleDraft, setTitleDraft] = useState(song?.title || '');
+  // Desktop's CanvasScreen has a toolbar-wide "saving…" indicator
+  // (saveStatus.js) that these two writes don't have a mobile equivalent
+  // of yet — without this, a failed title/language save here was
+  // completely silent (fire-and-forget, no error path at all).
+  const [saveError, setSaveError] = useState(null);
   // Local, not read straight from `song` on every render — same reasoning
   // as CanvasScreen's lyricLanguage/lyricDialect state: the prop only
   // updates on a fresh navigation, so a change made from this sheet needs
@@ -474,23 +479,31 @@ export default function SongThreadScreen({ state, onExit }) {
     reload();
   }, [reload]);
 
-  const commitRename = useCallback(() => {
+  const commitRename = useCallback(async () => {
     setRenaming(false);
     const title = titleDraft.trim();
     if (!song?.id || title === (song.title || '')) return;
-    saveSongTitle(song.id, title);
+    const { error } = await saveSongTitle(song.id, title);
+    if (error) { console.error('saveSongTitle failed', error); setSaveError("couldn't save the title — " + error.message); return; }
+    setSaveError(null);
   }, [song?.id, song?.title, titleDraft]);
 
-  const handleLanguageChange = useCallback((language) => {
+  const handleLanguageChange = useCallback(async (language) => {
     const dialect = DIALECTS[language][0];
     setLyricLanguage(language);
     setLyricDialect(dialect);
-    if (song?.id) saveSongLyricSettings(song.id, language, dialect);
+    if (!song?.id) return;
+    const { error } = await saveSongLyricSettings(song.id, language, dialect);
+    if (error) { console.error('saveSongLyricSettings failed', error); setSaveError("couldn't save the language — " + error.message); return; }
+    setSaveError(null);
   }, [song?.id]);
 
-  const handleDialectChange = useCallback((dialect) => {
+  const handleDialectChange = useCallback(async (dialect) => {
     setLyricDialect(dialect);
-    if (song?.id) saveSongLyricSettings(song.id, lyricLanguage, dialect);
+    if (!song?.id) return;
+    const { error } = await saveSongLyricSettings(song.id, lyricLanguage, dialect);
+    if (error) { console.error('saveSongLyricSettings failed', error); setSaveError("couldn't save the dialect — " + error.message); return; }
+    setSaveError(null);
   }, [song?.id, lyricLanguage]);
 
   const handleDeleteProject = useCallback(async () => {
@@ -559,30 +572,6 @@ export default function SongThreadScreen({ state, onExit }) {
 
   return (
     <MobileScreen className="thread-screen">
-      <div className="thread-header">
-        <button className="thread-back" onClick={onExit} title="back to projects">‹</button>
-        <div className="thread-title-block">
-          {renaming ? (
-            <input
-              className="thread-title-input"
-              value={titleDraft}
-              autoFocus
-              onChange={(e) => setTitleDraft(e.target.value)}
-              onBlur={commitRename}
-              onKeyDown={(e) => e.key === 'Enter' && e.target.blur()}
-            />
-          ) : (
-            <h1 className="thread-title">{titleDraft || 'Untitled'}</h1>
-          )}
-          <div className="thread-lang-pill">
-            <button className="thread-lang-btn" onClick={() => setLangSheetOpen(true)}>{langLabel}</button>
-            <TempoPulse bpm={songBpm} onClick={() => setTempoSheetOpen(true)} />
-            <span className="thread-lang-chevron">›</span>
-          </div>
-        </div>
-        <button className="thread-menu-btn" onClick={() => setMenuOpen(true)} title="more">···</button>
-      </div>
-
       {menuOpen && (
         <SongMenu
           langLabel={langLabel}
@@ -612,6 +601,32 @@ export default function SongThreadScreen({ state, onExit }) {
       )}
 
       <div className="thread-body">
+        <div className="thread-header glass">
+          <button className="thread-back" onClick={onExit} title="back to projects">‹</button>
+          <div className="thread-title-block">
+            {renaming ? (
+              <input
+                className="thread-title-input"
+                value={titleDraft}
+                autoFocus
+                onChange={(e) => setTitleDraft(e.target.value)}
+                onBlur={commitRename}
+                onKeyDown={(e) => e.key === 'Enter' && e.target.blur()}
+              />
+            ) : (
+              <h1 className="thread-title">{titleDraft || 'Untitled'}</h1>
+            )}
+            <div className="thread-lang-pill">
+              <button className="thread-lang-btn" onClick={() => setLangSheetOpen(true)}>{langLabel}</button>
+              <TempoPulse bpm={songBpm} onClick={() => setTempoSheetOpen(true)} />
+              <span className="thread-lang-chevron">›</span>
+            </div>
+          </div>
+          <button className="thread-menu-btn" onClick={() => setMenuOpen(true)} title="more">···</button>
+        </div>
+
+        {saveError && <p className="thread-status thread-status-error">{saveError}</p>}
+
         {loading && <p className="thread-status">Loading…</p>}
         {loadError && <p className="thread-status thread-status-error">Couldn't load this song.</p>}
 

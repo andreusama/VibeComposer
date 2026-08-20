@@ -386,7 +386,17 @@ export default function NoteEditorScreen({
         next.splice(index, 1); // the command line was never lyric content
         setLines(ensureTrailingEmpty(next));
         persist(next);
-        setActivePopover({ mode: 'ask', targetVerse: null, lineIndex: anchorLineIndex, seedMessage: message, anchorRect });
+        // originIsReal: false — anchorLineIndex (index - 1) is a pure
+        // positioning fallback ("put the popover somewhere sensible on
+        // screen"), not a genuine claim that this turn is ABOUT that line.
+        // A typed "Musa, ..." command on an empty/blank line often has
+        // nothing to do with whatever happens to sit physically above it —
+        // highlighting that line and pointing at it (see LineRow's
+        // museOrigin / MusePopover's pointer) would visually lie about what
+        // the question actually references. lineIndex itself stays set
+        // (still needed functionally — it's where "insert below" lands a
+        // reply), only the visual origin treatment is gated off.
+        setActivePopover({ mode: 'ask', targetVerse: null, lineIndex: anchorLineIndex, originIsReal: false, seedMessage: message, anchorRect });
         return;
       }
     }
@@ -437,10 +447,20 @@ export default function NoteEditorScreen({
       mode,
       targetVerse: { text: selection.text, before: selection.before, after: selection.after },
       lineIndex: selection.lineIndex,
-      anchorRect: selection.rect,
+      originIsReal: true, // a real selected fragment on this exact line — genuine reference
+      // Re-measured now, not selection.rect (captured back when the drag-
+      // select itself happened) — a selection near the bottom/edge of the
+      // screen often triggers the browser's own scroll-into-view or
+      // keyboard-avoidance adjustment, which can still be settling at
+      // select time. Using that stale rect anchored the popover to wherever
+      // the line USED to be, not where it actually ended up — the "muse
+      // points somewhere else" bug. getLineRect reads the line's real
+      // current position, same fresh-measurement approach handleFrictionTap
+      // already uses for the same reason.
+      anchorRect: getLineRect(selection.lineIndex) ?? selection.rect,
     });
     setSelection(null);
-  }, [selection]);
+  }, [selection, getLineRect]);
 
   // The friction nudge's tap target (LineRow's gutter icon) — content-
   // driven Socratic entry, see rhyme.js's detectRhymeFriction. No forced
@@ -452,6 +472,7 @@ export default function NoteEditorScreen({
       mode: 'ask',
       targetVerse: null,
       lineIndex: index,
+      originIsReal: true, // the exact line whose rhyme broke — genuine reference even without a text selection
       seedMessage: 'esta línea no encaja con el esquema de rima del bloque — ¿alguna idea?',
       anchorRect: getLineRect(index),
     });
@@ -555,7 +576,7 @@ export default function NoteEditorScreen({
             showSyllables={syllableCountOn}
             showPlaceholder={i === lines.length - 1}
             dimmed={focusModeOn && focusedIndex !== null && focusedIndex !== i}
-            museOrigin={activePopover?.lineIndex === i}
+            museOrigin={Boolean(activePopover?.originIsReal) && activePopover?.lineIndex === i}
             onChange={handleLineChange}
             onEnter={handleEnter}
             onBackspaceAtStart={handleBackspaceAtStart}
@@ -596,6 +617,7 @@ export default function NoteEditorScreen({
           songId={songId}
           sectionId={note.id}
           anchorRect={activePopover.anchorRect}
+          originIsReal={Boolean(activePopover.originIsReal)}
           onClose={handlePopoverClose}
           onReplace={handlePopoverReplace}
           onInsertBelow={handlePopoverInsertBelow}
@@ -627,13 +649,20 @@ export default function NoteEditorScreen({
           icon here anymore. "Variant" only shows up here, never on the
           song-thread FAB — creating a variant only makes sense from
           inside an existing note. */}
-      <FabMenu
-        pills={[
-          { label: 'Baúl de la inspiración', icon: '✦', dark: true, onClick: () => setBaulOpen(true) },
-          { label: 'Tools', icon: '☰', iconVariant: 'chord', onClick: () => setToolsOpen(true) },
-          { label: 'Variant', icon: '✎', iconVariant: 'thread', onClick: () => setVariantSheetOpen(true) },
-        ]}
-      />
+      {/* Hidden while a selection is active — selecting a word is meant to
+          be a focused, single-purpose moment (see SelectionCallout), and
+          the FAB has nothing to do with it. Also frees the bottom-right
+          corner so the callout bar can just be a clean, symmetric floating
+          card instead of carving out a gap to avoid overlapping it. */}
+      {!selection && (
+        <FabMenu
+          pills={[
+            { label: 'Baúl de la inspiración', icon: '✦', dark: true, onClick: () => setBaulOpen(true) },
+            { label: 'Tools', icon: '☰', iconVariant: 'chord', onClick: () => setToolsOpen(true) },
+            { label: 'Variant', icon: '✎', iconVariant: 'thread', onClick: () => setVariantSheetOpen(true) },
+          ]}
+        />
+      )}
 
       {variantSheetOpen && (
         <VariantChoiceSheet

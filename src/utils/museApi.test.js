@@ -130,6 +130,73 @@ describe('parseCompanionResponse', () => {
     expect(parseCompanionResponse(raw).wordBank.concept).toBeNull();
   });
 
+  it('parses a normal (non-declined) OPEN_REFERENCE response', () => {
+    const raw = JSON.stringify({
+      action_type: 'OPEN_REFERENCE',
+      answer: 'Benidorm — un skyline de rascacielos de los 60 en primera línea de playa.',
+      category: 'place',
+      declined: false,
+      redirect: null,
+      themes: ['lugar', 'ambición'],
+    });
+    const result = parseCompanionResponse(raw);
+    expect(result.action_type).toBe('OPEN_REFERENCE');
+    expect(result.openReference.declined).toBe(false);
+    expect(result.openReference.answer).toMatch(/Benidorm/);
+    expect(result.openReference.category).toBe('place');
+    expect(result.openReference.redirect).toBeNull();
+    // message carries the answer for non-declined turns — this is what
+    // satisfies the shared hasContent guard, same field every other mode
+    // uses (SOCRATIC's question.text, SURGEON's reasoning, etc.).
+    expect(result.message).toMatch(/Benidorm/);
+  });
+
+  it('parses a declined OPEN_REFERENCE response — answer/category null, redirect preserved, and it does NOT fall back as empty', () => {
+    const raw = JSON.stringify({
+      action_type: 'OPEN_REFERENCE',
+      answer: null,
+      category: null,
+      declined: true,
+      redirect: 'Soy política, como todo en este mundo — pero intento no contaminar tu mirada. ¿Qué tal un símbolo de esa misma tensión?',
+      themes: [],
+    });
+    const result = parseCompanionResponse(raw);
+    // The critical guard: a legitimate decline (answer: null by design)
+    // must NOT trip the "empty response" fallback that malformed JSON
+    // gets — that fallback forces action_type to SOCRATIC, which would
+    // silently swallow every real decline as if it were a parse failure.
+    expect(result.action_type).toBe('OPEN_REFERENCE');
+    expect(result.openReference.declined).toBe(true);
+    expect(result.openReference.answer).toBeNull();
+    expect(result.openReference.category).toBeNull();
+    expect(result.openReference.redirect).toMatch(/no contaminar tu mirada/);
+    expect(result.message).toMatch(/no contaminar tu mirada/);
+  });
+
+  it('ignores an invalid category on a declined OPEN_REFERENCE response rather than trusting it', () => {
+    const raw = JSON.stringify({
+      action_type: 'OPEN_REFERENCE', answer: null, category: 'place', declined: true,
+      redirect: 'Soy política — dame un símbolo en vez de una postura.', themes: [],
+    });
+    // category should never survive on a declined turn even if the model
+    // sent one — there's no real answer for it to categorize.
+    expect(parseCompanionResponse(raw).openReference.category).toBeNull();
+  });
+
+  it('recovers an OPEN_REFERENCE response even when the model drops "action_type" — real observed failure, exact payload', () => {
+    // Verbatim from a real production console error: a genuinely correct,
+    // well-formed OPEN_REFERENCE answer (Berlin Wall, declined: false) that
+    // the model sent with every field present except action_type itself —
+    // this used to discard the whole response and fall back to the broken-
+    // JSON SOCRATIC placeholder even though the content was perfect.
+    const raw = '{"answer": "El Muro de Berlín: hormigón gris de casi 4 metros, alambre de espino encima, franja de arena rastrillada para ver huellas, torres de vigilancia cada pocos metros, y del lado oeste kilómetros de grafitis de colores chillones cubriendo ese mismo gris.", "category": "place", "declined": false, "redirect": null}';
+    const result = parseCompanionResponse(raw);
+    expect(result.action_type).toBe('OPEN_REFERENCE');
+    expect(result.openReference.declined).toBe(false);
+    expect(result.openReference.answer).toMatch(/Muro de Berlín/);
+    expect(result.openReference.category).toBe('place');
+  });
+
   it('strips markdown code fences before parsing', () => {
     const fenced = '```json\n' + JSON.stringify(SURGEON_JSON) + '\n```';
     expect(parseCompanionResponse(fenced).action_type).toBe('SURGEON');
@@ -160,13 +227,13 @@ describe('parseCompanionResponse', () => {
     expect(result.action_type).toBe('SOCRATIC');
   });
 
-  it('falls back when action_type is missing or not one of the four modes', () => {
+  it('falls back when action_type is missing or not one of the five modes', () => {
     const raw = JSON.stringify({ reasoning: 'sin action_type', suggestions: [] });
     expect(parseCompanionResponse(raw).action_type).toBe('SOCRATIC');
   });
 
-  it('exports exactly the four documented action types', () => {
-    expect(MUSE_ACTION_TYPES).toEqual(['SURGEON', 'ARCHITECT', 'SOCRATIC', 'WORD_BANK']);
+  it('exports exactly the five documented action types', () => {
+    expect(MUSE_ACTION_TYPES).toEqual(['SURGEON', 'ARCHITECT', 'SOCRATIC', 'WORD_BANK', 'OPEN_REFERENCE']);
     expect(MUSE_TYPES).toEqual(['CONTINUITY', 'CONTRAST', 'RESOLUTION']);
     expect(MUSE_ANGLES).toEqual(['raw', 'atmospheric', 'abstract']);
   });

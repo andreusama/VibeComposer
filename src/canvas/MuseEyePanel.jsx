@@ -17,6 +17,7 @@ const MODE_META = {
   ARCHITECT: { icon: '🏛', color: 'chord', label: 'architect', desc: 'structural suggestion, not a question' },
   SOCRATIC: { icon: '❓', color: 'amber', label: 'socratic', desc: 'provoking question, no verses' },
   WORD_BANK: { icon: '📖', color: 'thread', label: 'word bank', desc: 'rhyme & imagery vocabulary' },
+  OPEN_REFERENCE: { icon: '🧭', color: 'slate', label: 'open reference', desc: 'cultural/sensory material — declines to opine' },
 };
 
 const TYPE_META = {

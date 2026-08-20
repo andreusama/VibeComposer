@@ -202,6 +202,7 @@ function SuggestionCard({ suggestion, showReplace, onDiscard, onAccept, onInsert
 export default function MusePopover({
   mode, targetVerse, seedMessage, verseText, noteFunction, lyricDna,
   lyricLanguage, lyricDialect, songStructure, songId, sectionId, anchorRect,
+  originIsReal = true,
   onClose, onReplace, onInsertBelow, onPreviewText = () => {},
 }) {
   // Concept AND genealogy modes (creativity proposals #3 and "genealogía de
@@ -519,7 +520,14 @@ export default function MusePopover({
           blocks the rest of the screen; this only exists to catch an
           outside tap and close. */}
       <div className="mp-scrim" onClick={onClose} />
-      <PopoverPointer anchorRect={anchorRect} style={style} placement={placement} />
+      {/* Only when there's a genuine line to point at — e.g. a typed
+          "Musa, ..." command anchors near whatever's on screen purely for
+          placement, not because that line is what's being discussed
+          (see NoteEditorScreen's originIsReal). A pointer aimed at a line
+          with no highlight of its own would just look like a rendering
+          glitch, and worse, would visually claim a reference that isn't
+          real. */}
+      {originIsReal && <PopoverPointer anchorRect={anchorRect} style={style} placement={placement} />}
       <div className={`mp-anchored mp-anchored-${placement}`} style={style} onClick={(e) => e.stopPropagation()}>
         <div className="mp-head">
           <span className="mp-head-target">{targetVerse ? `“${targetVerse.text}”` : 'the muse'}</span>

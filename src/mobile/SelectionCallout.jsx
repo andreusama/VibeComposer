@@ -1,28 +1,17 @@
-// The entry point to everything in this spec — a lightweight pill that
-// appears right where the user just selected text, offering the ways to
-// act on it. Positioned in fixed/viewport coordinates from the selection's
-// own DOMRect (captured in LineRow), clamped so it never runs off the right
-// edge on a narrow phone.
-//
-// Real constraint, not addressed elsewhere: selecting text in the
-// underlying <textarea> also brings up the OS's own native edit menu
-// (Copy/Paste/Select — Apple HIG's "Selection and input"), which a web
-// view has no way to detect the position of or suppress. HIG's own
-// guidance is to append custom commands after the system ones rather than
-// build a parallel menu, which isn't reachable from here — a plain
-// <textarea> gives no hook into UIMenuController. The one thing that IS
-// fixable from here: the native bubble hugs the selection tightly (roughly
-// a system-toolbar's height), so this pill sits further below it than a
-// generic tooltip offset would, to come to rest under the native menu
-// instead of stacked directly on top of it.
+// The entry point to everything in this spec — a bar docked to the bottom
+// of the screen (thumb zone) whenever there's an active selection, offering
+// the ways to act on it. `rect` is only used as the "is a selection active"
+// signal now, not for positioning — see the .sel-callout CSS comment for
+// why: iOS's native edit menu (Copy/Paste/Select) is OS-level chrome that
+// always paints above web content and always hugs the selection tightly,
+// so floating near the selection put this callout's own buttons in the
+// exact zone native chrome covers, making them untappable on a real
+// device. Docking to the bottom edge — a zone the native menu never
+// reaches — is the actual fix, not a positioning tweak.
 export default function SelectionCallout({ rect, onRhyme, onAskMuse, onConcept, onGenealogy }) {
   if (!rect) return null;
-  const style = {
-    top: rect.bottom + 40,
-    left: Math.max(8, Math.min(rect.left, window.innerWidth - 280)),
-  };
   return (
-    <div className="sel-callout" style={style}>
+    <div className="sel-callout">
       {/* preventDefault on mousedown (fires before the click, including on
           touch) keeps the textarea's selection/focus alive — without this,
           tapping the pill blurs the textarea first and the selection this

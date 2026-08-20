@@ -109,7 +109,14 @@ export default function LineAudioBadge({ memos }) {
     setOpen(true);
   }, []);
 
-  const style = anchorRect ? { top: anchorRect.bottom + 6, left: anchorRect.left } : {};
+  // Anchored from the RIGHT (right: distance from viewport's right edge to
+  // the badge's own right edge), not the left — the badge lives in the
+  // right-side .ne-audio-slot (see NoteEditorScreen.jsx), so anchoring the
+  // panel's LEFT edge to the badge's position pushed a 220px-wide panel
+  // straight off the right edge of the screen, mostly hidden. Opening
+  // leftward from the badge keeps it on-screen regardless of how close to
+  // the edge the badge itself sits.
+  const style = anchorRect ? { top: anchorRect.bottom + 6, right: Math.max(8, window.innerWidth - anchorRect.right) } : {};
 
   return (
     <>

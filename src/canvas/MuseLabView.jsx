@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { askMuse, buildStaticMuseInstructions, MUSE_MODEL } from '../utils/museApi.js';
 import { getUsageRemaining } from '../utils/api.js';
-import { MUSE_GOLDEN_SET } from './museGoldenSet.js';
+import { MUSE_GOLDEN_SET, OPEN_REFERENCE_GOLDEN_SET } from './museGoldenSet.js';
 import {
   loadLabRuns, saveLabRun, tagLabRun, deleteLabRun, clearLabRuns, computeAggregateStats,
   loadLabSnapshots, saveLabSnapshot, deleteLabSnapshot,
@@ -15,12 +15,13 @@ import {
 // real code-generated Prompt A via askMuse's staticSystemOverride escape
 // hatch — dev-only, never touched by any real product call path.
 
-const MODES = ['SURGEON', 'ARCHITECT', 'SOCRATIC', 'WORD_BANK', 'AUTO'];
+const MODES = ['SURGEON', 'ARCHITECT', 'SOCRATIC', 'WORD_BANK', 'OPEN_REFERENCE', 'AUTO'];
 const MODE_META = {
   SURGEON: { icon: '🔧', label: 'surgeon' },
   ARCHITECT: { icon: '🏛', label: 'architect' },
   SOCRATIC: { icon: '❓', label: 'socratic' },
   WORD_BANK: { icon: '📖', label: 'word bank' },
+  OPEN_REFERENCE: { icon: '🧭', label: 'open reference' },
   AUTO: { icon: '🎲', label: 'auto' },
 };
 const TAGS = [
@@ -35,6 +36,10 @@ function excerptFor(response) {
   if (response.suggestions?.length) return response.suggestions.map((s) => s.text).join(' / ');
   if (response.question) return response.question.text;
   if (response.wordBank) return `rima ${response.wordBank.rhymeType} con "${response.wordBank.targetRhyme}"`;
+  if (response.openReference) {
+    const or = response.openReference;
+    return or.declined ? `[declined · ${or.redirect}]` : `[${or.category}] ${or.answer}`;
+  }
   return response.message || '';
 }
 
@@ -201,6 +206,48 @@ export default function MuseLabView() {
     }
   }, [dispatching, dispatchOne, refreshRuns]);
 
+  // "Test guardrail" — runs exactly the 4 declined:true cases from the
+  // OPEN_REFERENCE spec's own edge-case table against the REAL pipeline
+  // (same dispatchOne every other run in this file uses, not a mock), and
+  // checks whether the model actually declined each one. This is the one
+  // check in the whole Lab where "did the real model behave" matters more
+  // than prompt-engineering iteration speed — a guardrail that silently
+  // stops working in production (a prompt tweak elsewhere regresses it, a
+  // model update changes behavior) is a much worse failure mode than a
+  // mediocre rhyme suggestion, so it gets its own always-real, one-click
+  // check rather than living only as golden-set cases someone has to
+  // remember to click through individually.
+  const [guardrailResult, setGuardrailResult] = useState(null);
+  const handleTestGuardrail = useCallback(async () => {
+    if (dispatching) return;
+    const cases = OPEN_REFERENCE_GOLDEN_SET.filter((c) => c.expectedDeclined === true);
+    setDispatching(true);
+    setDispatchError(null);
+    setGuardrailResult(null);
+    setBatchProgress({ done: 0, total: cases.length });
+    const results = [];
+    try {
+      for (let i = 0; i < cases.length; i++) {
+        const c = cases[i];
+        const run = await dispatchOne(c, 'A', { silent: true });
+        const declined = run.response?.openReference?.declined === true;
+        results.push({
+          caseId: c.id, label: c.label, userMessage: c.userMessage,
+          pass: declined, actionType: run.actionType,
+          excerpt: excerptFor(run.response),
+        });
+        setBatchProgress({ done: i + 1, total: cases.length });
+      }
+      refreshRuns();
+      setGuardrailResult(results);
+    } catch (err) {
+      setDispatchError(err.message === 'LIMIT_REACHED' ? 'daily AI limit reached mid-run' : err.message);
+    } finally {
+      setDispatching(false);
+      setBatchProgress(null);
+    }
+  }, [dispatching, dispatchOne, refreshRuns]);
+
   const handleTag = useCallback((runId, tagId) => {
     tagLabRun(runId, tagId);
     refreshRuns();
@@ -324,8 +371,31 @@ export default function MuseLabView() {
             <button className="lab-btn-ghost" onClick={() => handleRunGoldenSet('A')} disabled={dispatching}>▶ run full golden set (A)</button>
             <button className="lab-btn-ghost" onClick={() => handleRunGoldenSet('B')} disabled={dispatching || !promptBText.trim()}>▶ run full golden set (B)</button>
           </div>
+          <div className="lab-run-row">
+            <button className="lab-btn-ghost lab-btn-guardrail" onClick={handleTestGuardrail} disabled={dispatching} title="runs the 4 declined:true OPEN_REFERENCE cases against the real API">
+              🛡 test guardrail
+            </button>
+          </div>
           {batchProgress && <div className="lab-progress">running {batchProgress.done}/{batchProgress.total}…</div>}
           {dispatchError && <div className="lab-error">⚠ {dispatchError}</div>}
+
+          {guardrailResult && (
+            <div className="lab-guardrail-summary">
+              <div className="lab-guardrail-head">
+                <span>guardrail: {guardrailResult.filter((r) => r.pass).length}/{guardrailResult.length} passed</span>
+                {guardrailResult.every((r) => r.pass)
+                  ? <span className="lab-badge lab-badge-good">✓ all declined correctly</span>
+                  : <span className="lab-badge lab-badge-warn">⚠ silent guardrail failure</span>}
+              </div>
+              {guardrailResult.map((r) => (
+                <div className="lab-guardrail-row" key={r.caseId}>
+                  <span className={r.pass ? 'lab-guardrail-pass' : 'lab-guardrail-fail'}>{r.pass ? '✓' : '✕'}</span>
+                  <span className="lab-guardrail-question">{r.userMessage}</span>
+                  {!r.pass && <span className="lab-badge lab-badge-warn">{r.actionType || '—'}</span>}
+                </div>
+              ))}
+            </div>
+          )}
 
           {(currentRun || compareRun) && (
             <>

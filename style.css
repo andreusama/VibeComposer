@@ -3918,6 +3918,7 @@ body::before {
     --eye-text-faint: #4b4b52;
     --eye-warn: #c2673f;
     --eye-ok: #4d9a72;
+    --eye-slate: #6b8299;
     margin-top: var(--space-3);
     background: var(--eye-bg);
     border: 1px solid var(--eye-line);
@@ -3937,6 +3938,7 @@ body::before {
 .eye-badge-thread { color: var(--thread); }
 .eye-badge-amber { color: var(--amber); }
 .eye-badge-warn { color: var(--eye-warn); }
+.eye-badge-slate { color: var(--eye-slate); }
 .eye-status-row { display: flex; flex-wrap: wrap; gap: 6px; padding-bottom: 6px; }
 .eye-badge { font-family: var(--font-mono); font-size: 9.5px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--eye-line); color: var(--eye-text-dim); background: var(--eye-panel-2); }
 .eye-badge-graphite { color: var(--eye-text-dim); }
@@ -4101,6 +4103,7 @@ body::before {
     --eye-text-faint: #4b4b52;
     --eye-warn: #c2673f;
     --eye-ok: #4d9a72;
+    --eye-slate: #6b8299;
     position: fixed;
     inset: 0;
     z-index: 2000;
@@ -5437,17 +5440,41 @@ body::before {
    "mobile projects" usage earlier in this file — scoped by context, no
    actual class collision since those are all `mp-row`/`mp-thumb`/etc. */
 
+/* Docked to the bottom edge, not floating near the selection — a real
+   accessibility fix, not a style choice. iOS's own native selection menu
+   (Copy/Paste/Select) is OS-level chrome that unconditionally paints above
+   every web page, full stop; there is no z-index that wins against it. It
+   also always hugs the selection tightly, so anything WE float near the
+   selection sits in the exact zone the native menu already claims — on a
+   real device this made the callout's buttons untappable, covered by
+   native chrome (reported directly against this file's own earlier
+   "push it further below the native menu" mitigation, which reduced the
+   overlap but never eliminated it). The native menu never renders at the
+   screen's bottom edge, so docking there — same "thumb zone" principle
+   already used for popovers, see this section's header comment — sidesteps
+   the conflict entirely instead of trying to out-layer it. Symmetric side
+   margins, same inset as every other floating glass card in the app — the
+   FAB is hidden outright while a selection is active (see
+   NoteEditorScreen.jsx), on purpose: selecting a word is meant to be one
+   focused, single-purpose moment, not a screen still juggling an unrelated
+   affordance in the corner. */
 .sel-callout {
     position: fixed;
+    left: var(--space-4);
+    right: var(--space-4);
+    bottom: calc(var(--space-4) + env(safe-area-inset-bottom));
     z-index: 55;
     display: flex;
     flex-wrap: wrap; /* 4 pills (Rhyme/Concept/Genealogía/Ask muse) wrap to a second row on narrow phones instead of overflowing */
-    max-width: min(280px, calc(100vw - 16px));
+    justify-content: center;
     gap: 8px;
-    background: var(--ink);
-    border-radius: var(--r-md);
-    padding: 6px;
-    box-shadow: var(--sh-3);
+    border-radius: var(--r-lg);
+    padding: var(--space-2);
+    background: rgba(29, 28, 26, 0.72);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), var(--sh-3);
 }
 .sel-callout-btn {
     min-height: 48px;
@@ -5849,18 +5876,25 @@ body::before {
    .mp-scrim directly, adds its own small floating panel since a memo list
    is a different shape than a suggestion deck or chip row. */
 
+/* Neutral .glass, not amber/dark — this floats over the writing surface
+   the same way MusePopover does, but it isn't the muse and isn't primary
+   chrome, so it takes the plain paper-tinted glass instead of either of
+   those two identities. */
 .la-player {
     position: fixed;
     z-index: 61;
     min-width: 220px;
     max-width: calc(100vw - var(--space-4) * 2);
-    background: var(--bg);
     border-radius: var(--r-md);
-    box-shadow: var(--sh-3);
     padding: var(--space-2-5);
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
+    background: rgba(251, 249, 244, 0.78);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), var(--sh-3);
 }
 .la-row { display: flex; align-items: center; gap: var(--space-2); }
 .la-play-btn {
@@ -6421,6 +6455,19 @@ body::before {
 
 .lab-run-row { display: flex; gap: var(--space-1-5); }
 .lab-progress { font-family: var(--font-mono); font-size: 10.5px; color: var(--amber); }
+.lab-btn-guardrail { color: var(--eye-warn); border-color: color-mix(in srgb, var(--eye-warn) 40%, transparent); }
+.lab-btn-guardrail:hover { color: var(--eye-warn); border-color: var(--eye-warn); }
+
+/* Pass/fail summary for "test guardrail" — same visual language as
+   .lab-result-card/.lab-badge, not a new pattern, since this is
+   conceptually the same "here's what a real run produced" surface. */
+.lab-guardrail-summary { background: var(--eye-bg); border: 1px solid var(--eye-line); border-radius: var(--r-sm); padding: var(--space-2); display: flex; flex-direction: column; gap: 6px; }
+.lab-guardrail-head { display: flex; justify-content: space-between; align-items: center; font-family: var(--font-mono); font-size: 10.5px; color: var(--eye-text-dim); }
+.lab-guardrail-row { display: flex; align-items: center; gap: var(--space-2); font-size: 11px; padding-top: 5px; border-top: 1px solid var(--eye-line-soft); }
+.lab-guardrail-row:first-of-type { border-top: none; padding-top: 0; }
+.lab-guardrail-pass { color: var(--eye-ok); font-weight: 600; }
+.lab-guardrail-fail { color: var(--eye-warn); font-weight: 600; }
+.lab-guardrail-question { flex: 1; color: var(--eye-text); }
 
 .lab-compare { display: grid; grid-template-columns: 1fr; gap: var(--space-2); }
 .lab-compare.split { grid-template-columns: 1fr 1fr; }

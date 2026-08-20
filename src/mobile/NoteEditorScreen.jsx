@@ -36,7 +36,7 @@ const MUSE_COMMAND_RE = /^\s*musa\s*[,:]\s*/i;
 // screen row, same as any textarea — "single line" here means one entry in
 // the lines array, one row in the margin, not one row of pixels).
 function LineRow({
-  id, index, text, previewText, syllables, rhyme, friction, audioMemos, showSyllables, dimmed, showPlaceholder,
+  id, index, text, previewText, syllables, rhyme, friction, audioMemos, showSyllables, dimmed, showPlaceholder, museOrigin,
   onChange, onEnter, onBackspaceAtStart, onFocus, onBlurLine, onSelectionChange, onFrictionTap, onLongPress, inputRef,
 }) {
   // Live, not just on submit — the moment the line reads as addressing the
@@ -46,11 +46,18 @@ function LineRow({
   // like it before Enter ever commits anything.
   const isMuseCommand = MUSE_COMMAND_RE.test(text);
   const localRef = useRef(null);
-  // Long-press-to-record — timer lives on the ROW, not the textarea, so it
-  // doesn't fight the textarea's own native touch handling (tap-to-focus,
-  // caret placement, drag-select); a move past a small tolerance or an
-  // early release just cancels the pending timer, same disambiguation
-  // shape as MusePopover's card gestures.
+  // Long-press-to-record — the timer only arms for a touch that starts on
+  // the GUTTER, not the textarea. It used to live on the whole row, but
+  // touch events bubble: a hold directly on the line's text also reached
+  // this handler, meaning a stationary touch-and-hold on text — iOS's own
+  // gesture for the selection loupe/edit menu (Apple HIG, "Selection and
+  // input": "people expect to reveal the menu by touching and holding or
+  // double-tapping content... your app should respond to both gestures")
+  // — raced against this app's unrelated "start recording" action on the
+  // exact same input. Scoping the timer to the gutter leaves the text
+  // itself exclusively native; the gutter already hosts every other
+  // line-level action (syllable count, rhyme badge, friction nudge, audio
+  // badge), so "hold the margin to record" fits the same pattern.
   const holdTimerRef = useRef(null);
   const holdStartRef = useRef({ x: 0, y: 0 });
 
@@ -60,6 +67,7 @@ function LineRow({
 
   const handleRowTouchStart = useCallback((e) => {
     if (!e.touches || e.touches.length !== 1) return;
+    if (e.target.closest?.('.ne-line-input')) return; // let native text selection own the text itself
     holdStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
     clearHoldTimer();
     holdTimerRef.current = setTimeout(() => onLongPress(index), LONG_PRESS_MS);
@@ -137,7 +145,7 @@ function LineRow({
 
   return (
     <div
-      className={`ne-row${dimmed ? ' ne-row-dimmed' : ''}${isMuseCommand ? ' ne-row-muse' : ''}${previewText != null ? ' ne-row-preview' : ''}`}
+      className={`ne-row${dimmed ? ' ne-row-dimmed' : ''}${isMuseCommand ? ' ne-row-muse' : ''}${previewText != null ? ' ne-row-preview' : ''}${museOrigin ? ' ne-row-muse-origin' : ''}`}
       onTouchStart={handleRowTouchStart}
       onTouchMove={handleRowTouchMove}
       onTouchEnd={clearHoldTimer}
@@ -157,7 +165,6 @@ function LineRow({
         {!isMuseCommand && friction && (
           <button className="ne-gutter-friction" title="this line breaks the rhyme scheme — ask the muse?" onClick={() => onFrictionTap(index)}>✦</button>
         )}
-        {!isMuseCommand && audioMemos?.length > 0 && <LineAudioBadge memos={audioMemos} />}
       </div>
       <textarea
         ref={setRefs}
@@ -172,6 +179,14 @@ function LineRow({
         onBlur={() => onBlurLine(index)}
         onKeyDown={handleKeyDown}
       />
+      {/* Reserved on every row, same fixed width whether or not this line
+          has a memo — so recording (or deleting) one never shifts the
+          textarea's own width side to side. Right side, not the left
+          gutter: the gutter is lyric-craft metrics (syllables/rhyme),
+          audio is a different, unrelated kind of attachment. */}
+      <div className="ne-audio-slot">
+        {!isMuseCommand && audioMemos?.length > 0 && <LineAudioBadge memos={audioMemos} />}
+      </div>
     </div>
   );
 }
@@ -442,11 +457,37 @@ export default function NoteEditorScreen({
     });
   }, [getLineRect]);
 
+  // Accepting a muse suggestion force-overwrites the textarea's controlled
+  // value with no real keystroke behind it — which silently clears the
+  // browser's own undo stack for that field (shake-to-undo/Ctrl+Z do
+  // nothing afterward), and unlike desktop's promoteVariant/restoreVersion
+  // (canvasData.js), nothing here snapshots to section_versions first. A
+  // few real lines of the artist's own writing could vanish with no way
+  // back. Apple HIG's "Selection and input" is explicit that custom edit
+  // commands need undo/redo support — this is the minimal real version of
+  // that: a plain in-memory "last replacement," restorable for a few
+  // seconds via a snackbar, no new table/round trip needed.
+  const [lastReplacement, setLastReplacement] = useState(null); // {lineIndex, previousText}
+  const undoTimerRef = useRef(null);
+
+  useEffect(() => () => clearTimeout(undoTimerRef.current), []);
+
   const handlePopoverReplace = useCallback((newText) => {
     if (!activePopover?.targetVerse) return;
     const { targetVerse, lineIndex } = activePopover;
+    const previousText = lines[lineIndex]?.text ?? '';
     handleLineChange(lineIndex, targetVerse.before + newText + targetVerse.after);
-  }, [activePopover, handleLineChange]);
+    clearTimeout(undoTimerRef.current);
+    setLastReplacement({ lineIndex, previousText });
+    undoTimerRef.current = setTimeout(() => setLastReplacement(null), 6000);
+  }, [activePopover, handleLineChange, lines]);
+
+  const handleUndoReplace = useCallback(() => {
+    if (!lastReplacement) return;
+    clearTimeout(undoTimerRef.current);
+    handleLineChange(lastReplacement.lineIndex, lastReplacement.previousText);
+    setLastReplacement(null);
+  }, [lastReplacement, handleLineChange]);
 
   const handlePopoverInsertBelow = useCallback((newText) => {
     if (!activePopover) return;
@@ -480,26 +521,26 @@ export default function NoteEditorScreen({
 
   return (
     <MobileScreen className="ne-screen">
-      <div className="ne-header">
-        <button className="ne-back" onClick={onClose} title="back">‹</button>
-        <select value={type} onChange={handleTypeChange} className="canvas-note-type">
-          {SECTION_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-        </select>
-        {type === 'custom' && (
-          <input
-            className="ne-custom-label"
-            value={customLabel}
-            placeholder="label…"
-            onChange={(e) => setCustomLabel(e.target.value)}
-            onBlur={() => saveNoteType(note.id, type, customLabel)}
-          />
-        )}
-        <TempoPulse bpm={bpm} />
-        <button className="ne-menu" onClick={handleDelete} title="delete note">···</button>
-        <button className="ne-done" onClick={onClose}>Done</button>
-      </div>
-
       <div className="ne-body">
+        <div className="ne-header glass">
+          <button className="ne-back" onClick={onClose} title="back">‹</button>
+          <select value={type} onChange={handleTypeChange} className="ne-type-select">
+            {SECTION_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+          {type === 'custom' && (
+            <input
+              className="ne-custom-label"
+              value={customLabel}
+              placeholder="label…"
+              onChange={(e) => setCustomLabel(e.target.value)}
+              onBlur={() => saveNoteType(note.id, type, customLabel)}
+            />
+          )}
+          <TempoPulse bpm={bpm} />
+          <button className="ne-delete" onClick={handleDelete} title="delete note">🗑</button>
+          <button className="ne-done" onClick={onClose}>Done</button>
+        </div>
+
         {lines.map((line, i) => (
           <LineRow
             key={line.id}
@@ -514,6 +555,7 @@ export default function NoteEditorScreen({
             showSyllables={syllableCountOn}
             showPlaceholder={i === lines.length - 1}
             dimmed={focusModeOn && focusedIndex !== null && focusedIndex !== i}
+            museOrigin={activePopover?.lineIndex === i}
             onChange={handleLineChange}
             onEnter={handleEnter}
             onBackspaceAtStart={handleBackspaceAtStart}
@@ -569,6 +611,13 @@ export default function NoteEditorScreen({
           onClose={() => setRecordingIndex(null)}
           onSaved={handleAudioSaved}
         />
+      )}
+
+      {lastReplacement && (
+        <div className="ne-undo-toast">
+          <span>Line replaced</span>
+          <button onClick={handleUndoReplace}>Undo</button>
+        </div>
       )}
 
       {/* Replaces the old fixed chords/muse/tools bar — muse already lives

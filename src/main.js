@@ -115,11 +115,24 @@ subscribe((state) => {
 setAccentFromState(getState());
 render(getState());
 
-// Only matters for browser-window/device-emulation testing crossing
-// MOBILE_BREAKPOINT — a real phone's WebView viewport doesn't resize mid-
-// session, so this is purely a dev-time convenience, not a production path.
+// Only meant for browser-window/device-emulation testing crossing
+// MOBILE_BREAKPOINT — but real mobile browsers fire `resize` far more than
+// that: the on-screen keyboard opening/closing, and Android Chrome's
+// address bar hiding/showing on scroll, both fire it constantly. Without
+// the isMobile !== lastIsMobile guard, every one of those re-rendered the
+// whole app from a fresh getState() snapshot mid-interaction (e.g. while a
+// song-thread rename/language sheet was mid-edit) — a class of disruption
+// desktop never hits, since nobody resizes their browser window while
+// typing. Now it only actually re-renders when the breakpoint is crossed,
+// which is the one case this was ever meant to handle.
 let resizeTimer = null;
+let lastIsMobile = isMobileViewport();
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => render(getState()), 150);
+  resizeTimer = setTimeout(() => {
+    const nowMobile = isMobileViewport();
+    if (nowMobile === lastIsMobile) return;
+    lastIsMobile = nowMobile;
+    render(getState());
+  }, 150);
 });

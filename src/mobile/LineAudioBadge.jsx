@@ -113,8 +113,8 @@ export default function LineAudioBadge({ memos }) {
 
   return (
     <>
-      <button className="ne-gutter-audio" title={`${memos.length} voice memo${memos.length === 1 ? '' : 's'}`} onClick={handleOpen}>
-        🎙{memos.length > 1 ? memos.length : ''}
+      <button className="ne-audio-badge" title={`${memos.length} voice memo${memos.length === 1 ? '' : 's'}`} onClick={handleOpen}>
+        <span className="ne-audio-badge-dot">{memos.length > 1 ? memos.length : ''}</span>
       </button>
       {open && (
         <>

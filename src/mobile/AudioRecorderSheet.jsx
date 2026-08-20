@@ -89,7 +89,7 @@ export default function AudioRecorderSheet({ sectionId, songId, lineIndex, onClo
         {state === 'error' && (
           <>
             <p className="ar-status ar-error">{error}</p>
-            <button className="ar-btn-cancel" onClick={onClose}>close</button>
+            <button className="ar-btn-cancel" onClick={onClose}>Close</button>
           </>
         )}
 
@@ -100,9 +100,9 @@ export default function AudioRecorderSheet({ sectionId, songId, lineIndex, onClo
             </div>
             <p className="ar-timer">{String(Math.floor(elapsed / 60)).padStart(1, '0')}:{String(elapsed % 60).padStart(2, '0')}</p>
             <div className="ar-actions">
-              <button className="ar-btn-cancel" onClick={handleCancel} disabled={state === 'saving'}>discard</button>
+              <button className="ar-btn-cancel" onClick={handleCancel} disabled={state === 'saving'}>Discard</button>
               <button className="ar-btn-stop" onClick={handleStop} disabled={state === 'saving'}>
-                {state === 'saving' ? 'saving…' : 'stop'}
+                {state === 'saving' ? 'Saving…' : 'Stop'}
               </button>
             </div>
           </>

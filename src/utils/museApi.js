@@ -230,6 +230,13 @@ aparecen 2+ veces como gancho).
 === 5. FORMATO DE SALIDA (JSON ESTRICTO DE UNA SOLA LÍNEA) ===
 Responde EXCLUSIVAMENTE con el JSON correspondiente al modo ejecutado, sin explicaciones
 exteriores ni bloques markdown. Incluye siempre el array "themes".
+Dentro de cualquier valor de texto, nunca uses comillas dobles rectas (") para citar una
+palabra o frase — rompen el JSON. Usa comillas simples ('así') o guiones — nunca "así".
+Donde una plantilla muestra "A"|"B"|"C", esa barra vertical NO es JSON válido — significa
+"elige exactamente una de estas opciones" y en tu respuesta va SOLO esa palabra suelta,
+como string normal. Nunca copies el carácter "|", nunca combines varias opciones, y nunca
+escribas operadores de código (&&, ||, !=, ternarios) como valor — el valor es siempre un
+string, número, booleano o null simple, nada más.
 
 SI action_type == "SURGEON" o "ARCHITECT":
 {"action_type": "SURGEON"|"ARCHITECT", "reasoning": "explicación técnica/fonética de 1 frase", "targetLineText": "línea física exacta copiada tal cual o null", "isRhymeRequest": true|false, "rhymeTargetWord": "palabra objetivo o null", "suggestions": [{"text": "verso propuesto", "type": "CONTINUITY"|"CONTRAST"|"RESOLUTION", "angle": "raw"|"atmospheric"|"abstract"}, "... (5-6 en total)"], "themes": ["..."]}
@@ -432,10 +439,17 @@ export function parseCompanionResponse(raw) {
         return {...result, themes};
     } catch {
         console.error('muse response failed to parse:', raw);
+        // Never surface the raw (broken) response text to the artist — a
+        // malformed-JSON reply usually still looks like near-JSON, which
+        // read as a real, alarming bug when it leaked into the chat as if
+        // it were the muse's actual question. A plain retry prompt is the
+        // honest thing to show instead; the real payload stays in the
+        // console for debugging.
+        const fallbackText = 'la musa se ha hecho un lío respondiendo — inténtalo de nuevo';
         return {
             action_type: 'SOCRATIC',
-            message: raw.trim() || '(la musa no ha podido responder — inténtalo de nuevo)',
-            suggestions: [], question: {text: raw.trim(), options: []}, wordBank: null,
+            message: fallbackText,
+            suggestions: [], question: {text: fallbackText, options: []}, wordBank: null,
             targetLineText: null, isRhymeRequest: false, rhymeTargetWord: null, themes: [],
         };
     }

@@ -18,6 +18,10 @@ let state = {
   sessionChecked: false,
   activeSong:     null,
   songs:          [],
+  // Distinguishes "haven't fetched yet" from "fetched, genuinely zero
+  // projects" — songs alone can't tell those apart (both are `[]`), which
+  // let the projects screens flash an empty state during the real fetch.
+  songsLoaded:    false,
   projectError:   null,
 };
 

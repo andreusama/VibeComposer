@@ -36,7 +36,7 @@ function WholeVerseCommentTab({ lineId, userId, comments, setComments }) {
       <div className="ts-add-col">
         <textarea value={body} placeholder="a note about the whole thing…" onChange={(e) => setBody(e.target.value)} />
         <div className="ts-add-row">
-          <button onClick={handleAdd}>+ add</button>
+          <button onClick={handleAdd}>+ Add</button>
         </div>
       </div>
     </div>

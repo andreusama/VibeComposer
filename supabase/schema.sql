@@ -528,7 +528,7 @@ create table muse_entries (
   -- collapse to very different `action` values ('clarify' vs 'suggest'),
   -- and SURGEON/ARCHITECT collapse to the SAME `action` ('suggest') as
   -- each other and as WORD_BANK, so `action` alone can't drive rendering.
-  mode                 text check (mode in ('SURGEON', 'ARCHITECT', 'SOCRATIC', 'WORD_BANK')),
+  mode                 text check (mode in ('SURGEON', 'ARCHITECT', 'SOCRATIC', 'WORD_BANK', 'OPEN_REFERENCE')),
   content              text not null,
   -- Only populated on action='suggest' rows — the actual candidate
   -- lines/words, kept structured (not flattened into content) so each one

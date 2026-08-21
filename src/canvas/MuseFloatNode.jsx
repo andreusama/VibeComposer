@@ -21,8 +21,8 @@ const ANGLE_LABELS = {
   ca: { raw: 'crua', atmospheric: 'atmosfèrica', abstract: 'abstracta' },
 };
 const MODE_LABELS = {
-  es: { SURGEON: 'cirujano', ARCHITECT: 'arquitecto', SOCRATIC: 'socrática', WORD_BANK: 'banco de palabras' },
-  ca: { SURGEON: 'cirurgià', ARCHITECT: 'arquitecte', SOCRATIC: 'socràtica', WORD_BANK: 'banc de paraules' },
+  es: { SURGEON: 'cirujano', ARCHITECT: 'arquitecto', SOCRATIC: 'socrática', WORD_BANK: 'banco de palabras', OPEN_REFERENCE: 'referencia abierta' },
+  ca: { SURGEON: 'cirurgià', ARCHITECT: 'arquitecte', SOCRATIC: 'socràtica', WORD_BANK: 'banc de paraules', OPEN_REFERENCE: 'referència oberta' },
 };
 
 // The muse used to permanently occupy a tab in the note's side panel —

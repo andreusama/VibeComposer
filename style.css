@@ -4633,6 +4633,19 @@ body::before {
 }
 .thread-status-error { color: var(--rose); }
 
+.mp-retry-btn {
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    font-weight: 600;
+    color: var(--rose);
+    background: none;
+    border: 1px solid var(--rose);
+    border-radius: var(--radius-full, 999px);
+    padding: 2px 10px;
+    cursor: pointer;
+}
+.mp-retry-btn:active { opacity: 0.7; }
+
 .thread-empty {
     text-align: center;
     color: var(--muted);
@@ -5074,13 +5087,17 @@ body::before {
 .ne-row-muse .ne-line-input::placeholder { color: var(--amber); opacity: 0.6; }
 .ne-gutter-muse-icon { color: var(--amber); font-size: var(--fs-label); }
 
-/* The other half of the popover→line connection (.mp-pointer is the
-   first) — same amber as the muse's own header, so origin and direction
-   are never signaled by just one of the two at a time (design ref: "dos
-   señales a la vez, nunca una sola"). Plain tint, not .ne-row-muse's
-   italic/bordered treatment — this is the artist's own line, not a
-   message to the muse, so the text itself stays exactly as written. */
-.ne-row-muse-origin { background: var(--amber-soft); }
+/* The line the open Muse sheet is currently discussing — same amber-soft
+   fill + #EAD9B8 border as .muse-target-chip (desktop) and .mp-quote-box
+   (mobile sheet's own quote of this exact line), so the highlight in the
+   note reads as the same badge, not a different color coincidentally close.
+   box-shadow inset instead of a real border, same trick as .ne-row-muse, so
+   the row doesn't grow/shift when the highlight turns on. */
+.ne-row-muse-origin {
+    background: var(--amber-soft);
+    box-shadow: inset 0 0 0 1px #EAD9B8;
+    border-radius: var(--r-md);
+}
 
 .ne-gutter {
     flex-shrink: 0;
@@ -5492,86 +5509,74 @@ body::before {
 }
 .sel-callout-btn:active { background: rgba(255, 255, 255, 0.15); }
 
-/* Invisible on purpose — unlike the old dimming .mp-backdrop, nothing here
-   blocks the rest of the screen; it exists only to catch an outside tap
-   and close .mp-anchored. Non-intrusive per the redesign brief: the deck/
-   banner floats directly under the line it's about instead of taking over
-   the screen. */
+/* Dims the note behind the sheet (design ref: references/bottomTabMuse.jpg)
+   — a real scrim now, not the old invisible catch-tap-only version, so the
+   sheet reads as a distinct layer above the note the way the reference
+   does. Still exists to catch an outside tap and close .mp-anchored. The
+   origin line's own highlight (.ne-row-muse-origin) sits underneath this
+   tint and stays legible through it — its amber-soft fill is warm enough
+   to read as "still highlighted" rather than just "dimmed like everything
+   else." */
 .mp-scrim {
     position: fixed;
     inset: 0;
     z-index: 60;
-    background: transparent;
+    background: rgba(29, 28, 26, 0.32);
 }
 
-/* Positioned via inline style from MusePopover's anchorStyle() — directly
-   under (or, near the bottom of the viewport, above) the verse line the
-   turn is about. ONE unified card (single background/radius/shadow), same
-   as the original popover — head and content share this one surface.
-   Splitting it into a separate pill per content type looked "raro"
-   (washed-out, disconnected) in practice; keeping the single emergent
-   square with its shadow is the right call. Safe now that the deck only
-   ever renders one card at a time (no stacked card behind to double up
-   against or bleed through — see .mp-deck-card below). */
-/* Warm amber glass, not the neutral .glass tint — this panel IS the muse
-   (amber is her color everywhere else in this app: the gutter's muse icon,
-   .ne-row-muse, the desktop float node), and unlike the nav headers it has
-   nothing structural to scroll behind — it's a genuinely transient popover
-   that appears floating over the canvas, the textbook case the design ref
-   called out as "already floats conceptually, so the material should
-   match the behavior." */
+/* Bottom-docked sheet (design ref: references/bottomTabMuse.jpg), not an
+   anchored-under-the-line popover — the line it's about is instead marked
+   directly on the note itself (.ne-row-muse-origin), so the sheet is free
+   to always dock in the thumb zone regardless of where that line sits on
+   screen. bottom is set inline by MusePopover (keyboardInset) so the sheet
+   docks flush above the keyboard once an input inside it is focused,
+   instead of getting covered by it. Solid paper, not glass — it sits above
+   an opaque scrim now (.mp-scrim), so there's nothing translucent worth
+   showing through. */
 .mp-anchored {
     position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
     z-index: 61;
-    max-width: calc(100vw - var(--space-4) * 2);
-    max-height: min(48vh, 420px);
+    max-height: min(60vh, 520px);
     overflow-y: auto;
-    border-radius: var(--r-lg);
-    padding: var(--space-3);
-    background: rgba(251, 241, 225, 0.78);
-    backdrop-filter: blur(20px) saturate(180%);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
-    border: 1px solid rgba(255, 255, 255, 0.55);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), var(--sh-3);
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+    padding: var(--space-2) var(--space-4) calc(var(--space-4) + env(safe-area-inset-bottom));
+    background: var(--paper);
+    box-shadow: var(--sh-3);
 }
 
-/* The "pico" connecting the panel back to its origin line — a rotated
-   square, half hidden under the panel's own edge (z-index below .mp-
-   anchored's 61) so only the outward-pointing triangle tip shows, the
-   standard speech-bubble-caret trick. A separate position: fixed element
-   rather than a pseudo-element of .mp-anchored itself, since that panel
-   scrolls (overflow-y: auto) and would clip anything poking past its own
-   box. Same glass material as the panel so the seam reads as one surface. */
-.mp-pointer {
-    position: fixed;
-    z-index: 60;
-    width: 18px;
-    height: 18px;
-    transform: rotate(45deg);
-    background: rgba(251, 241, 225, 0.78);
-    backdrop-filter: blur(20px) saturate(180%);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
-    border: 1px solid rgba(255, 255, 255, 0.55);
+/* Drag-handle affordance at the top of the sheet — purely visual (closing
+   is still the scrim tap or .mp-close), but a bottom sheet with nothing up
+   there reads as accidentally cut off rather than intentionally docked. */
+.mp-grabber {
+    width: 36px;
+    height: 4px;
+    border-radius: var(--radius-pill);
+    background: var(--hairline);
+    margin: var(--space-1) auto var(--space-2);
 }
 
 .mp-head {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: var(--space-2);
-    padding-bottom: var(--space-2);
     margin-bottom: var(--space-2);
-    border-bottom: 1px solid var(--hairline);
 }
-.mp-head-target {
-    flex: 1;
-    min-width: 0;
-    font-family: var(--font-body);
-    font-style: italic;
-    font-size: var(--fs-secondary);
-    color: var(--muted);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+/* "+ THE MUSE" kicker — amber, same reasoning .ne-row-muse-origin's comment
+   gives: this panel IS the muse, amber is her color everywhere in this app. */
+.mp-eyebrow {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-family: var(--font-mono);
+    font-size: var(--fs-eyebrow);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--amber);
 }
 .mp-close {
     min-width: 48px;
@@ -5581,6 +5586,23 @@ body::before {
     color: var(--graphite);
     font-size: var(--fs-body);
     cursor: pointer;
+}
+
+/* Quotes the exact line/fragment the sheet is about — same amber-soft fill
+   + #EAD9B8 border as desktop's .muse-target-chip, and the same treatment
+   .ne-row-muse-origin now puts on the line itself in the note, so all
+   three read as one signal instead of three different highlight colors. */
+.mp-quote-box {
+    display: block;
+    background: var(--amber-soft);
+    border: 1px solid #EAD9B8;
+    border-radius: var(--r-sm);
+    padding: var(--space-2) var(--space-3);
+    margin-bottom: var(--space-3);
+    font-family: var(--font-body);
+    font-style: italic;
+    font-size: var(--fs-secondary);
+    color: var(--ink);
 }
 
 .mp-loading { display: flex; justify-content: center; padding: var(--space-6) 0; }
@@ -5608,6 +5630,52 @@ body::before {
     color: var(--ink);
     margin: 0;
 }
+.mp-answer {
+    font-family: var(--font-body);
+    font-size: var(--fs-body);
+    color: var(--ink);
+    margin: 0;
+}
+/* Free-typed reply, for when none of the SOCRATIC chips fit (design ref:
+   references/bottomTabMuse.jpg — the input+Send row under the question).
+   Chips stay above this as quick-fill shortcuts; this is the open-ended
+   fallback, always available alongside them rather than replacing them. */
+.mp-reply-form { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-1); }
+.mp-reply-input {
+    flex: 1;
+    min-width: 0;
+    min-height: 48px;
+    padding: 0 var(--space-3);
+    background: var(--bg-deep);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    color: var(--ink);
+}
+/* --accent, same indigo the app already uses for chords/desktop muse
+   chips — signals "this exact field is what's about to be sent" the
+   instant the keyboard opens, matching the reference's active-input ring. */
+.mp-reply-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.mp-reply-send {
+    flex-shrink: 0;
+    min-height: 48px;
+    padding: 0 var(--space-4);
+    background: var(--ink);
+    color: var(--paper);
+    border: none;
+    border-radius: var(--radius-pill);
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: var(--fs-secondary);
+    cursor: pointer;
+}
+.mp-reply-send:disabled { opacity: 0.4; cursor: default; }
+
 .mp-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .mp-chip {
     min-height: 48px;

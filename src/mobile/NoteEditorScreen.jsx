@@ -15,12 +15,78 @@ import AudioRecorderSheet from './AudioRecorderSheet.jsx';
 import LineAudioBadge from './LineAudioBadge.jsx';
 import { loadLineAudioFor } from '../canvas/lineAudioData.js';
 
-// Long-press duration to open the voice-memo recorder — fast enough to
-// feel deliberate-but-quick (this is "hold to talk," not "hold to reveal a
-// hidden menu"), slower than any normal tap/scroll gesture would ever
-// register as. See LineRow's onTouchStart/Move/End below.
+// Long-press duration to open the voice-memo recorder (gutter) or select a
+// word (the line's own text, see handleTextTouchStart below) — fast enough
+// to feel deliberate-but-quick ("hold to act," not "hold to reveal a hidden
+// menu"), slower than any normal tap/scroll gesture would ever register as.
+// Shared by both gestures, and deliberately faster than iOS's own ~500ms+
+// text-interaction gesture (loupe/selection) so ours reliably wins the race.
 const LONG_PRESS_MS = 400;
 const LONG_PRESS_MOVE_TOLERANCE = 10;
+
+// A word, for long-press-to-select purposes: anything that isn't whitespace
+// or sentence punctuation — deliberately NOT an [a-zA-Z] allowlist, so
+// accented letters and apostrophes (Catalan/Spanish lyrics: "anem", "d'octubre",
+// "l'aire") count as part of a word instead of splitting it.
+const WORD_CHAR_RE = /[^\s.,;:!?¿¡()«»"“”—–\-]/;
+
+// Expands a raw character index out to the word it falls inside (or null if
+// it lands on whitespace/punctuation with nothing to grab). Used by the
+// text long-press below — charIndexFromPoint only needs to get "close
+// enough" to the intended word, since this snaps to real word boundaries.
+function wordBoundsAtIndex(text, index) {
+  if (!text.length) return null;
+  let i = Math.min(Math.max(index, 0), text.length - 1);
+  if (!WORD_CHAR_RE.test(text[i] || '') && WORD_CHAR_RE.test(text[i - 1] || '')) i -= 1;
+  if (!WORD_CHAR_RE.test(text[i] || '')) return null;
+  let start = i;
+  let end = i + 1;
+  while (start > 0 && WORD_CHAR_RE.test(text[start - 1])) start -= 1;
+  while (end < text.length && WORD_CHAR_RE.test(text[end])) end += 1;
+  return { start, end };
+}
+
+// Textareas don't expose a "point → character offset" API the way
+// contenteditable's caretRangeFromPoint does, and a line can wrap across
+// multiple visual rows (see LineRow's auto-grow below), so a flat
+// x/averageCharWidth estimate breaks the moment a line wraps and drifts on
+// this app's proportional serif font regardless. Mirrors the line into an
+// offscreen div with identical box/font metrics (one span per character) and
+// picks whichever span's box center is closest to the touch point — one
+// layout pass, a few dozen spans at most for a lyric line, only run once per
+// long-press (not per frame).
+function charIndexFromPoint(textarea, clientX, clientY) {
+  const style = window.getComputedStyle(textarea);
+  const mirror = document.createElement('div');
+  mirror.style.cssText = `position: absolute; top: 0; left: -9999px; visibility: hidden;
+    white-space: pre-wrap; word-wrap: break-word; box-sizing: ${style.boxSizing};
+    width: ${style.width}; padding: ${style.padding}; border: ${style.borderWidth} solid transparent;
+    font: ${style.font}; letter-spacing: ${style.letterSpacing};`;
+  const text = textarea.value;
+  const spans = [];
+  for (const ch of text) {
+    const span = document.createElement('span');
+    span.textContent = ch; // pre-wrap on the mirror keeps a lone space's width intact
+    mirror.appendChild(span);
+    spans.push(span);
+  }
+  document.body.appendChild(mirror);
+  const taRect = textarea.getBoundingClientRect();
+  const mirrorRect = mirror.getBoundingClientRect();
+  const touchX = clientX - taRect.left;
+  const touchY = clientY - taRect.top;
+  let best = text.length;
+  let bestDist = Infinity;
+  spans.forEach((span, i) => {
+    const r = span.getBoundingClientRect();
+    const dx = (r.left - mirrorRect.left + r.width / 2) - touchX;
+    const dy = (r.top - mirrorRect.top + r.height / 2) - touchY;
+    const dist = dx * dx + dy * dy;
+    if (dist < bestDist) { bestDist = dist; best = i; }
+  });
+  document.body.removeChild(mirror);
+  return best;
+}
 
 // The "talk to the muse right inside the lyric" pattern from the design
 // ref — always the same wake word, like addressing Alexa, so it reads
@@ -49,15 +115,11 @@ function LineRow({
   // Long-press-to-record — the timer only arms for a touch that starts on
   // the GUTTER, not the textarea. It used to live on the whole row, but
   // touch events bubble: a hold directly on the line's text also reached
-  // this handler, meaning a stationary touch-and-hold on text — iOS's own
-  // gesture for the selection loupe/edit menu (Apple HIG, "Selection and
-  // input": "people expect to reveal the menu by touching and holding or
-  // double-tapping content... your app should respond to both gestures")
-  // — raced against this app's unrelated "start recording" action on the
-  // exact same input. Scoping the timer to the gutter leaves the text
-  // itself exclusively native; the gutter already hosts every other
-  // line-level action (syllable count, rhyme badge, friction nudge, audio
-  // badge), so "hold the margin to record" fits the same pattern.
+  // this handler, colliding with the text's own long-press (see
+  // handleTextTouchStart below) — both fired off the same touch. Scoping
+  // this one to the gutter keeps them apart; the gutter already hosts every
+  // other line-level action (syllable count, rhyme badge, friction nudge,
+  // audio badge), so "hold the margin to record" fits the same pattern.
   const holdTimerRef = useRef(null);
   const holdStartRef = useRef({ x: 0, y: 0 });
 
@@ -67,7 +129,7 @@ function LineRow({
 
   const handleRowTouchStart = useCallback((e) => {
     if (!e.touches || e.touches.length !== 1) return;
-    if (e.target.closest?.('.ne-line-input')) return; // let native text selection own the text itself
+    if (e.target.closest?.('.ne-line-input')) return; // the text has its own long-press handler (handleTextTouchStart)
     holdStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
     clearHoldTimer();
     holdTimerRef.current = setTimeout(() => onLongPress(index), LONG_PRESS_MS);
@@ -143,6 +205,54 @@ function LineRow({
     });
   }, [text, index, onSelectionChange]);
 
+  // Hold a word to select it — the primary entry point into Rhyme/Concept/
+  // Genealogía/Ask muse now, replacing reliance on iOS's own double-tap-to-
+  // select-word: that native gesture also raises iOS's own Select/Copy/Look
+  // Up bubble right over the selection at the same time this app's own pill
+  // bar docks at the bottom, and getting past that clash took two taps
+  // (dismiss the OS bubble, then reach the pills). This never asks the
+  // textarea for a real selection, so there's nothing for iOS to raise a
+  // menu about — charIndexFromPoint/wordBoundsAtIndex (top of file) work
+  // out the tapped word straight from the touch point and hand it to
+  // onSelectionChange exactly like handleSelect above does, one gesture in.
+  // Same timer/tolerance pattern as the gutter's long-press-to-record.
+  const textHoldTimerRef = useRef(null);
+  const textHoldStartRef = useRef({ x: 0, y: 0 });
+
+  const clearTextHoldTimer = useCallback(() => {
+    if (textHoldTimerRef.current) { clearTimeout(textHoldTimerRef.current); textHoldTimerRef.current = null; }
+  }, []);
+
+  const handleTextTouchStart = useCallback((e) => {
+    if (!e.touches || e.touches.length !== 1) return;
+    const { clientX, clientY } = e.touches[0];
+    textHoldStartRef.current = { x: clientX, y: clientY };
+    clearTextHoldTimer();
+    textHoldTimerRef.current = setTimeout(() => {
+      const el = localRef.current;
+      if (!el) return;
+      const charIndex = charIndexFromPoint(el, clientX, clientY);
+      const bounds = wordBoundsAtIndex(text, charIndex);
+      if (!bounds) return;
+      onSelectionChange({
+        lineIndex: index,
+        text: text.slice(bounds.start, bounds.end),
+        before: text.slice(0, bounds.start),
+        after: text.slice(bounds.end),
+        rect: el.getBoundingClientRect(),
+      });
+    }, LONG_PRESS_MS);
+  }, [text, index, onSelectionChange, clearTextHoldTimer]);
+
+  const handleTextTouchMove = useCallback((e) => {
+    if (!textHoldTimerRef.current || !e.touches) return;
+    const dx = e.touches[0].clientX - textHoldStartRef.current.x;
+    const dy = e.touches[0].clientY - textHoldStartRef.current.y;
+    if (Math.abs(dx) > LONG_PRESS_MOVE_TOLERANCE || Math.abs(dy) > LONG_PRESS_MOVE_TOLERANCE) clearTextHoldTimer();
+  }, [clearTextHoldTimer]);
+
+  useEffect(() => clearTextHoldTimer, [clearTextHoldTimer]);
+
   return (
     <div
       className={`ne-row${dimmed ? ' ne-row-dimmed' : ''}${isMuseCommand ? ' ne-row-muse' : ''}${previewText != null ? ' ne-row-preview' : ''}${museOrigin ? ' ne-row-muse-origin' : ''}`}
@@ -178,6 +288,14 @@ function LineRow({
         onSelect={handleSelect}
         onBlur={() => onBlurLine(index)}
         onKeyDown={handleKeyDown}
+        onTouchStart={handleTextTouchStart}
+        onTouchMove={handleTextTouchMove}
+        onTouchEnd={clearTextHoldTimer}
+        onTouchCancel={clearTextHoldTimer}
+        // Defense in depth against iOS's native Select/Copy/Look Up bubble
+        // (see handleTextTouchStart's comment) — some iOS versions fire
+        // `contextmenu` for the same long-press that would raise it.
+        onContextMenu={(e) => e.preventDefault()}
       />
       {/* Reserved on every row, same fixed width whether or not this line
           has a memo — so recording (or deleting) one never shifts the
@@ -653,8 +771,16 @@ export default function NoteEditorScreen({
           be a focused, single-purpose moment (see SelectionCallout), and
           the FAB has nothing to do with it. Also frees the bottom-right
           corner so the callout bar can just be a clean, symmetric floating
-          card instead of carving out a gap to avoid overlapping it. */}
-      {!selection && (
+          card instead of carving out a gap to avoid overlapping it. Same
+          reasoning for the Muse sheet (activePopover): it's a full-width
+          bottom dock now (design ref: references/bottomTabMuse.jpg), not a
+          small card anchored under a line, so it sits directly behind the
+          FAB's bottom-right corner — and .fab-menu-btn's z-index:62 was
+          deliberately set above the sheet's z-index:61 for the OLD
+          line-anchored popover, which rarely overlapped it. Left onscreen,
+          the "+" pokes through the sheet's own content and makes it hard
+          to read. */}
+      {!selection && !activePopover && (
         <FabMenu
           pills={[
             { label: 'Baúl de la inspiración', icon: '✦', dark: true, onClick: () => setBaulOpen(true) },

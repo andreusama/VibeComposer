@@ -26,34 +26,32 @@ function haptic(pattern) {
   try { navigator.vibrate?.(pattern); } catch { /* unsupported — fine */ }
 }
 
-// Positions the anchored panel directly under the verse line it's about,
-// same "measure once at open time" approach SelectionCallout already uses
-// for its pill — not a live-tracked anchor, so it doesn't fight scrolling
-// mid-interaction. Falls back to placing the panel ABOVE the line if there
-// isn't room below in the current viewport — `placement` drives both the
-// pointer's direction and which edge it attaches to (see PopoverPointer).
-function anchorStyle(anchorRect, estimatedHeight = 260) {
-  if (!anchorRect) return { style: {}, placement: 'below' };
-  const fitsBelow = anchorRect.bottom + estimatedHeight + 12 <= window.innerHeight;
-  return fitsBelow
-    ? { style: { top: anchorRect.bottom + 8, left: anchorRect.left, width: anchorRect.width }, placement: 'below' }
-    : { style: { bottom: window.innerHeight - anchorRect.top + 8, left: anchorRect.left, width: anchorRect.width }, placement: 'above' };
-}
-
-// A small diamond "pico" connecting the popover back to the exact line it's
-// about — the origin-line amber highlight (.ne-row-muse-origin) is the
-// other half of that same signal, never just one alone (design ref: "dos
-// señales a la vez"). Rendered as its own position: fixed element, sibling
-// to .mp-anchored rather than a pseudo-element on it — .mp-anchored has its
-// own overflow-y: auto for long content, which would clip a pointer poking
-// out past its edge if it lived inside that box.
-function PopoverPointer({ anchorRect, style, placement }) {
-  if (!anchorRect) return null;
-  const left = (style.left ?? 0) + 24;
-  const edgeStyle = placement === 'below'
-    ? { top: (style.top ?? 0) - 9 }
-    : { bottom: (style.bottom ?? 0) - 9 };
-  return <div className={`mp-pointer mp-pointer-${placement}`} style={{ left, ...edgeStyle }} />;
+// Tracks how much the on-screen keyboard is covering the viewport, so the
+// sheet can dock flush above it instead of getting hidden underneath (design
+// ref: references/bottomTabMuse.jpg — "el teclado se ancla al fondo real de
+// la pantalla y el sheet se acopla justo encima"). visualViewport shrinks
+// (and offsetTop can grow) exactly when the keyboard opens, on the mobile
+// browsers that support it — the gap between window.innerHeight and that
+// shrunk viewport IS the keyboard's height. 0 (the default, no inline
+// style override) just falls back to .mp-anchored's own `bottom: 0`.
+function useKeyboardInset() {
+  const [inset, setInset] = useState(0);
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const onResize = () => {
+      const gap = window.innerHeight - vv.height - vv.offsetTop;
+      setInset(Math.max(0, Math.round(gap)));
+    };
+    vv.addEventListener('resize', onResize);
+    vv.addEventListener('scroll', onResize);
+    onResize();
+    return () => {
+      vv.removeEventListener('resize', onResize);
+      vv.removeEventListener('scroll', onResize);
+    };
+  }, []);
+  return inset;
 }
 
 // A single swipeable card — deliberately only ever ONE rendered at a time
@@ -161,19 +159,24 @@ function SuggestionCard({ suggestion, showReplace, onDiscard, onAccept, onInsert
   );
 }
 
-// The one popover shell for all 4 muse modes (SURGEON/ARCHITECT/SOCRATIC/
-// WORD_BANK) — same askMuse() call as desktop's MuseFloatNode, just a
+// The one popover shell for all 5 muse modes (SURGEON/ARCHITECT/SOCRATIC/
+// WORD_BANK/OPEN_REFERENCE) — same askMuse() call as desktop's MuseFloatNode, just a
 // mobile-native, single-shot presentation instead of a persistent chat
 // thread ("Zero-Chat" per the HCI spec this was built against): each mode
 // renders straight from the latest askMuse response, no visible scrolling
 // history.
 //
-// Presentation: anchored directly under the verse line the turn is about
-// (anchorStyle above) instead of a centered, dimming backdrop modal — an
-// invisible full-screen "scrim" still catches an outside tap to close, but
-// nothing visually blocks the rest of the screen. SURGEON/ARCHITECT render
-// as a swipeable card deck, SOCRATIC as a single-line question + chips
-// banner, WORD_BANK as a scrollable pill grid — all anchored the same way.
+// Presentation: a bottom-docked sheet over a dimming scrim (design ref:
+// references/bottomTabMuse.jpg), not anchored directly under the verse
+// line — the line itself is marked instead (.ne-row-muse-origin, driven by
+// NoteEditorScreen's museOrigin/originIsReal), and the sheet quotes it
+// again in its own .mp-quote-box, so "which line" reads from two places at
+// once without the sheet needing to track that line's on-screen position.
+// useKeyboardInset docks the sheet flush above the keyboard once an input
+// inside it (the SOCRATIC reply composer, or a concept/genealogy ask form)
+// gains focus. SURGEON/ARCHITECT render as a swipeable card deck, SOCRATIC
+// as a question + chips + free-reply banner, WORD_BANK as a scrollable pill
+// grid — all inside the same sheet shell.
 //
 // Two ways in:
 // 1. Selection callout (Rhyme / Concept / Genealogía / Ask muse pills) —
@@ -201,7 +204,7 @@ function SuggestionCard({ suggestion, showReplace, onDiscard, onAccept, onInsert
 //    intent verbatim.
 export default function MusePopover({
   mode, targetVerse, seedMessage, verseText, noteFunction, lyricDna,
-  lyricLanguage, lyricDialect, songStructure, songId, sectionId, anchorRect,
+  lyricLanguage, lyricDialect, songStructure, songId, sectionId,
   originIsReal = true,
   onClose, onReplace, onInsertBelow, onPreviewText = () => {},
 }) {
@@ -285,6 +288,10 @@ export default function MusePopover({
   const [provocationStage, setProvocationStage] = useState('idle');
   const [provocationConceptDraft, setProvocationConceptDraft] = useState('');
   const [provocationClarificationDraft, setProvocationClarificationDraft] = useState('');
+  // SOCRATIC's free-typed reply (design ref: references/bottomTabMuse.jpg)
+  // — sits alongside the model's own chips as the open-ended fallback for
+  // whenever none of them are actually the answer.
+  const [replyDraft, setReplyDraft] = useState('');
 
   useEffect(() => {
     if (!sectionId) return;
@@ -396,6 +403,14 @@ export default function MusePopover({
   }, [onInsertBelow, onClose]);
 
   const handleChip = useCallback((chip) => send(chip), [send]);
+
+  const handleReplySubmit = useCallback((e) => {
+    e.preventDefault();
+    const text = replyDraft.trim();
+    if (!text) return;
+    setReplyDraft('');
+    send(text);
+  }, [replyDraft, send]);
 
   // Concept mode's confirm/ask step (creativity proposal #3) — never fires
   // the actual WORD_BANK request (or, in genealogy mode, the actual
@@ -512,27 +527,31 @@ export default function MusePopover({
     onClose();
   }, [targetVerse, onReplace, onInsertBelow, onClose]);
 
-  const { style, placement } = anchorStyle(anchorRect);
+  const keyboardInset = useKeyboardInset();
 
   return (
     <>
-      {/* Invisible — unlike the old centered modal, nothing here dims or
-          blocks the rest of the screen; this only exists to catch an
-          outside tap and close. */}
+      {/* Dims the note behind the sheet — catches an outside tap to close
+          too. */}
       <div className="mp-scrim" onClick={onClose} />
-      {/* Only when there's a genuine line to point at — e.g. a typed
-          "Musa, ..." command anchors near whatever's on screen purely for
-          placement, not because that line is what's being discussed
-          (see NoteEditorScreen's originIsReal). A pointer aimed at a line
-          with no highlight of its own would just look like a rendering
-          glitch, and worse, would visually claim a reference that isn't
-          real. */}
-      {originIsReal && <PopoverPointer anchorRect={anchorRect} style={style} placement={placement} />}
-      <div className={`mp-anchored mp-anchored-${placement}`} style={style} onClick={(e) => e.stopPropagation()}>
+      <div
+        className="mp-anchored"
+        style={keyboardInset > 0 ? { bottom: keyboardInset } : undefined}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mp-grabber" />
         <div className="mp-head">
-          <span className="mp-head-target">{targetVerse ? `“${targetVerse.text}”` : 'the muse'}</span>
+          <span className="mp-eyebrow">+ the muse</span>
           <button className="mp-close" onClick={onClose} title="close">✕</button>
         </div>
+        {/* Only when there's a genuine line/fragment behind this turn — e.g.
+            a typed "Musa, ..." command has no real targetVerse (see
+            NoteEditorScreen's originIsReal), and quoting one back would
+            visually claim a reference that isn't real. Same amber-soft +
+            #EAD9B8 treatment as .ne-row-muse-origin on the line itself. */}
+        {originIsReal && targetVerse && (
+          <p className="mp-quote-box">&quot;{targetVerse.text}&quot;</p>
+        )}
 
         {/* Concept AND genealogy modes' shared confirm/ask step — renders
             BEFORE anything askMuse-related, since neither send() nor
@@ -632,6 +651,18 @@ export default function MusePopover({
                 <button key={i} className="mp-chip" onClick={() => handleChip(opt)}>{opt}</button>
               ))}
             </div>
+            {/* Open-ended fallback for whenever none of the chips above are
+                actually the answer (design ref: references/bottomTabMuse.jpg). */}
+            <form className="mp-reply-form" onSubmit={handleReplySubmit}>
+              <input
+                className="mp-reply-input"
+                type="text"
+                value={replyDraft}
+                onChange={(e) => setReplyDraft(e.target.value)}
+                placeholder="tu respuesta…"
+              />
+              <button className="mp-reply-send" type="submit" disabled={!replyDraft.trim()}>Send</button>
+            </form>
             {/* Creativity proposal #4 — always available on any SOCRATIC
                 turn, not something the model has to remember to offer as
                 one of its own dynamic chips. Never fires on the first tap —
@@ -703,6 +734,18 @@ export default function MusePopover({
                 </button>
               </div>
             )}
+          </div>
+        )}
+
+        {/* OPEN_REFERENCE never got a render branch when the mode shipped —
+            the response saved and loaded fine, but with no case matching
+            'OPEN_REFERENCE' the popover just showed nothing. Same plain
+            text treatment as SOCRATIC's banner (no chips/options either
+            way: an answer has nothing to pick from, and a decline's
+            redirect is meant to be read, not tapped). */}
+        {!loading && !error && response?.action_type === 'OPEN_REFERENCE' && (
+          <div className="mp-banner">
+            <p className="mp-answer">{response.message}</p>
           </div>
         )}
 

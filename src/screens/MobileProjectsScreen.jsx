@@ -74,9 +74,13 @@ export default function MobileProjectsScreen({ state, justEntered }) {
   const [query, setQuery] = useState('');
   const [creating, setCreating] = useState(false);
 
+  const loadSongs = () => {
+    loadProjectSummaries().then(({ songs, error }) => setState({ songs, projectError: error, songsLoaded: true }));
+  };
+
   useEffect(() => {
     if (!justEntered) return;
-    loadProjectSummaries().then(({ songs, error }) => setState({ songs, projectError: error, songsLoaded: true }));
+    loadSongs();
   }, [justEntered]);
 
   const filtered = useMemo(() => {
@@ -128,7 +132,12 @@ export default function MobileProjectsScreen({ state, justEntered }) {
           <div className="mp-loading"><span className="mp-spinner" /></div>
         ) : (
           <>
-            {state.projectError && <p className="thread-status thread-status-error">{state.projectError}</p>}
+            {state.projectError && (
+              <p className="thread-status thread-status-error">
+                {state.projectError}{' '}
+                <button className="mp-retry-btn" onClick={loadSongs}>Retry</button>
+              </p>
+            )}
             {!state.projectError && filtered.length === 0 && (
               <div className="thread-empty"><p>No projects yet.</p></div>
             )}

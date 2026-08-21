@@ -27,7 +27,7 @@ create table muse_entries (
   -- schema.sql's comment on this column for why it's separate from
   -- `action` (the UI needs the specific mode to render correctly, and
   -- SURGEON/ARCHITECT/WORD_BANK all collapse to the same `action` value).
-  mode                 text check (mode in ('SURGEON', 'ARCHITECT', 'SOCRATIC', 'WORD_BANK')),
+  mode                 text check (mode in ('SURGEON', 'ARCHITECT', 'SOCRATIC', 'WORD_BANK', 'OPEN_REFERENCE')),
   content              text not null,
   options              jsonb,
   saved_annotation_id  uuid references annotations(id) on delete set null,

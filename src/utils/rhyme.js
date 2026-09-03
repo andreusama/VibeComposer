@@ -23,7 +23,7 @@
 //     of each group's first appearance. A key that never recurs isn't a
 //     rhyme, it's free verse — no letter.
 
-import { LANG_RULES, stripToLetters, normalizeY, silenceGuQu, ACCENT_VOWELS, ACCENT_LETTERS } from './syllables.js';
+import { LANG_RULES, stripToLetters, normalizeY, silenceGuQu, ACCENT_VOWELS, ACCENT_LETTERS, countLineSyllables } from './syllables.js';
 
 export const DIALECTS = {
   es: ['central'],
@@ -196,6 +196,39 @@ export function classifyWordStress(rawWord, lang = 'es') {
   if (fromEnd === 0) return 'aguda';
   if (fromEnd === 1) return 'llana';
   return 'esdrujula';
+}
+
+// Metric length of a verse — what the gutter counter should show.
+//
+//  - Spanish: the singable-syllable count (raw syllables + sinalefa), exactly
+//    what countLineSyllables already returns — unchanged.
+//  - Catalan: the traditional convention counts syllables ONLY up to the last
+//    stressed one, so the post-tonic syllables of the final word don't count
+//    ("la lluna plena" is a tetrasíl·lab: la-llu-na-PLE·na → 4, not 5). A line
+//    ending in an aguda word loses nothing, a plana loses 1, an esdrúixola 2.
+//
+// The final word never gets a sinalefa reduction (nothing follows it), so its
+// post-tonic tail is still fully present in `base` and subtracting it is exact.
+export function lineMeter(line, lang = 'es', dialect = 'central') {
+  const base = countLineSyllables(line, lang);
+  if (lang !== 'ca' || !base) return base;
+
+  const words = wordsOf(line);
+  const last = words[words.length - 1];
+  if (!last) return base;
+
+  const clean = cleanWord(last.clean, lang);
+  const nuclei = findSyllableNuclei(clean, lang);
+  const stressIdx = findStress(clean, lang);
+  if (!nuclei.length || stressIdx === null) return base;
+
+  const stressedNucleus = nuclei.findIndex(
+    (n) => stressIdx >= n.start && stressIdx < n.start + n.text.length
+  );
+  if (stressedNucleus === -1) return base;
+
+  const postTonic = nuclei.length - 1 - stressedNucleus; // 0 aguda · 1 plana · 2 esdrúixola
+  return Math.max(0, base - postTonic);
 }
 
 // The rhyme key a *line* ends on — its last word's tail, by the same rule

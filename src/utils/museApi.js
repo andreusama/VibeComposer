@@ -16,9 +16,8 @@
 // sometimes it's raw vocabulary, not crafted lines.
 
 import {API_URL, checkAndIncrementLimit} from './api.js';
-import {getLineRhymeKey, getWordRhymeKey, wordMatchesRhyme} from './rhyme.js';
+import {getLineRhymeKey, getWordRhymeKey, wordMatchesRhyme, lineMeter} from './rhyme.js';
 import {splitIntoLines} from './textLines.js';
-import {countLineSyllables} from './syllables.js';
 import {significantWords} from './repeatedWords.js';
 import {logDebugEvent} from './debugLog.js';
 import {queryRhymeCandidates, queryWordBank, verifyWordsInLexicon} from './lexicon.js';
@@ -95,7 +94,7 @@ function describePhysicalLines(verseText, lang, dialect) {
     if (!lines.length) return '(nota vacía, sin líneas todavía)';
     return lines
         .map((line, i) => {
-            const syllables = countLineSyllables(line, lang);
+            const syllables = lineMeter(line, lang, dialect);
             const key = getLineRhymeKey(line, lang, dialect);
             const rhymeInfo = key ? `termina en "${key.clean}" — consonante "${key.consonant}", asonante "${key.assonant}"` : 'sin rima';
             return `${i + 1}. "${line}" — ${syllables} sílabas, ${rhymeInfo}`;
@@ -581,10 +580,10 @@ export function applyMuseVerification(parsed, {
 
         const beforeMetric = parsed.suggestions.map((s) => s.text);
         if (targetLine) {
-            const targetSyllables = countLineSyllables(targetLine, lang);
+            const targetSyllables = lineMeter(targetLine, lang, dialect);
             if (targetSyllables > 0) {
                 const verifiedByMetric = parsed.suggestions.filter((s) => {
-                    const optSyllables = countLineSyllables(s.text, lang);
+                    const optSyllables = lineMeter(s.text, lang, dialect);
                     return Math.abs(optSyllables - targetSyllables) <= 2;
                 });
                 if (verifiedByMetric.length > 0) parsed.suggestions = verifiedByMetric;
@@ -658,7 +657,7 @@ function buildLineContextForDebug(verseText, lang, dialect, songStructure) {
         return {
             i,
             text,
-            syllables: countLineSyllables(text, lang),
+            syllables: lineMeter(text, lang, dialect),
             rhyme: key ? `consonante "${key.consonant}" · asonante "${key.assonant}"` : null,
         };
     });

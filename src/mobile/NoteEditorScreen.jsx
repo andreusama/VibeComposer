@@ -1,11 +1,11 @@
-import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useReducer, useRef } from 'react';
 import { SECTION_TYPES, saveNoteText, saveNoteType, deleteNote } from '../canvas/canvasData.js';
 import { splitIntoLines } from '../utils/textLines.js';
-import { classifyStanzaRhymes, detectRhymeFriction } from '../utils/rhyme.js';
-import { countLineSyllables } from '../utils/syllables.js';
+import { classifyStanzaRhymes, detectRhymeFriction, lineMeter } from '../utils/rhyme.js';
 import MobileScreen from './MobileScreen.jsx';
 import ToolsSheet from './ToolsSheet.jsx';
 import SelectionCallout from './SelectionCallout.jsx';
+import LineRangeCallout from './LineRangeCallout.jsx';
 import MusePopover from './MusePopover.jsx';
 import FabMenu from './FabMenu.jsx';
 import VariantChoiceSheet from './VariantChoiceSheet.jsx';
@@ -14,6 +14,11 @@ import TempoPulse from './TempoPulse.jsx';
 import AudioRecorderSheet from './AudioRecorderSheet.jsx';
 import LineAudioBadge from './LineAudioBadge.jsx';
 import { loadLineAudioFor } from '../canvas/lineAudioData.js';
+import { loadWordVariants, addWordVariant, updateWordVariant, deleteWordVariant, resolveVariantRange } from '../canvas/wordVariantData.js';
+import LineHighlight from '../components/LineHighlight.jsx';
+import WordVariantSheet from './WordVariantSheet.jsx';
+import { loadLineHistory, addLineHistory, deleteLineHistory } from '../canvas/lineHistoryData.js';
+import LineHistorySheet from './LineHistorySheet.jsx';
 
 // Long-press duration to open the voice-memo recorder (gutter) or select a
 // word (the line's own text, see handleTextTouchStart below) — fast enough
@@ -103,7 +108,8 @@ const MUSE_COMMAND_RE = /^\s*musa\s*[,:]\s*/i;
 // the lines array, one row in the margin, not one row of pixels).
 function LineRow({
   id, index, text, previewText, syllables, rhyme, friction, audioMemos, showSyllables, dimmed, showPlaceholder, museOrigin,
-  onChange, onEnter, onBackspaceAtStart, onFocus, onBlurLine, onSelectionChange, onFrictionTap, onLongPress, inputRef,
+  lineSelected, variantRanges, hasHistory,
+  onChange, onEnter, onBackspaceAtStart, onFocus, onBlurLine, onSelectionChange, onFrictionTap, onLongPress, onGutterTap, onVariantTap, onHistoryTap, inputRef,
 }) {
   // Live, not just on submit — the moment the line reads as addressing the
   // muse (the wake word + its disambiguating comma/colon typed), the row's
@@ -205,98 +211,197 @@ function LineRow({
     });
   }, [text, index, onSelectionChange]);
 
-  // Hold a word to select it — the primary entry point into Rhyme/Concept/
-  // Genealogía/Ask muse now, replacing reliance on iOS's own double-tap-to-
-  // select-word: that native gesture also raises iOS's own Select/Copy/Look
-  // Up bubble right over the selection at the same time this app's own pill
-  // bar docks at the bottom, and getting past that clash took two taps
-  // (dismiss the OS bubble, then reach the pills). This never asks the
-  // textarea for a real selection, so there's nothing for iOS to raise a
-  // menu about — charIndexFromPoint/wordBoundsAtIndex (top of file) work
-  // out the tapped word straight from the touch point and hand it to
-  // onSelectionChange exactly like handleSelect above does, one gesture in.
-  // Same timer/tolerance pattern as the gutter's long-press-to-record.
+  // Hold a word to select it, then DRAG to extend the selection across more
+  // words — the entry point into Rhyme/Concept/Genealogía/Ask muse/Alternativa.
+  // This never touches the textarea's REAL selection: charIndexFromPoint/
+  // wordBoundsAtIndex (top of file) work the words out straight from the touch
+  // point, so iOS/Android never raise their native Copy/Look-Up edit menu over
+  // it — the whole reason for not relying on the OS's own drag-to-select, which
+  // works fine for one word but fights this app's pill bar the moment it's a
+  // multi-word range. The move/end handlers are attached natively (non-passive)
+  // so they can preventDefault the browser's own selection + the keyboard.
   const textHoldTimerRef = useRef(null);
   const textHoldStartRef = useRef({ x: 0, y: 0 });
+  const textMovedRef = useRef(false);
+  // { active, anchor: {start,end} } — set once the long-press fires, drives
+  // the drag-to-extend below.
+  const synthSelRef = useRef({ active: false, anchor: null });
+  // Latest render values, so the native listeners (bound once) always read
+  // current props without re-binding on every keystroke.
+  const liveRef = useRef({});
+  liveRef.current = { text, index, variantRanges, onSelectionChange, onVariantTap };
 
   const clearTextHoldTimer = useCallback(() => {
     if (textHoldTimerRef.current) { clearTimeout(textHoldTimerRef.current); textHoldTimerRef.current = null; }
+  }, []);
+
+  const selectWordSpan = useCallback((el, aStart, aEnd) => {
+    const { text: t, index: i } = liveRef.current;
+    const start = Math.max(0, Math.min(aStart, aEnd));
+    const end = Math.min(t.length, Math.max(aStart, aEnd));
+    if (end <= start) return;
+    liveRef.current.onSelectionChange({
+      lineIndex: i,
+      text: t.slice(start, end),
+      before: t.slice(0, start),
+      after: t.slice(end),
+      rect: el.getBoundingClientRect(),
+    });
   }, []);
 
   const handleTextTouchStart = useCallback((e) => {
     if (!e.touches || e.touches.length !== 1) return;
     const { clientX, clientY } = e.touches[0];
     textHoldStartRef.current = { x: clientX, y: clientY };
+    textMovedRef.current = false;
+    synthSelRef.current = { active: false, anchor: null };
     clearTextHoldTimer();
     textHoldTimerRef.current = setTimeout(() => {
       const el = localRef.current;
       if (!el) return;
       const charIndex = charIndexFromPoint(el, clientX, clientY);
-      const bounds = wordBoundsAtIndex(text, charIndex);
+      const bounds = wordBoundsAtIndex(liveRef.current.text, charIndex);
       if (!bounds) return;
-      onSelectionChange({
-        lineIndex: index,
-        text: text.slice(bounds.start, bounds.end),
-        before: text.slice(0, bounds.start),
-        after: text.slice(bounds.end),
-        rect: el.getBoundingClientRect(),
-      });
+      synthSelRef.current = { active: true, anchor: bounds };
+      // Kill the OS's own text-selection UI for the duration of the drag —
+      // with the field unselectable there is nothing for iOS/Android to raise
+      // a Copy/Look-Up menu about. Restored on touchend/cancel.
+      el.style.webkitUserSelect = 'none';
+      el.style.userSelect = 'none';
+      try { navigator.vibrate?.(8); } catch { /* unsupported — fine */ }
+      selectWordSpan(el, bounds.start, bounds.end);
     }, LONG_PRESS_MS);
-  }, [text, index, onSelectionChange, clearTextHoldTimer]);
+  }, [clearTextHoldTimer, selectWordSpan]);
 
+  // React's onTouchMove is passive — used only to disambiguate an early drag
+  // (a scroll) from a hold BEFORE the long-press fires. Once synthetic select
+  // is active, the native listener below owns the gesture.
   const handleTextTouchMove = useCallback((e) => {
-    if (!textHoldTimerRef.current || !e.touches) return;
+    if (synthSelRef.current.active || !e.touches) return;
     const dx = e.touches[0].clientX - textHoldStartRef.current.x;
     const dy = e.touches[0].clientY - textHoldStartRef.current.y;
-    if (Math.abs(dx) > LONG_PRESS_MOVE_TOLERANCE || Math.abs(dy) > LONG_PRESS_MOVE_TOLERANCE) clearTextHoldTimer();
+    if (Math.abs(dx) > LONG_PRESS_MOVE_TOLERANCE || Math.abs(dy) > LONG_PRESS_MOVE_TOLERANCE) {
+      textMovedRef.current = true;
+      clearTextHoldTimer();
+    }
   }, [clearTextHoldTimer]);
+
+  useEffect(() => {
+    const el = localRef.current;
+    if (!el) return undefined;
+
+    const onMove = (e) => {
+      if (!synthSelRef.current.active) return;
+      e.preventDefault(); // stop the browser growing its own selection / scrolling
+      const t = e.touches?.[0];
+      if (!t) return;
+      const idx = charIndexFromPoint(el, t.clientX, t.clientY);
+      const { text: txt } = liveRef.current;
+      const b = wordBoundsAtIndex(txt, idx) || { start: idx, end: idx };
+      const a = synthSelRef.current.anchor;
+      selectWordSpan(el, Math.min(a.start, b.start), Math.max(a.end, b.end));
+    };
+
+    const onEnd = (e) => {
+      if (synthSelRef.current.active) {
+        synthSelRef.current.active = false;
+        el.style.webkitUserSelect = '';
+        el.style.userSelect = '';
+        e.preventDefault();   // don't focus the field / raise the keyboard / native menu
+        el.blur?.();
+        return;
+      }
+      if (textMovedRef.current) return;
+      // Quick tap inside a word-variant underline → open the swap sheet.
+      const ranges = liveRef.current.variantRanges;
+      if (!ranges?.length) return;
+      const ct = e.changedTouches?.[0];
+      if (!ct) return;
+      const idx = charIndexFromPoint(el, ct.clientX, ct.clientY);
+      const hit = ranges.find((r) => idx >= r.start && idx < r.end);
+      if (hit) { e.preventDefault(); liveRef.current.onVariantTap(hit.variantId); }
+    };
+
+    el.addEventListener('touchmove', onMove, { passive: false });
+    el.addEventListener('touchend', onEnd, { passive: false });
+    return () => {
+      el.removeEventListener('touchmove', onMove);
+      el.removeEventListener('touchend', onEnd);
+    };
+  }, [selectWordSpan]);
 
   useEffect(() => clearTextHoldTimer, [clearTextHoldTimer]);
 
   return (
     <div
-      className={`ne-row${dimmed ? ' ne-row-dimmed' : ''}${isMuseCommand ? ' ne-row-muse' : ''}${previewText != null ? ' ne-row-preview' : ''}${museOrigin ? ' ne-row-muse-origin' : ''}`}
+      className={`ne-row${dimmed ? ' ne-row-dimmed' : ''}${isMuseCommand ? ' ne-row-muse' : ''}${previewText != null ? ' ne-row-preview' : ''}${museOrigin ? ' ne-row-muse-origin' : ''}${lineSelected ? ' ne-row-line-selected' : ''}`}
       onTouchStart={handleRowTouchStart}
       onTouchMove={handleRowTouchMove}
       onTouchEnd={clearHoldTimer}
       onTouchCancel={clearHoldTimer}
     >
-      <div className="ne-gutter">
+      {/* Tapping the gutter (the number/letter margin — not the friction
+          nudge button inside it) toggles this line into the multi-line
+          selection range: the one thing a phone can't do natively across
+          the per-line textareas. A quick tap only — the same touch held
+          for LONG_PRESS_MS still arms the voice-memo recorder (see
+          handleRowTouchStart), these don't collide. */}
+      <div
+        className="ne-gutter"
+        onClick={(e) => {
+          if (e.target.closest('.ne-gutter-friction') || e.target.closest('.ne-gutter-history')) return;
+          onGutterTap(index);
+        }}
+      >
         {/* Syllables/rhyme are lyric-craft metrics — meaningless once this
             row has switched to "message to the muse," so they're hidden
             rather than showing a stale/nonsense reading. */}
-        {!isMuseCommand && showSyllables && syllables != null && <span className="ne-gutter-count">{syllables}</span>}
-        {!isMuseCommand && rhyme?.letter && <span className={`ne-gutter-letter ${rhyme.type}`}>{rhyme.letter}</span>}
-        {isMuseCommand && <span className="ne-gutter-muse-icon">✦</span>}
+        {lineSelected && <span className="ne-gutter-check">✓</span>}
+        {!lineSelected && !isMuseCommand && showSyllables && syllables != null && <span className="ne-gutter-count">{syllables}</span>}
+        {!lineSelected && !isMuseCommand && rhyme?.letter && <span className={`ne-gutter-letter ${rhyme.type}`}>{rhyme.letter}</span>}
+        {!lineSelected && isMuseCommand && <span className="ne-gutter-muse-icon">✦</span>}
         {/* Content-driven Socratic nudge — this line broke the stanza's
             established rhyme scheme (see rhyme.js's detectRhymeFriction).
             Purely local, no API call until tapped — no idle timer anywhere
             in this screen, the writer gets to think in silence. */}
-        {!isMuseCommand && friction && (
+        {!lineSelected && !isMuseCommand && friction && (
           <button className="ne-gutter-friction" title="this line breaks the rhyme scheme — ask the muse?" onClick={() => onFrictionTap(index)}>✦</button>
         )}
+        {!lineSelected && !isMuseCommand && hasHistory && (
+          <button className="ne-gutter-history" title="earlier versions of this line" onClick={() => onHistoryTap(index)}>⟲</button>
+        )}
       </div>
-      <textarea
-        ref={setRefs}
-        className="ne-line-input"
-        rows={1}
-        value={displayedText}
-        readOnly={previewText != null}
-        placeholder={showPlaceholder ? 'write the next line…' : ''}
-        onChange={handleInput}
-        onFocus={() => onFocus(index)}
-        onSelect={handleSelect}
-        onBlur={() => onBlurLine(index)}
-        onKeyDown={handleKeyDown}
-        onTouchStart={handleTextTouchStart}
-        onTouchMove={handleTextTouchMove}
-        onTouchEnd={clearTextHoldTimer}
-        onTouchCancel={clearTextHoldTimer}
-        // Defense in depth against iOS's native Select/Copy/Look Up bubble
-        // (see handleTextTouchStart's comment) — some iOS versions fire
-        // `contextmenu` for the same long-press that would raise it.
-        onContextMenu={(e) => e.preventDefault()}
-      />
+      <div className="ne-input-wrap">
+        <LineHighlight text={displayedText} ranges={variantRanges} />
+        <textarea
+          ref={setRefs}
+          className="ne-line-input"
+          rows={1}
+          value={displayedText}
+          readOnly={previewText != null}
+          placeholder={showPlaceholder ? 'write the next line…' : ''}
+          onChange={handleInput}
+          onFocus={() => onFocus(index)}
+          onSelect={handleSelect}
+          onBlur={() => onBlurLine(index)}
+          onKeyDown={handleKeyDown}
+          onTouchStart={handleTextTouchStart}
+          onTouchMove={handleTextTouchMove}
+          // touchend is handled by the non-passive native listener in the
+          // effect above (synthetic-selection finalize / variant-tap) — it
+          // needs preventDefault, which a React passive handler can't do.
+          onTouchCancel={() => {
+            clearTextHoldTimer();
+            synthSelRef.current = { active: false, anchor: null };
+            const el = localRef.current;
+            if (el) { el.style.webkitUserSelect = ''; el.style.userSelect = ''; }
+          }}
+          // Defense in depth against iOS's native Select/Copy/Look Up bubble
+          // (see handleTextTouchStart's comment) — some iOS versions fire
+          // `contextmenu` for the same long-press that would raise it.
+          onContextMenu={(e) => e.preventDefault()}
+        />
+      </div>
       {/* Reserved on every row, same fixed width whether or not this line
           has a memo — so recording (or deleting) one never shifts the
           textarea's own width side to side. Right side, not the left
@@ -351,6 +456,11 @@ export default function NoteEditorScreen({
   // disappears the instant a popover opens (see openPopover), it doesn't
   // need to survive alongside it.
   const [selection, setSelection] = useState(null);
+  // Contiguous, inclusive range of physical line indices tapped in the
+  // gutter — the mobile-only "select more than one line at once" affordance
+  // (a phone can't drag-select across the per-line textareas the way
+  // desktop's single textarea allows). null when no range is active.
+  const [lineRange, setLineRange] = useState(null);
   // { mode: 'rhyme'|'ask', targetVerse: {text,before,after}, lineIndex } or
   // null — only ever opened from a real selection (see openPopover); the
   // toolbar's own "muse" icon is still a disabled stub, not wired to this.
@@ -372,6 +482,23 @@ export default function NoteEditorScreen({
   // grouped by line_index below for the per-row badge — line_index is a
   // position snapshot, not a stable id, see line_audio's schema comment.
   const [audioBySection, setAudioBySection] = useState([]);
+  // All word-variant rows for this block (one query, see loadWordVariants).
+  // { variant, open: boolean } sheet state lives in wordVariantSheet below.
+  const [wordVariants, setWordVariants] = useState([]);
+  const [wordVariantSheet, setWordVariantSheet] = useState(null); // { variantId } | { draft: {lineIndex, before, text} }
+  // Per-physical-line version log (line_history). `lineHistorySheet` = the
+  // line index currently open in LineHistorySheet, or null.
+  const [lineHistory, setLineHistory] = useState([]);
+  const [lineHistorySheet, setLineHistorySheet] = useState(null);
+  // Text a line held when it last gained focus — compared on blur to decide
+  // whether the previous wording is worth logging to line_history.
+  const focusBaselineRef = useRef({});
+  // Multi-step session undo/redo — snapshots of the whole `lines` array.
+  // Refs (not state) so pushing one mid-handler never schedules a render
+  // race; a tick reducer re-renders just the header buttons' enabled state.
+  const undoRef = useRef({ undo: [], redo: [] });
+  const [, bumpUndoTick] = useReducer((n) => n + 1, 0);
+  const typingCoalesceRef = useRef(null);
   const saveTimer = useRef(null);
   // Keyed by line id, not array index — see toLineObjects for why.
   const rowRefs = useRef({});
@@ -389,6 +516,10 @@ export default function NoteEditorScreen({
   useEffect(() => {
     let cancelled = false;
     loadLineAudioFor(note.id).then(({ data }) => { if (!cancelled) setAudioBySection(data || []); });
+    loadWordVariants(note.id).then(({ data }) => { if (!cancelled) setWordVariants(data || []); });
+    loadLineHistory(note.id).then(({ data }) => { if (!cancelled) setLineHistory(data || []); });
+    undoRef.current = { undo: [], redo: [] };
+    focusBaselineRef.current = {};
     return () => { cancelled = true; };
   }, [note.id]);
 
@@ -421,14 +552,42 @@ export default function NoteEditorScreen({
   }, [lines]);
 
   const lineTexts = useMemo(() => lines.map((l) => l.text), [lines]);
+  // A line addressed to the muse ("Musa, …") is a QUESTION, not lyric content:
+  // it must not count toward the syllable meter or the rhyme scheme, and the
+  // muse must not be shown it as part of "the verse so far". Blanked (not
+  // dropped) here so the results stay index-aligned with `lines` for the gutter.
+  const lyricLineTexts = useMemo(
+    () => lineTexts.map((t) => (MUSE_COMMAND_RE.test(t) ? '' : t)),
+    [lineTexts]
+  );
   const rhymeLines = useMemo(
-    () => classifyStanzaRhymes(lineTexts, lyricLanguage || 'es', lyricDialect || 'central'),
-    [lineTexts, lyricLanguage, lyricDialect]
+    () => classifyStanzaRhymes(lyricLineTexts, lyricLanguage || 'es', lyricDialect || 'central'),
+    [lyricLineTexts, lyricLanguage, lyricDialect]
   );
   const syllableCounts = useMemo(
-    () => lineTexts.map((l) => (l ? countLineSyllables(l, lyricLanguage || 'es') : null)),
-    [lineTexts, lyricLanguage]
+    () => lyricLineTexts.map((l) => (l ? lineMeter(l, lyricLanguage || 'es', lyricDialect || 'central') : null)),
+    [lyricLineTexts, lyricLanguage, lyricDialect]
   );
+
+  // Word-variant underline spans, re-resolved against the live line text on
+  // every edit (a variant whose active wording no longer appears in the line
+  // is simply not drawn — "detached", still listed in its sheet).
+  const variantRangesByLine = useMemo(() => {
+    const map = {};
+    wordVariants.forEach((v) => {
+      const text = lineTexts[v.line_index];
+      if (text == null) return;
+      const range = resolveVariantRange(v, text);
+      if (range) (map[v.line_index] ??= []).push({ ...range, variantId: v.id });
+    });
+    return map;
+  }, [wordVariants, lineTexts]);
+
+  const lineHistoryByIndex = useMemo(() => {
+    const map = {};
+    lineHistory.forEach((h) => { (map[h.line_index] ??= []).push(h); });
+    return map;
+  }, [lineHistory]);
 
   // Only acts when a line-complete signal (blur/Enter/Backspace, see
   // pendingFrictionCheckRef's setters below) actually happened — rhymeLines
@@ -462,12 +621,69 @@ export default function NoteEditorScreen({
   // setLines/persist as separate, ordinary statements avoids that; this is
   // a plain event handler, not a rapid-fire concurrent update, so reading
   // `lines` directly (not the functional-updater form) is safe here.
+  // ─── Session undo / redo ──────────────────────────────────────────────────
+  // Snapshot the CURRENT lines array before a mutation. `coalesce` groups a
+  // burst of keystrokes into one step (~phrase granularity) instead of one
+  // step per character.
+  const pushUndo = useCallback((snapshot, { coalesce = false } = {}) => {
+    if (coalesce) {
+      if (typingCoalesceRef.current) {
+        clearTimeout(typingCoalesceRef.current);
+        typingCoalesceRef.current = setTimeout(() => { typingCoalesceRef.current = null; }, 600);
+        return;
+      }
+      typingCoalesceRef.current = setTimeout(() => { typingCoalesceRef.current = null; }, 600);
+    }
+    const { undo } = undoRef.current;
+    undo.push(snapshot);
+    if (undo.length > 100) undo.shift();
+    undoRef.current.redo = [];
+    bumpUndoTick();
+  }, []);
+
+  const applyRestoredLines = useCallback((restored) => {
+    setLines(ensureTrailingEmpty(restored));
+    persist(restored);
+    setSelection(null);
+    setLineRange(null);
+  }, [persist]);
+
+  const handleUndo = useCallback(() => {
+    const { undo, redo } = undoRef.current;
+    if (!undo.length) return;
+    redo.push(lines);
+    applyRestoredLines(undo.pop());
+    bumpUndoTick();
+  }, [lines, applyRestoredLines]);
+
+  const handleRedo = useCallback(() => {
+    const { undo, redo } = undoRef.current;
+    if (!redo.length) return;
+    undo.push(lines);
+    applyRestoredLines(redo.pop());
+    bumpUndoTick();
+  }, [lines, applyRestoredLines]);
+
+  // ─── Per-line history capture ─────────────────────────────────────────────
+  // Append `prevText` as the previous wording of physical line `lineIndex`,
+  // unless it's blank or already the newest logged wording there.
+  const logLineHistory = useCallback((lineIndex, prevText) => {
+    const trimmed = (prevText || '').trim();
+    if (!trimmed) return;
+    const newest = lineHistory.find((h) => h.line_index === lineIndex);
+    if (newest && newest.text === prevText) return;
+    addLineHistory(note.id, lineIndex, prevText).then(({ data }) => {
+      if (data) setLineHistory((cur) => [data, ...cur]);
+    });
+  }, [lineHistory, note.id]);
+
   const handleLineChange = useCallback((index, value) => {
+    pushUndo(lines, { coalesce: true });
     const next = [...lines];
     next[index] = { ...next[index], text: value };
     setLines(ensureTrailingEmpty(next));
     persist(next);
-  }, [lines, persist]);
+  }, [lines, persist, pushUndo]);
 
   // MusePopover anchors directly under whichever line a turn is about —
   // measured once at open time (same "static snapshot" approach
@@ -481,10 +697,23 @@ export default function NoteEditorScreen({
   // Shared by onBlur (loses focus) and onFrictionTap's caller — a line is
   // "complete" enough to re-check its rhyme fit against the rest of the
   // stanza once the user has actually stepped away from it.
-  const handleBlurLine = useCallback(() => {
+  const handleBlurLine = useCallback((index) => {
     setSelection(null);
     pendingFrictionCheckRef.current = true;
-  }, []);
+    const line = lines[index];
+    if (line) {
+      const baseline = focusBaselineRef.current[line.id];
+      if (baseline != null && baseline !== line.text) logLineHistory(index, baseline);
+      focusBaselineRef.current[line.id] = line.text;
+    }
+  }, [lines, logLineHistory]);
+
+  const handleRowFocus = useCallback((index) => {
+    setFocusedIndex(index);
+    setLineRange(null);
+    const line = lines[index];
+    if (line && focusBaselineRef.current[line.id] == null) focusBaselineRef.current[line.id] = line.text;
+  }, [lines]);
 
   // Real editor behavior: Enter splits the line at the caret into two,
   // moving whatever was after the caret down to a new line, caret at its
@@ -493,6 +722,7 @@ export default function NoteEditorScreen({
   // "Musa" wake word (design ref, 2026-08-10) is a command, not lyric
   // content, so Enter there opens the muse instead of splitting.
   const handleEnter = useCallback((index, caretPos) => {
+    pushUndo(lines);
     const line = lines[index];
     const command = line.text.match(MUSE_COMMAND_RE);
     if (command) {
@@ -528,7 +758,7 @@ export default function NoteEditorScreen({
     persist(next);
     pendingFocusRef.current = { id: newLine.id, caret: 0 };
     pendingFrictionCheckRef.current = true;
-  }, [lines, persist, getLineRect]);
+  }, [lines, persist, getLineRect, pushUndo]);
 
   // The other half of Enter's symmetry: Backspace at the very start of a
   // line (collapsed caret, not deleting a selection) merges it into the
@@ -537,6 +767,7 @@ export default function NoteEditorScreen({
   // created it" and lands the caret back where that Enter was pressed.
   const handleBackspaceAtStart = useCallback((index) => {
     if (index === 0) return;
+    pushUndo(lines);
     const prev = lines[index - 1];
     const cur = lines[index];
     const caret = prev.text.length;
@@ -547,17 +778,18 @@ export default function NoteEditorScreen({
     persist(next);
     pendingFocusRef.current = { id: prev.id, caret };
     pendingFrictionCheckRef.current = true;
-  }, [lines, persist]);
+  }, [lines, persist, pushUndo]);
 
   // Inserting a whole new line (not splitting an existing one) — used by
   // the muse popover's "Insert below" action, same splice shape as
   // handleEnter but without touching the line it's inserted after.
   const handleInsertLineAfter = useCallback((index, text) => {
+    pushUndo(lines);
     const next = [...lines];
     next.splice(index + 1, 0, { id: crypto.randomUUID(), text });
     setLines(ensureTrailingEmpty(next));
     persist(next);
-  }, [lines, persist]);
+  }, [lines, persist, pushUndo]);
 
   const openPopover = useCallback((mode) => {
     if (!selection) return;
@@ -579,6 +811,103 @@ export default function NoteEditorScreen({
     });
     setSelection(null);
   }, [selection, getLineRect]);
+
+  // Tap a line's gutter to add it to the selection range. Contiguous and
+  // inclusive: the first tap seeds a one-line range, a tap outside it
+  // stretches whichever end is nearer, a tap back inside collapses to that
+  // single line (and a second tap on a lone selected line clears it).
+  const handleGutterTap = useCallback((index) => {
+    setSelection(null);
+    document.activeElement?.blur?.(); // don't let the keyboard cover the range bar
+    setLineRange((cur) => {
+      if (!cur) return { start: index, end: index };
+      if (index >= cur.start && index <= cur.end) {
+        return cur.start === cur.end ? null : { start: index, end: index };
+      }
+      return index < cur.start ? { start: index, end: cur.end } : { start: cur.start, end: index };
+    });
+  }, []);
+
+  const openLineRangePopover = useCallback((mode) => {
+    if (!lineRange) return;
+    const { start, end } = lineRange;
+    const text = lines.slice(start, end + 1).map((l) => l.text).join('\n');
+    setActivePopover({
+      mode,
+      targetVerse: { text, before: '', after: '' },
+      lineIndex: start,
+      lineRange: { start, end }, // handlePopoverReplace swaps the whole span, not one line
+      originIsReal: true,
+      anchorRect: getLineRect(start),
+    });
+    setLineRange(null);
+  }, [lineRange, lines, getLineRect]);
+
+  // ─── Word-variant alternatives ────────────────────────────────────────────
+  // Open the sheet to attach an alternative wording to the current selection.
+  const handleAddVariantFromSelection = useCallback(() => {
+    if (!selection) return;
+    setWordVariantSheet({ draft: { lineIndex: selection.lineIndex, before: selection.before, text: selection.text } });
+    setSelection(null);
+  }, [selection]);
+
+  const handleVariantTap = useCallback((variantId) => {
+    setWordVariantSheet({ variantId });
+  }, []);
+
+  const handleCreateWordVariant = useCallback(async (draft, options) => {
+    const { data, error } = await addWordVariant(note.id, draft.lineIndex, options, draft.before, 0);
+    if (!error && data) setWordVariants((cur) => [...cur, data]);
+    setWordVariantSheet(null);
+  }, [note.id]);
+
+  // Swap which wording sits in the line. `nextOptions` may also carry edits
+  // to the options list itself (rename/add/remove from the manage sheet).
+  const handleSaveWordVariant = useCallback(async (variant, nextOptions, nextActiveIndex) => {
+    const lineText = lines[variant.line_index]?.text ?? '';
+    const range = resolveVariantRange(variant, lineText);
+    const nextActive = nextOptions[nextActiveIndex] ?? '';
+    if (range && nextActive && lineText.slice(range.start, range.end) !== nextActive) {
+      pushUndo(lines);
+      logLineHistory(variant.line_index, lineText);
+      const nextText = lineText.slice(0, range.start) + nextActive + lineText.slice(range.end);
+      const next = [...lines];
+      next[variant.line_index] = { ...next[variant.line_index], text: nextText };
+      setLines(ensureTrailingEmpty(next));
+      persist(next);
+    }
+    const { data } = await updateWordVariant(variant.id, { options: nextOptions, active_index: nextActiveIndex });
+    setWordVariants((cur) => cur.map((v) => (v.id === variant.id ? (data || { ...v, options: nextOptions, active_index: nextActiveIndex }) : v)));
+    setWordVariantSheet(null);
+  }, [lines, persist, pushUndo, logLineHistory]);
+
+  const handleDeleteWordVariant = useCallback(async (variant) => {
+    await deleteWordVariant(variant.id);
+    setWordVariants((cur) => cur.filter((v) => v.id !== variant.id));
+    setWordVariantSheet(null);
+  }, []);
+
+  // ─── Per-line history sheet ───────────────────────────────────────────────
+  const handleHistoryTap = useCallback((index) => setLineHistorySheet(index), []);
+
+  // Restore mirrors canvasData.restoreVersion: log what we're about to
+  // overwrite, then swap the old wording back in.
+  const handleRestoreLineHistory = useCallback((index, entry) => {
+    const current = lines[index]?.text ?? '';
+    if (current === entry.text) { setLineHistorySheet(null); return; }
+    pushUndo(lines);
+    logLineHistory(index, current);
+    const next = [...lines];
+    next[index] = { ...next[index], text: entry.text };
+    setLines(ensureTrailingEmpty(next));
+    persist(next);
+    setLineHistorySheet(null);
+  }, [lines, persist, pushUndo, logLineHistory]);
+
+  const handleDeleteLineHistoryEntry = useCallback(async (entry) => {
+    await deleteLineHistory(entry.id);
+    setLineHistory((cur) => cur.filter((h) => h.id !== entry.id));
+  }, []);
 
   // The friction nudge's tap target (LineRow's gutter icon) — content-
   // driven Socratic entry, see rhyme.js's detectRhymeFriction. No forced
@@ -613,13 +942,32 @@ export default function NoteEditorScreen({
 
   const handlePopoverReplace = useCallback((newText) => {
     if (!activePopover?.targetVerse) return;
-    const { targetVerse, lineIndex } = activePopover;
+    const { targetVerse, lineIndex, lineRange: range } = activePopover;
+
+    // A multi-line selection (gutter-tapped range) — swap the whole span of
+    // rows for however many lines the replacement text has.
+    if (range) {
+      pushUndo(lines);
+      for (let i = range.start; i <= range.end; i++) logLineHistory(i, lines[i]?.text ?? '');
+      const next = [...lines];
+      const replacement = newText.split('\n').map((t) => ({ id: crypto.randomUUID(), text: t }));
+      next.splice(range.start, range.end - range.start + 1, ...replacement);
+      setLines(ensureTrailingEmpty(next));
+      persist(next);
+      return;
+    }
+
     const previousText = lines[lineIndex]?.text ?? '';
-    handleLineChange(lineIndex, targetVerse.before + newText + targetVerse.after);
+    pushUndo(lines);
+    logLineHistory(lineIndex, previousText);
+    const nextLines = [...lines];
+    nextLines[lineIndex] = { ...nextLines[lineIndex], text: targetVerse.before + newText + targetVerse.after };
+    setLines(ensureTrailingEmpty(nextLines));
+    persist(nextLines);
     clearTimeout(undoTimerRef.current);
     setLastReplacement({ lineIndex, previousText });
     undoTimerRef.current = setTimeout(() => setLastReplacement(null), 6000);
-  }, [activePopover, handleLineChange, lines]);
+  }, [activePopover, handleLineChange, lines, persist, pushUndo, logLineHistory]);
 
   const handleUndoReplace = useCallback(() => {
     if (!lastReplacement) return;
@@ -656,7 +1004,9 @@ export default function NoteEditorScreen({
     onDeleted?.(note.id);
   }, [note.id, onDeleted]);
 
-  const currentText = lineTexts.join('\n');
+  // What the muse (and the whole-verse tools) sees as "the verse" — muse
+  // command lines stripped out entirely, they're not part of the lyric.
+  const currentText = lineTexts.filter((t) => !MUSE_COMMAND_RE.test(t)).join('\n');
 
   return (
     <MobileScreen className="ne-screen">
@@ -676,6 +1026,18 @@ export default function NoteEditorScreen({
             />
           )}
           <TempoPulse bpm={bpm} />
+          <button
+            className="ne-undo-btn"
+            onClick={handleUndo}
+            disabled={!undoRef.current.undo.length}
+            title="undo"
+          >↩︎</button>
+          <button
+            className="ne-undo-btn"
+            onClick={handleRedo}
+            disabled={!undoRef.current.redo.length}
+            title="redo"
+          >↪︎</button>
           <button className="ne-delete" onClick={handleDelete} title="delete note">🗑</button>
           <button className="ne-done" onClick={onClose}>Done</button>
         </div>
@@ -695,14 +1057,20 @@ export default function NoteEditorScreen({
             showPlaceholder={i === lines.length - 1}
             dimmed={focusModeOn && focusedIndex !== null && focusedIndex !== i}
             museOrigin={Boolean(activePopover?.originIsReal) && activePopover?.lineIndex === i}
+            lineSelected={lineRange != null && i >= lineRange.start && i <= lineRange.end}
+            variantRanges={variantRangesByLine[i]}
+            hasHistory={lineHistoryByIndex[i]?.length > 0}
             onChange={handleLineChange}
             onEnter={handleEnter}
             onBackspaceAtStart={handleBackspaceAtStart}
-            onFocus={setFocusedIndex}
+            onFocus={handleRowFocus}
             onBlurLine={handleBlurLine}
             onSelectionChange={setSelection}
             onFrictionTap={handleFrictionTap}
             onLongPress={handleLongPress}
+            onGutterTap={handleGutterTap}
+            onVariantTap={handleVariantTap}
+            onHistoryTap={handleHistoryTap}
             inputRef={(id, el) => {
               if (el) rowRefs.current[id] = el;
               else delete rowRefs.current[id];
@@ -718,6 +1086,15 @@ export default function NoteEditorScreen({
           onConcept={() => openPopover('concept')}
           onGenealogy={() => openPopover('genealogy')}
           onAskMuse={() => openPopover('ask')}
+          onAlternative={handleAddVariantFromSelection}
+        />
+      )}
+
+      {lineRange && !activePopover && (
+        <LineRangeCallout
+          count={lineRange.end - lineRange.start + 1}
+          onAskMuse={() => openLineRangePopover('ask')}
+          onClear={() => setLineRange(null)}
         />
       )}
 
@@ -760,6 +1137,27 @@ export default function NoteEditorScreen({
         </div>
       )}
 
+      {wordVariantSheet && (
+        <WordVariantSheet
+          variant={wordVariantSheet.variantId ? wordVariants.find((v) => v.id === wordVariantSheet.variantId) : null}
+          draft={wordVariantSheet.draft || null}
+          onClose={() => setWordVariantSheet(null)}
+          onCreate={handleCreateWordVariant}
+          onSave={handleSaveWordVariant}
+          onDelete={handleDeleteWordVariant}
+        />
+      )}
+
+      {lineHistorySheet != null && (
+        <LineHistorySheet
+          entries={lineHistoryByIndex[lineHistorySheet] || []}
+          currentText={lines[lineHistorySheet]?.text ?? ''}
+          onRestore={(entry) => handleRestoreLineHistory(lineHistorySheet, entry)}
+          onDelete={handleDeleteLineHistoryEntry}
+          onClose={() => setLineHistorySheet(null)}
+        />
+      )}
+
       {/* Replaces the old fixed chords/muse/tools bar — muse already lives
           as a contextual action on text selection (SelectionCallout) and
           the inline "Musa," wake word, chords already lives inside the
@@ -780,7 +1178,7 @@ export default function NoteEditorScreen({
           line-anchored popover, which rarely overlapped it. Left onscreen,
           the "+" pokes through the sheet's own content and makes it hard
           to read. */}
-      {!selection && !activePopover && (
+      {!selection && !activePopover && !lineRange && (
         <FabMenu
           pills={[
             { label: 'Baúl de la inspiración', icon: '✦', dark: true, onClick: () => setBaulOpen(true) },

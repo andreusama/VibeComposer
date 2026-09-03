@@ -1693,6 +1693,15 @@ body::before {
 }
 .canvas-note-ask-selection:hover { border-color: var(--amber); }
 
+/* Wraps the textarea + its word-variant underline overlay (see
+   components/LineHighlight.jsx) as one relatively-positioned unit inside the
+   flex row, so the overlay can sit exactly behind the text. */
+.canvas-note-text-wrap {
+    flex: 1;
+    min-width: 0;
+    position: relative;
+    display: flex;
+}
 .canvas-note-text {
     flex: 1;
     min-width: 0;
@@ -1706,11 +1715,29 @@ body::before {
     width: 100%;
     padding: calc(6px * var(--canvas-scale)) calc(16px * var(--canvas-scale)) calc(16px * var(--canvas-scale));
     background: transparent;
+    position: relative;
+    z-index: 1;
     /* No soft-wrap: one physical line has to equal one visual row, or the
        rhyme badge gutter next to it can't line up with the right line. */
     white-space: pre;
     overflow-x: auto;
 }
+.canvas-note-highlight {
+    font-family: var(--font-serif);
+    font-size: calc(var(--fs-body) * var(--canvas-scale));
+    line-height: 1.6;
+    padding: calc(6px * var(--canvas-scale)) calc(16px * var(--canvas-scale)) calc(16px * var(--canvas-scale));
+    white-space: pre;
+}
+.canvas-note-sel-actions {
+    position: absolute;
+    right: calc(8px * var(--canvas-scale));
+    bottom: calc(8px * var(--canvas-scale));
+    z-index: 3;
+    display: flex;
+    gap: var(--space-1);
+}
+.canvas-note-sel-actions .canvas-note-ask-selection { position: static; }
 
 .canvas-note-syllable-strip,
 .canvas-note-rhyme-strip {
@@ -3125,6 +3152,34 @@ body::before {
 
 .note-history-row {
     padding: var(--space-2-5) 0;
+}
+
+/* Per-line history grouping in the side panel's history tab */
+.note-panel-subhead {
+    font-family: var(--font-mono);
+    font-size: calc(var(--fs-micro) * var(--canvas-scale));
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin: var(--space-3) 0 var(--space-1);
+}
+.note-panel-subhead:first-child { margin-top: 0; }
+.note-line-history-group {
+    padding: var(--space-2) 0;
+    border-top: 1px solid var(--hairline);
+}
+.note-line-history-current {
+    font-family: var(--font-serif);
+    font-size: calc(var(--fs-secondary) * var(--canvas-scale));
+    color: var(--ink);
+    margin-bottom: var(--space-1);
+    overflow-wrap: break-word;
+}
+.note-line-history-num {
+    font-family: var(--font-mono);
+    font-size: calc(var(--fs-micro) * var(--canvas-scale));
+    color: var(--muted);
+    margin-right: var(--space-1-5);
 }
 
 .note-history-row:first-child { padding-top: 0; }
@@ -5050,6 +5105,22 @@ body::before {
     cursor: pointer;
 }
 
+/* Multi-step session undo/redo (see NoteEditorScreen's undoRef) */
+.ne-undo-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 40px;
+    min-height: 44px;
+    background: none;
+    border: none;
+    color: var(--ink);
+    font-size: var(--fs-body);
+    cursor: pointer;
+}
+.ne-undo-btn:first-of-type { margin-left: auto; }
+.ne-undo-btn:disabled { opacity: 0.3; cursor: default; }
+
 .ne-body {
     flex: 1;
     overflow-y: auto;
@@ -5121,6 +5192,21 @@ body::before {
 }
 .ne-gutter-letter.assonant { color: var(--amber); text-transform: lowercase; }
 
+/* Multi-line selection — tap line numbers in the gutter to gather a block
+   (the phone can't drag-select across the per-line textareas). The whole
+   gutter column is the tap target; the selected rows get a tinted fill and
+   a check where the syllable count usually sits. */
+.ne-gutter { cursor: pointer; }
+.ne-gutter-check {
+    font-size: var(--fs-micro);
+    font-weight: 700;
+    color: var(--thread);
+}
+.ne-row-line-selected {
+    background: var(--thread-soft, rgba(120, 130, 200, 0.12));
+    box-shadow: inset 0 0 0 1px var(--thread);
+}
+
 /* Content-driven Socratic nudge (rhyme.js's detectRhymeFriction) — a small
    tap target, quiet until noticed, deliberately NOT an animated/attention-
    grabbing pulse: no idle timer anywhere on this screen, so nothing about
@@ -5135,6 +5221,19 @@ body::before {
     cursor: pointer;
 }
 .ne-gutter-friction:active { opacity: 1; }
+
+/* Earlier-versions badge — only rendered when line_history has rows for this
+   line (LineHistorySheet opens on tap). Quiet, like the friction nudge. */
+.ne-gutter-history {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--graphite-soft);
+    opacity: 0.6;
+    font-size: var(--fs-micro);
+    cursor: pointer;
+}
+.ne-gutter-history:active { opacity: 1; }
 
 /* Voice-memo slot — the right-side mirror of .ne-gutter: same fixed 22px
    width on EVERY row regardless of whether that line has a recording, so
@@ -5243,6 +5342,45 @@ body::before {
 }
 .ne-line-input:focus { outline: none; }
 .ne-line-input::placeholder { color: var(--faint); }
+
+/* ─── Word-variant underline overlay ─────────────────────────────────────────
+   A transparent-text mirror of the textarea (see components/LineHighlight.jsx)
+   sitting directly behind it, so a word/phrase that has alternative wordings
+   can carry a coloured underline the <textarea> can't draw itself. Tap the
+   underlined span to swap wordings (WordVariantSheet). */
+.ne-input-wrap {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    display: flex;
+}
+.ne-input-wrap .ne-line-input {
+    flex: 1;
+    position: relative;
+    z-index: 1;
+}
+.ne-input-wrap .line-highlight {
+    font-family: var(--font-body);
+    font-size: 1.0625rem;
+    line-height: 1.29;
+    padding: 4px 0;
+}
+.line-highlight {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    word-break: break-word;
+    color: transparent;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+.wv-underline {
+    color: transparent;
+    border-bottom: 2px solid var(--thread);
+}
 
 /* ─── Tools sheet (mobile) ────────────────────────────────────────────────────
    Folds in NoteSidePanel.jsx's variants/notes/history — see ROADMAP.md
@@ -5508,6 +5646,16 @@ body::before {
     border-radius: var(--r-sm);
 }
 .sel-callout-btn:active { background: rgba(255, 255, 255, 0.15); }
+
+/* Line count on the multi-line-selection bar (LineRangeCallout) */
+.sel-callout-count {
+    align-self: center;
+    padding: 0 var(--space-2);
+    color: rgba(255, 255, 255, 0.7);
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    white-space: nowrap;
+}
 
 /* Dims the note behind the sheet (design ref: references/bottomTabMuse.jpg)
    — a real scrim now, not the old invisible catch-tap-only version, so the
@@ -6134,6 +6282,141 @@ body::before {
 .vc-option-body { display: flex; flex-direction: column; }
 .vc-option-title { font-family: var(--font-sans); font-weight: 600; font-size: var(--fs-body); color: var(--ink); }
 .vc-option-sub { font-family: var(--font-sans); font-size: var(--fs-secondary); color: var(--muted); margin-top: 2px; }
+
+/* ─── Word-variant sheet (mobile) ─────────────────────────────────────────────
+   Manage the alternative wordings for an underlined span — see
+   src/mobile/WordVariantSheet.jsx. */
+.wv-option-list { display: flex; flex-direction: column; gap: var(--space-2); }
+.wv-option-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    background: var(--surface);
+}
+.wv-option-row.active { border-color: var(--thread); box-shadow: inset 0 0 0 1px var(--thread); }
+.wv-option-radio {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: var(--fs-body);
+    color: var(--thread);
+    cursor: pointer;
+    min-width: 24px;
+}
+.wv-option-input {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    background: none;
+    font-family: var(--font-body);
+    font-size: var(--fs-body);
+    color: var(--ink);
+}
+.wv-option-input:focus { outline: none; }
+.wv-option-del {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    padding: 0 var(--space-1);
+    color: var(--muted);
+    cursor: pointer;
+}
+.wv-add {
+    margin-top: var(--space-2);
+    background: none;
+    border: none;
+    padding: var(--space-2) 0;
+    color: var(--thread);
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: var(--fs-secondary);
+    cursor: pointer;
+}
+.wv-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-top: var(--space-3);
+}
+.wv-actions-spacer { flex: 1; }
+.wv-remove-all {
+    background: none;
+    border: none;
+    padding: var(--space-2) 0;
+    color: var(--danger, #c0392b);
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    cursor: pointer;
+}
+.wv-cancel {
+    background: none;
+    border: none;
+    padding: var(--space-2) var(--space-3);
+    color: var(--muted);
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    cursor: pointer;
+}
+.wv-save {
+    padding: var(--space-2) var(--space-4);
+    border: none;
+    border-radius: var(--r-sm);
+    background: var(--thread);
+    color: #fff;
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: var(--fs-secondary);
+    cursor: pointer;
+}
+.wv-save:disabled { opacity: 0.4; }
+
+/* ─── Line history sheet (mobile) ─────────────────────────────────────────────
+   src/mobile/LineHistorySheet.jsx */
+.lh-current {
+    padding: var(--space-2) 0 var(--space-3);
+    border-bottom: 1px solid var(--hairline);
+    margin-bottom: var(--space-2);
+}
+.lh-list { display: flex; flex-direction: column; }
+.lh-row {
+    padding: var(--space-2) 0;
+    border-bottom: 1px solid var(--hairline);
+}
+.lh-label {
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.lh-text {
+    font-family: var(--font-body);
+    font-size: var(--fs-body);
+    color: var(--ink);
+    margin: 4px 0 0;
+    white-space: pre-wrap;
+}
+.lh-row-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-top: var(--space-1);
+}
+.lh-row-actions button {
+    background: none;
+    border: none;
+    padding: var(--space-1) 0;
+    color: var(--thread);
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    font-weight: 600;
+    cursor: pointer;
+}
+.lh-row-actions .lh-del { color: var(--muted); font-weight: 400; }
 
 /* ─── Baúl sheet (mobile) ──────────────────────────────────────────────────────
    ROADMAP.md Phase 3, design ref 2026-08-11 — "tap to attach" instead of

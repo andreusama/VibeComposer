@@ -8,7 +8,7 @@
 // exact zone native chrome covers, making them untappable on a real
 // device. Docking to the bottom edge — a zone the native menu never
 // reaches — is the actual fix, not a positioning tweak.
-export default function SelectionCallout({ rect, onRhyme, onAskMuse, onConcept, onGenealogy }) {
+export default function SelectionCallout({ rect, onRhyme, onAskMuse, onConcept, onGenealogy, onAlternative }) {
   if (!rect) return null;
   return (
     <div className="sel-callout">
@@ -38,6 +38,13 @@ export default function SelectionCallout({ rect, onRhyme, onAskMuse, onConcept, 
       <button className="sel-callout-btn" onMouseDown={(e) => e.preventDefault()} onClick={onAskMuse}>
         ✦ Ask muse
       </button>
+      {/* Attach an alternative wording to these words — they then carry a
+          coloured underline, tap it to swap wordings in place. */}
+      {onAlternative && (
+        <button className="sel-callout-btn" onMouseDown={(e) => e.preventDefault()} onClick={onAlternative}>
+          ✎ Alternativa
+        </button>
+      )}
     </div>
   );
 }

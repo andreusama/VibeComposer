@@ -3,8 +3,9 @@ import { findRepeatedWords } from '../utils/repeatedWords.js';
 import {
   loadNoteDetail, addVariant, updateVariantText, deleteVariant, promoteVariant,
   addAnnotation, updateAnnotation, deleteAnnotation, restoreVersion, deleteHistoryVersion,
-  SECTION_TYPES, saveNoteType,
+  SECTION_TYPES, saveNoteType, saveNoteText,
 } from './canvasData.js';
+import { loadLineHistory, addLineHistory, deleteLineHistory } from './lineHistoryData.js';
 
 const CATEGORY_LABELS = { duda: 'duda', idea: 'idea', referencia: 'referencia' };
 
@@ -28,6 +29,7 @@ export default function NoteSidePanel({
   const [variants, setVariants] = useState([]);
   const [annotations, setAnnotations] = useState([]);
   const [history, setHistory] = useState([]);
+  const [lineHistory, setLineHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -42,12 +44,16 @@ export default function NoteSidePanel({
     let cancelled = false;
     setLoading(true);
     (async () => {
-      const { variants, annotations, history, error } = await loadNoteDetail(note.id, lineId);
+      const [{ variants, annotations, history, error }, { data: lineHist }] = await Promise.all([
+        loadNoteDetail(note.id, lineId),
+        loadLineHistory(note.id),
+      ]);
       if (cancelled) return;
       if (error) { setError(error.message); setLoading(false); return; }
       setVariants(variants);
       setAnnotations(annotations);
       setHistory(history);
+      setLineHistory(lineHist || []);
       setLoading(false);
     })();
     return () => { cancelled = true; };
@@ -96,6 +102,27 @@ export default function NoteSidePanel({
     const { error } = await deleteHistoryVersion(id);
     if (error) { setError(error.message); return; }
     setHistory((h) => h.filter((v) => v.id !== id));
+  }, []);
+
+  // Restore one PHYSICAL LINE to an earlier wording — logs what it's about to
+  // overwrite (same append-only contract as handleRestore above), swaps that
+  // one line in the block text, saves, and mirrors to the canvas.
+  const handleRestoreLine = useCallback(async (entry) => {
+    const lines = currentText.split('\n');
+    if (lines[entry.line_index] === entry.text) return;
+    const prev = lines[entry.line_index] ?? '';
+    lines[entry.line_index] = entry.text;
+    const joined = lines.join('\n');
+    if (lineId) await saveNoteText(lineId, joined);
+    const { data } = await addLineHistory(note.id, entry.line_index, prev);
+    if (data) setLineHistory((h) => [data, ...h]);
+    onTextUpdated(note.id, joined);
+  }, [currentText, lineId, note.id, onTextUpdated]);
+
+  const handleDeleteLineHistory = useCallback(async (id) => {
+    const { error } = await deleteLineHistory(id);
+    if (error) { setError(error.message); return; }
+    setLineHistory((h) => h.filter((v) => v.id !== id));
   }, []);
 
   const handleAddAnnotation = useCallback(async () => {
@@ -158,7 +185,7 @@ export default function NoteSidePanel({
           className={`note-panel-tab${activeTab === 'history' ? ' active' : ''}`}
           onClick={() => setActiveTab('history')}
         >
-          history <span className="note-panel-tab-count">{history.length}</span>
+          history <span className="note-panel-tab-count">{history.length + lineHistory.length}</span>
         </button>
       </div>
 
@@ -237,19 +264,55 @@ export default function NoteSidePanel({
 
             {activeTab === 'history' && (
               <div className="note-group-card">
-                {history.length === 0 && <p className="note-panel-empty">no previous versions</p>}
-                {history.map((v) => (
-                  <div className="note-history-row" key={v.id}>
-                    <p className="note-history-text">{v.snapshot?.[0]?.text}</p>
-                    <div className="note-history-meta">
-                      <span>{new Date(v.created_at).toLocaleString()}</span>
-                      <div className="note-history-buttons">
-                        <button onClick={() => handleRestore(v)}>restore</button>
-                        <button className="note-history-delete" onClick={() => handleDeleteHistory(v.id)}>delete</button>
+                {history.length === 0 && lineHistory.length === 0 && (
+                  <p className="note-panel-empty">no previous versions</p>
+                )}
+
+                {lineHistory.length > 0 && (
+                  <>
+                    <p className="note-panel-subhead">line by line</p>
+                    {Object.entries(
+                      lineHistory.reduce((acc, e) => { (acc[e.line_index] ??= []).push(e); return acc; }, {})
+                    ).sort((a, b) => Number(a[0]) - Number(b[0])).map(([lineIndex, entries]) => (
+                      <div className="note-line-history-group" key={lineIndex}>
+                        <p className="note-line-history-current">
+                          <span className="note-line-history-num">L{Number(lineIndex) + 1}</span>
+                          {currentText.split('\n')[Number(lineIndex)] || <em>(empty)</em>}
+                        </p>
+                        {entries.map((e) => (
+                          <div className="note-history-row" key={e.id}>
+                            <p className="note-history-text">{e.text || <em>(empty)</em>}</p>
+                            <div className="note-history-meta">
+                              <span>{new Date(e.created_at).toLocaleString()}</span>
+                              <div className="note-history-buttons">
+                                <button onClick={() => handleRestoreLine(e)}>restore</button>
+                                <button className="note-history-delete" onClick={() => handleDeleteLineHistory(e.id)}>delete</button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                    </div>
-                  </div>
-                ))}
+                    ))}
+                  </>
+                )}
+
+                {history.length > 0 && (
+                  <>
+                    <p className="note-panel-subhead">whole block</p>
+                    {history.map((v) => (
+                      <div className="note-history-row" key={v.id}>
+                        <p className="note-history-text">{v.snapshot?.[0]?.text}</p>
+                        <div className="note-history-meta">
+                          <span>{new Date(v.created_at).toLocaleString()}</span>
+                          <div className="note-history-buttons">
+                            <button onClick={() => handleRestore(v)}>restore</button>
+                            <button className="note-history-delete" onClick={() => handleDeleteHistory(v.id)}>delete</button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </>
+                )}
               </div>
             )}
 

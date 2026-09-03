@@ -3,8 +3,12 @@ import { Handle, Position, NodeResizer } from '@xyflow/react';
 import { SECTION_TYPES, STATUS_CYCLE, saveNoteType, saveNoteText, saveNoteStatus, saveNotePosition, deleteNote } from './canvasData.js';
 import { beginSave, endSave } from './saveStatus.js';
 import { splitIntoLines } from '../utils/textLines.js';
-import { classifyStanzaRhymes } from '../utils/rhyme.js';
-import { countLineSyllables } from '../utils/syllables.js';
+import { classifyStanzaRhymes, lineMeter } from '../utils/rhyme.js';
+import { useUndoStack } from '../utils/useUndoStack.js';
+import LineHighlight from '../components/LineHighlight.jsx';
+import WordVariantSheet from '../mobile/WordVariantSheet.jsx';
+import { loadWordVariants, addWordVariant, updateWordVariant, deleteWordVariant, resolveVariantRange } from './wordVariantData.js';
+import { addLineHistory } from './lineHistoryData.js';
 
 // Set explicitly rather than relying on the base stylesheet's 6px default,
 // which wasn't reliably applying — this guarantees a small, predictable dot
@@ -28,18 +32,27 @@ function getSelectionLineContext(text, start, end) {
   if (start === end) return null;
   const lines = text.split('\n');
   let offset = 0;
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     const lineEnd = offset + line.length;
     if (start >= offset && start <= lineEnd) {
       const localStart = start - offset;
       const localEnd = Math.min(line.length, end - offset);
       const selectedText = line.slice(localStart, localEnd);
       if (!selectedText.trim()) return null;
-      return { text: selectedText, before: line.slice(0, localStart), after: line.slice(localEnd) };
+      return { text: selectedText, before: line.slice(0, localStart), after: line.slice(localEnd), lineIndex: i };
     }
     offset = lineEnd + 1; // +1 for the \n this split() consumed
   }
   return null;
+}
+
+// Absolute character offset in `text` where physical line `lineIndex` starts.
+function lineStartOffset(text, lineIndex) {
+  const lines = text.split('\n');
+  let offset = 0;
+  for (let i = 0; i < lineIndex && i < lines.length; i++) offset += lines[i].length + 1;
+  return offset;
 }
 
 export default function TextNoteNode({ id, data, selected }) {
@@ -53,11 +66,18 @@ export default function TextNoteNode({ id, data, selected }) {
   // below the text. See MuseFloatNode's pendingTargetVerse for where it
   // ends up once the user acts on it.
   const [selection, setSelection] = useState(null);
+  const [wordVariants, setWordVariants] = useState([]);
+  const [wordVariantSheet, setWordVariantSheet] = useState(null); // { variantId } | { draft }
   const saveTimer = useRef(null);
   const lineId = note.lines?.[0]?.id;
   const textareaRef = useRef(null);
+  const overlayRef = useRef(null);
   const syllableStripRef = useRef(null);
   const rhymeStripRef = useRef(null);
+  const undo = useUndoStack();
+  // splitIntoLines snapshot taken when the textarea gained focus — diffed on
+  // blur to log per-line history (line_history).
+  const focusBaselineRef = useRef(null);
 
   // Recomputed straight from the current text/language/dialect on every
   // render — cheap (one note's worth of lines), no need to debounce a pure
@@ -68,9 +88,34 @@ export default function TextNoteNode({ id, data, selected }) {
   );
 
   const syllableCounts = useMemo(
-    () => splitIntoLines(text).map((line) => (line ? countLineSyllables(line, lyricLanguage || 'es') : null)),
-    [text, lyricLanguage]
+    () => splitIntoLines(text).map((line) => (line ? lineMeter(line, lyricLanguage || 'es', lyricDialect || 'central') : null)),
+    [text, lyricLanguage, lyricDialect]
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    if (note.id) loadWordVariants(note.id).then(({ data }) => { if (!cancelled) setWordVariants(data || []); });
+    undo.reset();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [note.id]);
+
+  // Word-variant underline spans as ABSOLUTE offsets over the whole text —
+  // resolved per physical line, then shifted by that line's start offset.
+  // `text.split('\n')` (not splitIntoLines) so offsets match selectionStart.
+  const variantRanges = useMemo(() => {
+    const rawLines = text.split('\n');
+    const out = [];
+    wordVariants.forEach((v) => {
+      const line = rawLines[v.line_index];
+      if (line == null) return;
+      const local = resolveVariantRange(v, line);
+      if (!local) return;
+      const base = lineStartOffset(text, v.line_index);
+      out.push({ start: base + local.start, end: base + local.end, variantId: v.id });
+    });
+    return out;
+  }, [wordVariants, text]);
 
   // Both gutters are separate scrollable columns next to the textarea (it
   // can't host inline React content), so their scroll position has to be
@@ -78,9 +123,10 @@ export default function TextNoteNode({ id, data, selected }) {
   // lines than fit in view — the classic line-number-gutter trick.
   const handleTextareaScroll = useCallback(() => {
     if (!textareaRef.current) return;
-    const { scrollTop } = textareaRef.current;
+    const { scrollTop, scrollLeft } = textareaRef.current;
     if (syllableStripRef.current) syllableStripRef.current.scrollTop = scrollTop;
     if (rhymeStripRef.current) rhymeStripRef.current.scrollTop = scrollTop;
+    if (overlayRef.current) overlayRef.current.scrollTo(scrollLeft, scrollTop);
   }, []);
 
   // Resync from the canonical copy only when something OUTSIDE this note
@@ -105,8 +151,9 @@ export default function TextNoteNode({ id, data, selected }) {
     setCustomLabel(note.custom_label || '');
   }, [note.type, note.custom_label]);
 
-  const handleTextChange = useCallback((e) => {
-    const val = e.target.value;
+  // Commit a new text value from anywhere (typing, undo/redo, a variant
+  // swap): mirror to the parent + schedule the debounced Supabase save.
+  const commitText = useCallback((val) => {
     setText(val);
     setSelection(null); // any prior selection's offsets are stale the moment the text changes
     onTextChange?.(id, val);
@@ -127,6 +174,44 @@ export default function TextNoteNode({ id, data, selected }) {
       }
     }, 500);
   }, [lineId, id, onTextChange]);
+
+  const handleTextChange = useCallback((e) => {
+    undo.snapshot(text, { coalesce: true });
+    commitText(e.target.value);
+  }, [undo, text, commitText]);
+
+  // Ctrl/Cmd+Z undo, +Shift (or Ctrl+Y) redo — the textarea's own native
+  // undo history is wiped by every controlled-value swap, so we run our own.
+  const handleTextKeyDown = useCallback((e) => {
+    const mod = e.metaKey || e.ctrlKey;
+    if (!mod) return;
+    const key = e.key.toLowerCase();
+    if (key === 'z' && !e.shiftKey) {
+      const prev = undo.undo(text);
+      if (prev !== undefined) { e.preventDefault(); commitText(prev); }
+    } else if ((key === 'z' && e.shiftKey) || key === 'y') {
+      const next = undo.redo(text);
+      if (next !== undefined) { e.preventDefault(); commitText(next); }
+    }
+  }, [undo, text, commitText]);
+
+  const handleTextFocus = useCallback(() => {
+    focusBaselineRef.current = text.split('\n');
+  }, [text]);
+
+  const handleTextBlur = useCallback(() => {
+    setSelection(null);
+    const baseline = focusBaselineRef.current;
+    focusBaselineRef.current = null;
+    if (!baseline) return;
+    const current = text.split('\n');
+    if (current.length !== baseline.length) return; // structural change — too ambiguous to log per line
+    current.forEach((line, i) => {
+      if (line !== baseline[i] && baseline[i].trim() && note.id) {
+        addLineHistory(note.id, i, baseline[i]);
+      }
+    });
+  }, [text, note.id]);
 
   const handleTypeChange = useCallback((e) => {
     const val = e.target.value;
@@ -174,6 +259,49 @@ export default function TextNoteNode({ id, data, selected }) {
     setSelection(null);
   }, [selection, onOpenMuse, note]);
 
+  // ─── Word-variant alternatives ────────────────────────────────────────────
+  const handleAddVariantFromSelection = useCallback((e) => {
+    e.stopPropagation();
+    if (!selection || selection.lineIndex == null) return;
+    setWordVariantSheet({ draft: { lineIndex: selection.lineIndex, before: selection.before, text: selection.text } });
+    setSelection(null);
+  }, [selection]);
+
+  const handleTextClick = useCallback((e) => {
+    if (!variantRanges.length) return;
+    const pos = e.target.selectionStart;
+    const hit = variantRanges.find((r) => pos >= r.start && pos < r.end);
+    if (hit) setWordVariantSheet({ variantId: hit.variantId });
+  }, [variantRanges]);
+
+  const handleCreateWordVariant = useCallback(async (draft, options) => {
+    const { data, error } = await addWordVariant(note.id, draft.lineIndex, options, draft.before, 0);
+    if (!error && data) setWordVariants((cur) => [...cur, data]);
+    setWordVariantSheet(null);
+  }, [note.id]);
+
+  const handleSaveWordVariant = useCallback(async (variant, nextOptions, nextActiveIndex) => {
+    const rawLines = text.split('\n');
+    const line = rawLines[variant.line_index] ?? '';
+    const range = resolveVariantRange(variant, line);
+    const nextActive = nextOptions[nextActiveIndex] ?? '';
+    if (range && nextActive && line.slice(range.start, range.end) !== nextActive) {
+      undo.snapshot(text);
+      if (note.id) addLineHistory(note.id, variant.line_index, line);
+      rawLines[variant.line_index] = line.slice(0, range.start) + nextActive + line.slice(range.end);
+      commitText(rawLines.join('\n'));
+    }
+    const { data } = await updateWordVariant(variant.id, { options: nextOptions, active_index: nextActiveIndex });
+    setWordVariants((cur) => cur.map((v) => (v.id === variant.id ? (data || { ...v, options: nextOptions, active_index: nextActiveIndex }) : v)));
+    setWordVariantSheet(null);
+  }, [text, undo, commitText, note.id]);
+
+  const handleDeleteWordVariant = useCallback(async (variant) => {
+    await deleteWordVariant(variant.id);
+    setWordVariants((cur) => cur.filter((v) => v.id !== variant.id));
+    setWordVariantSheet(null);
+  }, []);
+
   return (
     <div className={`canvas-note${selected ? ' selected' : ''}`}>
       <NodeResizer minWidth={200} minHeight={140} isVisible={selected} onResizeEnd={handleResizeEnd} />
@@ -215,30 +343,46 @@ export default function TextNoteNode({ id, data, selected }) {
       {chordSummary && <div className="canvas-note-chords">{chordSummary}</div>}
 
       <div className="canvas-note-text-row">
-        <textarea
-          ref={textareaRef}
-          className="canvas-note-text nodrag nowheel"
-          value={text}
-          onChange={handleTextChange}
-          onScroll={handleTextareaScroll}
-          onSelect={handleTextSelect}
-          onBlur={() => setSelection(null)}
-          placeholder="write…"
-        />
+        <div className="canvas-note-text-wrap">
+          <LineHighlight ref={overlayRef} text={text} ranges={variantRanges} className="canvas-note-highlight" />
+          <textarea
+            ref={textareaRef}
+            className="canvas-note-text nodrag nowheel"
+            value={text}
+            onChange={handleTextChange}
+            onKeyDown={handleTextKeyDown}
+            onScroll={handleTextareaScroll}
+            onSelect={handleTextSelect}
+            onClick={handleTextClick}
+            onFocus={handleTextFocus}
+            onBlur={handleTextBlur}
+            placeholder="write…"
+          />
+        </div>
         {/* Genius-style fragment targeting: select a piece of a line, ask the
             muse specifically about it (SURGEON mode gets an exact target
             instead of inferring one). Anchored to a corner of the text area
             rather than tracking the caret position — simple and predictable,
             no text-mirror-div needed for a first pass. */}
         {selection && (
-          <button
-            className="canvas-note-ask-selection nodrag"
-            onMouseDown={(e) => e.preventDefault()} // keep the textarea selection from collapsing on click
-            onClick={handleAskAboutSelection}
-            title={`preguntar a la musa sobre: "${selection.text}"`}
-          >
-            ✦ preguntar sobre esto
-          </button>
+          <div className="canvas-note-sel-actions nodrag">
+            <button
+              className="canvas-note-ask-selection"
+              onMouseDown={(e) => e.preventDefault()} // keep the textarea selection from collapsing on click
+              onClick={handleAskAboutSelection}
+              title={`preguntar a la musa sobre: "${selection.text}"`}
+            >
+              ✦ preguntar sobre esto
+            </button>
+            <button
+              className="canvas-note-ask-selection"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={handleAddVariantFromSelection}
+              title={`alternativa para: "${selection.text}"`}
+            >
+              ✎ alternativa
+            </button>
+          </div>
         )}
         <div className="canvas-note-syllable-strip nodrag" ref={syllableStripRef}>
           {syllableCounts.map((count, i) => (
@@ -266,6 +410,17 @@ export default function TextNoteNode({ id, data, selected }) {
         <span>{note.variantCount || 0} variant{note.variantCount === 1 ? '' : 's'}</span>
         <span>{note.annotationCount || 0} note{note.annotationCount === 1 ? '' : 's'}</span>
       </div>
+
+      {wordVariantSheet && (
+        <WordVariantSheet
+          variant={wordVariantSheet.variantId ? wordVariants.find((v) => v.id === wordVariantSheet.variantId) : null}
+          draft={wordVariantSheet.draft || null}
+          onClose={() => setWordVariantSheet(null)}
+          onCreate={handleCreateWordVariant}
+          onSave={handleSaveWordVariant}
+          onDelete={handleDeleteWordVariant}
+        />
+      )}
     </div>
   );
 }

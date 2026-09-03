@@ -127,6 +127,42 @@ create table if not exists section_versions (
 
 create index if not exists idx_section_versions_section on section_versions(section_id, created_at desc);
 
+-- ─── word_variants ──────────────────────────────────────────────────────────────
+-- Alternate wordings for a SPAN of words inside one physical line. The line's
+-- text always holds exactly options[active_index]; the span is re-located on
+-- load by searching for that string, biased by anchor_before. Anchored via
+-- (section_id, line_index) — see migration_word_variants_line_history.sql.
+create table if not exists word_variants (
+  id            uuid primary key default gen_random_uuid(),
+  section_id    uuid not null references sections(id) on delete cascade,
+  line_index    integer not null,
+  options       jsonb   not null,
+  active_index  integer not null default 0,
+  anchor_before text    not null default '',
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
+);
+
+create index if not exists idx_word_variants_section on word_variants(section_id, line_index);
+
+drop trigger if exists trg_word_variants_updated_at on word_variants;
+create trigger trg_word_variants_updated_at
+  before update on word_variants
+  for each row execute function set_updated_at();
+
+-- ─── line_history ───────────────────────────────────────────────────────────────
+-- Per-physical-line version log: the previous wording is appended on every
+-- meaningful line change. Finer-grained than section_versions; both coexist.
+create table if not exists line_history (
+  id         uuid primary key default gen_random_uuid(),
+  section_id uuid not null references sections(id) on delete cascade,
+  line_index integer not null,
+  text       text    not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_line_history_section on line_history(section_id, line_index, created_at desc);
+
 -- ─── ideas_notebook ─────────────────────────────────────────────────────────────
 -- Loose ideas/phrases/references for a song, not anchored to any line.
 create table if not exists ideas_notebook (
@@ -155,6 +191,8 @@ alter table lines            enable row level security;
 alter table line_variants    enable row level security;
 alter table annotations      enable row level security;
 alter table section_versions enable row level security;
+alter table word_variants    enable row level security;
+alter table line_history     enable row level security;
 alter table ideas_notebook   enable row level security;
 
 drop policy if exists songs_owner on songs;
@@ -230,6 +268,34 @@ create policy section_versions_owner on section_versions
     exists (
       select 1 from sections sec join songs s on s.id = sec.song_id
       where sec.id = section_versions.section_id and s.user_id = auth.uid()
+    )
+  );
+
+drop policy if exists word_variants_owner on word_variants;
+create policy word_variants_owner on word_variants
+  for all using (
+    exists (
+      select 1 from sections sec join songs s on s.id = sec.song_id
+      where sec.id = word_variants.section_id and s.user_id = auth.uid()
+    )
+  ) with check (
+    exists (
+      select 1 from sections sec join songs s on s.id = sec.song_id
+      where sec.id = word_variants.section_id and s.user_id = auth.uid()
+    )
+  );
+
+drop policy if exists line_history_owner on line_history;
+create policy line_history_owner on line_history
+  for all using (
+    exists (
+      select 1 from sections sec join songs s on s.id = sec.song_id
+      where sec.id = line_history.section_id and s.user_id = auth.uid()
+    )
+  ) with check (
+    exists (
+      select 1 from sections sec join songs s on s.id = sec.song_id
+      where sec.id = line_history.section_id and s.user_id = auth.uid()
     )
   );
 

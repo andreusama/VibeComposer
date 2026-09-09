@@ -8,20 +8,20 @@ export default function VariantChoiceSheet({ onClose, onChoose }) {
     <div className="ts-backdrop" onClick={onClose}>
       <div className="ts-sheet" onClick={(e) => e.stopPropagation()}>
         <div className="ts-grabber" />
-        <div className="ts-sub-head"><h2>New variant</h2></div>
-        <p className="vc-hint">Same slot in the thread — swipe between them later.</p>
+        <div className="ts-sub-head"><h2>Nueva variante</h2></div>
+        <p className="vc-hint">Mismo hueco en el hilo — luego deslizas entre ellas.</p>
         <button className="vc-option" onClick={() => onChoose(false)}>
           <span className="vc-option-icon">+</span>
           <span className="vc-option-body">
-            <span className="vc-option-title">Start from scratch</span>
-            <span className="vc-option-sub">a blank page, same slot</span>
+            <span className="vc-option-title">Empezar de cero</span>
+            <span className="vc-option-sub">página en blanco, mismo hueco</span>
           </span>
         </button>
         <button className="vc-option" onClick={() => onChoose(true)}>
           <span className="vc-option-icon">⧉</span>
           <span className="vc-option-body">
-            <span className="vc-option-title">Start with current text</span>
-            <span className="vc-option-sub">copy this note, then rewrite</span>
+            <span className="vc-option-title">Empezar con el texto actual</span>
+            <span className="vc-option-sub">copia esta parte y reescribe</span>
           </span>
         </button>
       </div>

@@ -3,8 +3,7 @@ import { Handle, Position, NodeResizer } from '@xyflow/react';
 import { resolveMainThreadPath, saveOutputTitle, deleteOutputNode } from './canvasData.js';
 import { beginSave, endSave } from './saveStatus.js';
 import { splitIntoLines } from '../utils/textLines.js';
-import { classifyStanzaRhymes } from '../utils/rhyme.js';
-import { countLineSyllables } from '../utils/syllables.js';
+import { classifyStanzaRhymes, lineMeter } from '../utils/rhyme.js';
 
 const HANDLE_STYLE = { width: 10, height: 10, background: '#1D1C1A', border: '2px solid #fff' };
 
@@ -84,7 +83,7 @@ export default function OutputNode({ id, data, selected }) {
             // just read-only here instead of scroll-synced to a textarea.
             const textLines = splitIntoLines(line?.text || '');
             const rhymeLines = classifyStanzaRhymes(textLines, lyricLanguage || 'es', lyricDialect || 'central');
-            const syllableCounts = textLines.map((l) => (l ? countLineSyllables(l, lyricLanguage || 'es') : null));
+            const syllableCounts = textLines.map((l) => (l ? lineMeter(l, lyricLanguage || 'es', lyricDialect || 'central') : null));
             return (
               <div className="output-line" key={note.id}>
                 <div className="output-line-head">

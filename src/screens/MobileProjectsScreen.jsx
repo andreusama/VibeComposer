@@ -1,24 +1,23 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { setState } from '../state/store.js';
 import { loadProjectSummaries, computePreviewLayout, createProject, deleteSong } from './projectsData.js';
 import MobileScreen from '../mobile/MobileScreen.jsx';
 import MobileFab from '../mobile/MobileFab.jsx';
 import MobileTabBar from '../mobile/MobileTabBar.jsx';
+import { IcSearch, IcChevronRight } from '../mobile/icons.jsx';
 
 const TABS = [
-  { key: 'projects', icon: '♫', label: 'Projects' },
-  { key: 'profile', icon: '☺', label: 'Profile' },
+  { key: 'projects', label: 'Proyectos' },
+  { key: 'profile', label: 'Perfil' },
 ];
 
-// "edited today" for anything from the last 24h of calendar days, otherwise
-// a plain lowercase date — matches the design mockup's two label styles
-// without needing a full relative-time library for just two cases.
+// "editado hoy" for anything from the last 24h of calendar days, otherwise a
+// plain lowercase date.
 function formatEdited(dateStr) {
   const date = new Date(dateStr);
   const now = new Date();
-  const isToday = date.toDateString() === now.toDateString();
-  if (isToday) return 'edited today';
-  return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }).toLowerCase();
+  if (date.toDateString() === now.toDateString()) return 'editado hoy';
+  return date.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' }).toLowerCase();
 }
 
 function ProjectThumbnail({ nodes, links }) {
@@ -35,36 +34,65 @@ function ProjectThumbnail({ nodes, links }) {
   );
 }
 
-// A <div role="button"> wrapper, not a <button>, now that the row needs a
-// second, independently-tappable delete action inside it — a button can't
-// contain another button (invalid HTML, and the nested one silently never
-// receives its own click). onKeyDown mirrors a real button's Enter/Space
-// activation so this doesn't lose keyboard accessibility for it.
+const REVEAL = 84; // px of the delete action revealed on a full swipe-left
+
+// Each project is its own elevated card (white on the deeper screen ground,
+// with BOTH a shadow and a 1.5px border — two independent contrast cues, see
+// .mp-card in style.css). The card also slides left to reveal "Eliminar".
 function ProjectRow({ song, onOpen, onDelete }) {
-  const nodeCount = song.nodeCount || 0;
+  const partCount = song.nodeCount || 0;
+  const [offset, setOffset] = useState(0);
+  const [pressed, setPressed] = useState(false);
+  const startRef = useRef({ x: 0, base: 0, moved: false });
+
+  const onTouchStart = useCallback((e) => {
+    startRef.current = { x: e.touches[0].clientX, base: offset, moved: false };
+    setPressed(true);
+  }, [offset]);
+
+  const onTouchMove = useCallback((e) => {
+    const dx = e.touches[0].clientX - startRef.current.x;
+    if (Math.abs(dx) > 6) { startRef.current.moved = true; setPressed(false); } // a swipe, not a press
+    setOffset(Math.max(-REVEAL, Math.min(0, startRef.current.base + dx)));
+  }, []);
+
+  const onTouchEnd = useCallback(() => {
+    setPressed(false);
+    setOffset((o) => (o < -REVEAL / 2 ? -REVEAL : 0));
+  }, []);
+
+  const handleOpen = () => {
+    if (startRef.current.moved) return;      // it was a swipe, not a tap
+    if (offset !== 0) { setOffset(0); return; } // first tap closes the revealed action
+    onOpen();
+  };
+
   return (
-    <div
-      className="mp-row"
-      role="button"
-      tabIndex={0}
-      onClick={onOpen}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); } }}
-    >
-      <ProjectThumbnail nodes={song.previewNodes} links={song.previewLinks} />
-      <div className="mp-row-body">
-        <div className="mp-row-title">{song.title || 'untitled'}</div>
-        <div className="mp-row-meta">
-          {nodeCount} node{nodeCount === 1 ? '' : 's'} · {formatEdited(song.updated_at)}
-        </div>
-      </div>
-      <button
-        className="mp-row-delete"
-        onClick={(e) => { e.stopPropagation(); onDelete(); }}
-        title="Delete project"
+    <div className={`mp-card${pressed ? ' pressed' : ''}`}>
+      <button className="mp-row-delete-action" onClick={onDelete}>Eliminar</button>
+      <div
+        className="mp-row"
+        role="button"
+        tabIndex={0}
+        style={{ transform: `translateX(${offset}px)` }}
+        onClick={handleOpen}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); } }}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        onMouseDown={() => setPressed(true)}
+        onMouseUp={() => setPressed(false)}
+        onMouseLeave={() => setPressed(false)}
       >
-        🗑
-      </button>
-      <span className="mp-row-chevron">›</span>
+        <ProjectThumbnail nodes={song.previewNodes} links={song.previewLinks} />
+        <div className="mp-row-body">
+          <div className="mp-row-title">{song.title || 'Sin título'}</div>
+          <div className="mp-row-meta">
+            {partCount} {partCount === 1 ? 'parte' : 'partes'} · {formatEdited(song.updated_at)}
+          </div>
+        </div>
+        <span className="mp-row-chevron" aria-hidden="true"><IcChevronRight size={15} /></span>
+      </div>
     </div>
   );
 }
@@ -86,13 +114,13 @@ export default function MobileProjectsScreen({ state, justEntered }) {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return songs;
-    return songs.filter((s) => (s.title || 'untitled').toLowerCase().includes(q));
+    return songs.filter((s) => (s.title || 'Sin título').toLowerCase().includes(q));
   }, [songs, query]);
 
   const openSong = (song) => setState({ activeSong: song, screen: 'canvas' });
 
   const handleDeleteProject = async (song) => {
-    if (!confirm(`Delete "${song.title || 'this project'}"? This can't be undone.`)) return;
+    if (!confirm(`¿Eliminar "${song.title || 'este proyecto'}"? No se puede deshacer.`)) return;
     const { error } = await deleteSong(song.id);
     if (error) { setState({ projectError: error.message }); return; }
     setState({ songs: songs.filter((s) => s.id !== song.id) });
@@ -114,13 +142,13 @@ export default function MobileProjectsScreen({ state, justEntered }) {
   return (
     <MobileScreen className="mp-screen">
       <div className="mp-body">
-        <div className="mp-header glass">
-          <h1 className="mp-title">Projects</h1>
+        <div className="mp-header">
+          <h1 className="mp-title">Proyectos</h1>
           <div className="mp-search">
-            <span className="mp-search-icon">⌕</span>
+            <span className="mp-search-icon"><IcSearch size={17} /></span>
             <input
               type="text"
-              placeholder="Search"
+              placeholder="Buscar"
               autoComplete="off"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -135,11 +163,11 @@ export default function MobileProjectsScreen({ state, justEntered }) {
             {state.projectError && (
               <p className="thread-status thread-status-error">
                 {state.projectError}{' '}
-                <button className="mp-retry-btn" onClick={loadSongs}>Retry</button>
+                <button className="mp-retry-btn" onClick={loadSongs}>Reintentar</button>
               </p>
             )}
             {!state.projectError && filtered.length === 0 && (
-              <div className="thread-empty"><p>No projects yet.</p></div>
+              <div className="thread-empty"><p>Aún no hay proyectos.</p></div>
             )}
             {filtered.map((song) => (
               <ProjectRow
@@ -153,10 +181,10 @@ export default function MobileProjectsScreen({ state, justEntered }) {
         )}
       </div>
 
-      <MobileFab onClick={handleNewProject} pending={creating} title="New project" aboveTabBar />
+      <MobileFab onClick={handleNewProject} pending={creating} title="Nuevo proyecto" aboveTabBar />
 
-      {/* "Profile" has no screen behind it yet — tab shown for the design's
-          bottom-nav chrome, not wired to anything until that phase exists. */}
+      {/* "Perfil" aún no tiene pantalla — la pestaña es solo el chrome de la
+          barra inferior del diseño, sin cablear hasta esa fase. */}
       <MobileTabBar active="projects" tabs={TABS} />
     </MobileScreen>
   );

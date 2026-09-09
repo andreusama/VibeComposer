@@ -12,6 +12,10 @@ import FabMenu from '../mobile/FabMenu.jsx';
 import NoteEditorScreen from '../mobile/NoteEditorScreen.jsx';
 import BaulSheet from '../mobile/BaulSheet.jsx';
 import TempoPulse from '../mobile/TempoPulse.jsx';
+import {
+  IcChevronLeft, IcChevronRight, IcMore, IcPlus, IcCheck, IcMuse,
+  IcGlobe, IcMetronome, IcRepeat, IcCopy, IcExport, IcTrash,
+} from '../mobile/icons.jsx';
 
 function describeAdjacentNote(note) {
   return { type: note.custom_label || note.type, text: note.lines?.[0]?.text || '' };
@@ -20,47 +24,43 @@ function describeAdjacentNote(note) {
 const LANGUAGE_LABELS = { es: 'Castellano', ca: 'Català' };
 const capitalize = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
-// "···" — design ref (2026-08-10 mockup): Language & dialect / Rename /
-// Duplicate / Export / Delete project. Duplicate and Export have no backend
-// behind them anywhere in this app yet (not even on desktop) — shown but
-// disabled rather than half-built.
-function SongMenu({ langLabel, bpmLabel, onOpenLanguage, onOpenTempo, onRename, onRepeatedWords, onDelete, onClose }) {
+// "···" — Idioma y dialecto / Tempo / Palabras repetidas / Duplicar /
+// Exportar / Eliminar proyecto. Renombrar salió de aquí: ahora se toca el
+// título directamente. Duplicar y Exportar no tienen backend todavía —
+// mostrados pero desactivados.
+function SongMenu({ langLabel, bpmLabel, onOpenLanguage, onOpenTempo, onRepeatedWords, onDelete, onClose }) {
   return (
     <div className="thread-menu-backdrop" onClick={onClose}>
       <div className="thread-menu" onClick={(e) => e.stopPropagation()}>
         <button className="thread-menu-item" onClick={onOpenLanguage}>
           <div className="thread-menu-main">
-            <div className="thread-menu-label">Language &amp; dialect</div>
+            <div className="thread-menu-label">Idioma y dialecto</div>
             <div className="thread-menu-sublabel">{langLabel}</div>
           </div>
-          <span className="thread-menu-icon">🌐</span>
+          <span className="thread-menu-icon"><IcGlobe size={19} /></span>
         </button>
         <button className="thread-menu-item" onClick={onOpenTempo}>
           <div className="thread-menu-main">
             <div className="thread-menu-label">Tempo</div>
             <div className="thread-menu-sublabel">{bpmLabel}</div>
           </div>
-          <span className="thread-menu-icon">◍</span>
-        </button>
-        <button className="thread-menu-item" onClick={onRename}>
-          <div className="thread-menu-label">Rename</div>
-          <span className="thread-menu-icon">✎</span>
+          <span className="thread-menu-icon"><IcMetronome size={19} /></span>
         </button>
         <button className="thread-menu-item" onClick={onRepeatedWords}>
-          <div className="thread-menu-label">Repeated words</div>
-          <span className="thread-menu-icon">🔁</span>
+          <div className="thread-menu-label">Palabras repetidas</div>
+          <span className="thread-menu-icon"><IcRepeat size={19} /></span>
         </button>
-        <button className="thread-menu-item" disabled title="coming soon">
-          <div className="thread-menu-label">Duplicate</div>
-          <span className="thread-menu-icon">⧉</span>
+        <button className="thread-menu-item" disabled title="próximamente">
+          <div className="thread-menu-label">Duplicar</div>
+          <span className="thread-menu-icon"><IcCopy size={19} /></span>
         </button>
-        <button className="thread-menu-item" disabled title="coming soon">
-          <div className="thread-menu-label">Export</div>
-          <span className="thread-menu-icon">⇧</span>
+        <button className="thread-menu-item" disabled title="próximamente">
+          <div className="thread-menu-label">Exportar</div>
+          <span className="thread-menu-icon"><IcExport size={19} /></span>
         </button>
         <button className="thread-menu-item thread-menu-danger" onClick={onDelete}>
-          <div className="thread-menu-label">Delete project</div>
-          <span className="thread-menu-icon">🗑</span>
+          <div className="thread-menu-label">Eliminar proyecto</div>
+          <span className="thread-menu-icon"><IcTrash size={19} /></span>
         </button>
       </div>
     </div>
@@ -93,7 +93,7 @@ function TempoSheet({ bpm, onSave, onClose }) {
           <span className="tempo-sheet-unit">BPM</span>
         </div>
         <button className="tempo-sheet-save" disabled={!valid} onClick={() => valid && onSave(parsed)}>
-          Save
+          Guardar
         </button>
       </div>
     </div>
@@ -116,10 +116,10 @@ function RepeatedWordsSheet({ notes, onClose }) {
     <div className="ts-backdrop" onClick={onClose}>
       <div className="ts-sheet" onClick={(e) => e.stopPropagation()}>
         <div className="ts-grabber" />
-        <div className="ts-sub-head"><h2>Repeated words</h2></div>
-        <p className="ts-repeat-scope-hint">across the whole song</p>
+        <div className="ts-sub-head"><h2>Palabras repetidas</h2></div>
+        <p className="ts-repeat-scope-hint">en toda la canción</p>
         {results.length === 0 ? (
-          <p className="ts-empty">no repeats found across the song</p>
+          <p className="ts-empty">sin repeticiones en toda la canción</p>
         ) : (
           <div className="ts-repeat-results">
             <ul>{results.map((r) => <li key={r.word}><strong>{r.word}</strong> × {r.count}</li>)}</ul>
@@ -138,9 +138,9 @@ function LanguageSheet({ language, dialect, onChangeLanguage, onChangeDialect, o
     <div className="ts-backdrop" onClick={onClose}>
       <div className="ts-sheet" onClick={(e) => e.stopPropagation()}>
         <div className="ts-grabber" />
-        <div className="ts-sub-head"><h2>Language &amp; dialect</h2></div>
+        <div className="ts-sub-head"><h2>Idioma y dialecto</h2></div>
         <div className="lang-sheet-group">
-          <div className="lang-sheet-group-label">Language</div>
+          <div className="lang-sheet-group-label">Idioma</div>
           {Object.keys(LANGUAGE_LABELS).map((lang) => (
             <button
               key={lang}
@@ -148,13 +148,13 @@ function LanguageSheet({ language, dialect, onChangeLanguage, onChangeDialect, o
               onClick={() => onChangeLanguage(lang)}
             >
               {LANGUAGE_LABELS[lang]}
-              {language === lang && <span className="lang-sheet-check">✓</span>}
+              {language === lang && <span className="lang-sheet-check"><IcCheck size={15} /></span>}
             </button>
           ))}
         </div>
         {DIALECTS[language].length > 1 && (
           <div className="lang-sheet-group">
-            <div className="lang-sheet-group-label">Dialect</div>
+            <div className="lang-sheet-group-label">Dialecto</div>
             {DIALECTS[language].map((d) => (
               <button
                 key={d}
@@ -162,7 +162,7 @@ function LanguageSheet({ language, dialect, onChangeLanguage, onChangeDialect, o
                 onClick={() => onChangeDialect(d)}
               >
                 {capitalize(d)}
-                {dialect === d && <span className="lang-sheet-check">✓</span>}
+                {dialect === d && <span className="lang-sheet-check"><IcCheck size={15} /></span>}
               </button>
             ))}
           </div>
@@ -220,11 +220,11 @@ function SongThreadCard({ note, chordSummary, onOpen }) {
           {visibleLines.map((line, i) => <span className="ln" key={i}>{line}</span>)}
         </div>
       ) : (
-        <p className="thread-card-text"><span className="thread-card-empty">write…</span></p>
+        <p className="thread-card-text"><span className="thread-card-empty">escribe…</span></p>
       )}
-      {moreCount > 0 && <div className="thread-card-more">+{moreCount} more line{moreCount === 1 ? '' : 's'}</div>}
+      {moreCount > 0 && <div className="thread-card-more">+{moreCount} {moreCount === 1 ? 'verso' : 'versos'}</div>}
       <div className="thread-card-foot">
-        <span>{note.annotationCount || 0} note{note.annotationCount === 1 ? '' : 's'}</span>
+        <span>{note.annotationCount || 0} {note.annotationCount === 1 ? 'apunte' : 'apuntes'}</span>
       </div>
     </button>
   );
@@ -296,8 +296,8 @@ function ThreadSlot({ group, progressionsById, onOpen }) {
 
 function InsertAffordance({ pending, onClick }) {
   return (
-    <button className="thread-insert" onClick={onClick} disabled={pending} title="insert a note here">
-      <span className="thread-insert-dot">{pending ? '…' : '+'}</span>
+    <button className="thread-insert" onClick={onClick} disabled={pending} title="insertar una parte aquí">
+      <span className="thread-insert-dot">{pending ? <span className="thread-insert-spinner" /> : <IcPlus size={13} />}</span>
     </button>
   );
 }
@@ -575,10 +575,9 @@ export default function SongThreadScreen({ state, onExit }) {
       {menuOpen && (
         <SongMenu
           langLabel={langLabel}
-          bpmLabel={songBpm ? `${songBpm} BPM` : 'not set'}
+          bpmLabel={songBpm ? `${songBpm} BPM` : 'sin definir'}
           onOpenLanguage={() => { setMenuOpen(false); setLangSheetOpen(true); }}
           onOpenTempo={() => { setMenuOpen(false); setTempoSheetOpen(true); }}
-          onRename={() => { setMenuOpen(false); setRenaming(true); }}
           onRepeatedWords={() => { setMenuOpen(false); setRepeatedWordsOpen(true); }}
           onDelete={handleDeleteProject}
           onClose={() => setMenuOpen(false)}
@@ -601,8 +600,8 @@ export default function SongThreadScreen({ state, onExit }) {
       )}
 
       <div className="thread-body">
-        <div className="thread-header glass">
-          <button className="thread-back" onClick={onExit} title="back to projects">‹</button>
+        <div className="thread-header">
+          <button className="thread-back" onClick={onExit} title="volver a proyectos"><IcChevronLeft size={24} /></button>
           <div className="thread-title-block">
             {renaming ? (
               <input
@@ -614,25 +613,25 @@ export default function SongThreadScreen({ state, onExit }) {
                 onKeyDown={(e) => e.key === 'Enter' && e.target.blur()}
               />
             ) : (
-              <h1 className="thread-title">{titleDraft || 'Untitled'}</h1>
+              <h1 className="thread-title" onClick={() => setRenaming(true)} title="tocar para renombrar">{titleDraft || 'Sin título'}</h1>
             )}
             <div className="thread-lang-pill">
               <button className="thread-lang-btn" onClick={() => setLangSheetOpen(true)}>{langLabel}</button>
               <TempoPulse bpm={songBpm} onClick={() => setTempoSheetOpen(true)} />
-              <span className="thread-lang-chevron">›</span>
+              <span className="thread-lang-chevron"><IcChevronRight size={13} /></span>
             </div>
           </div>
-          <button className="thread-menu-btn" onClick={() => setMenuOpen(true)} title="more">···</button>
+          <button className="thread-menu-btn" onClick={() => setMenuOpen(true)} title="más"><IcMore size={20} /></button>
         </div>
 
         {saveError && <p className="thread-status thread-status-error">{saveError}</p>}
 
-        {loading && <p className="thread-status">Loading…</p>}
-        {loadError && <p className="thread-status thread-status-error">Couldn't load this song.</p>}
+        {loading && <p className="thread-status">Cargando…</p>}
+        {loadError && <p className="thread-status thread-status-error">No se pudo cargar esta canción.</p>}
 
         {!loading && !loadError && groups.length === 0 && (
           <div className="thread-empty">
-            <p>No notes yet.</p>
+            <p>Aún no hay partes.</p>
           </div>
         )}
 
@@ -649,14 +648,12 @@ export default function SongThreadScreen({ state, onExit }) {
         ))}
       </div>
 
-      {/* Replaces the old plain "+" FAB — "Añadir nota" covers the same
-          append-at-end action. The between-slot circles above stay: they
-          insert at a specific spot, a genuinely different action from
-          appending, not a duplicate of it. */}
+      {/* Los círculos entre slots de arriba insertan en un punto concreto —
+          acción distinta de "Añadir parte", que añade al final. */}
       <FabMenu
         pills={[
-          { label: 'Baúl de la inspiración', icon: '✦', dark: true, onClick: () => setBaulOpen(true) },
-          { label: 'Añadir nota', icon: '+', onClick: handleAppend, disabled: appending },
+          { label: 'Baúl de la inspiración', icon: <IcMuse size={18} />, dark: true, onClick: () => setBaulOpen(true) },
+          { label: 'Añadir parte', icon: <IcPlus size={18} />, onClick: handleAppend, disabled: appending },
         ]}
       />
 

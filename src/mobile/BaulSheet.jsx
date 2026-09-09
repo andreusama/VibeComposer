@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
 import { processBaulInput, readFileAsBase64, inputTypeForFile, emptyAdnLirico } from '../utils/baulProcessor.js';
 import { saveLyricDna, insertBaulEntry, clearBaulEntries } from '../canvas/canvasData.js';
+import { IcMuse, IcCheck, IcNote, IcMic, IcImage, IcPaperclip, IcTrash, IcChevronLeft } from './icons.jsx';
 
 // The mobile "tap to attach" entry point (design ref, 2026-08-11 mockup) —
 // same processBaulInput/saveLyricDna calls desktop's BaulFloatNode uses,
@@ -74,12 +75,12 @@ export default function BaulSheet({ songId, lyricDna, onLyricDnaUpdated, onClose
         <div className="ts-grabber" />
 
         <div className={`baul-sheet-body${mode === 'confirmClear' ? ' baul-sheet-body-dimmed' : ''}`}>
-          <div className="baul-hero"><span className="baul-hero-spark">✦</span></div>
+          <div className="baul-hero"><span className="baul-hero-spark"><IcMuse size={26} /></span></div>
 
           {mode === 'note' ? (
             <>
-              <button className="ts-back baul-note-back" onClick={() => setMode('menu')}>‹ back</button>
-              <div className="attach-title">Write a note</div>
+              <button className="ts-back baul-note-back" onClick={() => setMode('menu')}><IcChevronLeft size={16} /> volver</button>
+              <div className="attach-title">Escribir un apunte</div>
               <textarea
                 className="baul-note-input"
                 value={noteText}
@@ -90,31 +91,31 @@ export default function BaulSheet({ songId, lyricDna, onLyricDnaUpdated, onClose
               />
               {error && <p className="baul-error">{error}</p>}
               <button className="baul-note-submit" onClick={handleSubmitNote} disabled={processing || !noteText.trim()}>
-                {processing ? '…' : 'Add to baúl'}
+                {processing ? '…' : 'Añadir al baúl'}
               </button>
             </>
           ) : (
             <>
-              <div className="attach-title">Add inspiration</div>
-              <p className="attach-sub">Nothing is lost — everything you add becomes context for what you write next.</p>
-              {justSaved && <p className="baul-saved-hint">✓ absorbed</p>}
+              <div className="attach-title">Añadir inspiración</div>
+              <p className="attach-sub">Nada se pierde — todo lo que añades se vuelve contexto para lo que escribas después.</p>
+              {justSaved && <p className="baul-saved-hint"><IcCheck size={14} /> absorbido</p>}
               {error && <p className="baul-error">{error}</p>}
 
               <button className="attach-option" onClick={() => setMode('note')} disabled={processing}>
-                <span className="aic aic-thread">☰</span>
-                <span className="tt">Write a note</span>
+                <span className="aic aic-thread"><IcNote size={18} /></span>
+                <span className="tt">Escribir un apunte</span>
               </button>
-              <button className="attach-option" disabled title="coming soon — needs speech-to-text, not built yet">
-                <span className="aic aic-chord">♫</span>
-                <span className="tt">Record a voice memo</span>
+              <button className="attach-option" disabled title="próximamente — necesita voz-a-texto">
+                <span className="aic aic-chord"><IcMic size={18} /></span>
+                <span className="tt">Grabar una nota de voz</span>
               </button>
               <button className="attach-option" onClick={() => photoInputRef.current?.click()} disabled={processing}>
-                <span className="aic aic-amber">▣</span>
-                <span className="tt">Choose a photo</span>
+                <span className="aic aic-amber"><IcImage size={18} /></span>
+                <span className="tt">Elegir una foto</span>
               </button>
               <button className="attach-option" onClick={() => fileInputRef.current?.click()} disabled={processing}>
-                <span className="aic aic-graphite">▤</span>
-                <span className="tt">Import a file</span>
+                <span className="aic aic-graphite"><IcPaperclip size={18} /></span>
+                <span className="tt">Importar un archivo</span>
               </button>
               <input ref={photoInputRef} type="file" accept="image/*" className="baul-file-input" onChange={handleFilePick} />
               <input ref={fileInputRef} type="file" accept="application/pdf" className="baul-file-input" onChange={handleFilePick} />
@@ -122,10 +123,10 @@ export default function BaulSheet({ songId, lyricDna, onLyricDnaUpdated, onClose
               <div className="divider-row"><div className="line" /><div className="label">danger zone</div><div className="line" /></div>
 
               <button className="clear-option" onClick={() => setMode('confirmClear')} disabled={processing}>
-                <span className="aic"><span className="clear-icon">🗑</span></span>
+                <span className="aic"><span className="clear-icon"><IcTrash size={18} /></span></span>
                 <span className="clear-option-body">
-                  <span className="tt">Clear the baúl</span>
-                  <span className="ss">start from zero — removes everything added so far</span>
+                  <span className="tt">Vaciar el baúl</span>
+                  <span className="ss">empezar de cero — borra todo lo añadido</span>
                 </span>
               </button>
             </>
@@ -136,14 +137,14 @@ export default function BaulSheet({ songId, lyricDna, onLyricDnaUpdated, onClose
           <div className="confirm-sheet">
             <div className="confirm-card">
               <div className="confirm-text">
-                <div className="tt">Clear the baúl?</div>
-                <div className="ss">This removes every note, voice memo, photo, and file you've added — the muse forgets them too. This can't be undone.</div>
+                <div className="tt">¿Vaciar el baúl?</div>
+                <div className="ss">Elimina todos los apuntes, notas de voz, fotos y archivos que hayas añadido — la musa también los olvida. No se puede deshacer.</div>
               </div>
               <button className="confirm-btn destructive" onClick={handleClear} disabled={processing}>
-                {processing ? '…' : 'Clear everything'}
+                {processing ? '…' : 'Vaciar todo'}
               </button>
             </div>
-            <button className="confirm-cancel" onClick={() => setMode('menu')}>Cancel</button>
+            <button className="confirm-cancel" onClick={() => setMode('menu')}>Cancelar</button>
           </div>
         )}
       </div>

@@ -6,6 +6,15 @@
 import { supabase } from '../utils/supabaseClient.js';
 
 export const SECTION_TYPES = ['verse', 'chorus', 'pre-chorus', 'bridge', 'outro', 'custom'];
+// Display labels only — the stored value stays the English key (saveNoteType).
+export const SECTION_TYPE_LABELS = {
+  verse: 'verso',
+  chorus: 'estribillo',
+  'pre-chorus': 'pre-estribillo',
+  bridge: 'puente',
+  outro: 'outro',
+  custom: 'personalizado',
+};
 export const STATUS_CYCLE = ['unresolved', 'provisional', 'closed'];
 
 export function saveSongTitle(id, title) {

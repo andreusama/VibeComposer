@@ -7,7 +7,7 @@ import { addAnnotation } from './canvasData.js';
 import MuseEyePanel from './MuseEyePanel.jsx';
 
 // Display-only labels — purely cosmetic, don't affect anything the model
-// reads (see museApi.js's MUSE_TYPES/MUSE_ANGLES). Keyed by lang since the
+// reads (see museApi.js MUSE_TYPES). Keyed by lang since the
 // muse's own voice now follows lyricLanguage (see buildStaticMuseInstructions'
 // "esto NO es solo para los versos" rule) — these chrome labels shouldn't be
 // the one thing on screen still stuck in Spanish when a Catalan song is open.
@@ -15,10 +15,6 @@ import MuseEyePanel from './MuseEyePanel.jsx';
 const TYPE_LABELS = {
   es: { CONTINUITY: 'continuidad', CONTRAST: 'contraste', RESOLUTION: 'resolución' },
   ca: { CONTINUITY: 'continuïtat', CONTRAST: 'contrast', RESOLUTION: 'resolució' },
-};
-const ANGLE_LABELS = {
-  es: { raw: 'cruda', atmospheric: 'atmosférica', abstract: 'abstracta' },
-  ca: { raw: 'crua', atmospheric: 'atmosfèrica', abstract: 'abstracta' },
 };
 const MODE_LABELS = {
   es: { SURGEON: 'cirujano', ARCHITECT: 'arquitecto', SOCRATIC: 'socrática', WORD_BANK: 'banco de palabras', OPEN_REFERENCE: 'referencia abierta' },
@@ -243,7 +239,6 @@ export default function MuseFloatNode({ id, data, selected }) {
   const isPendingQuestion = lastEntry?.role === 'muse' && lastEntry.mode === 'SOCRATIC';
   const modeLabels = MODE_LABELS[lyricLanguage] || MODE_LABELS.es;
   const typeLabels = TYPE_LABELS[lyricLanguage] || TYPE_LABELS.es;
-  const angleLabels = ANGLE_LABELS[lyricLanguage] || ANGLE_LABELS.es;
 
   return (
     <div className={`muse-float${selected ? ' selected' : ''}`}>
@@ -304,7 +299,6 @@ export default function MuseFloatNode({ id, data, selected }) {
                           <div className="muse-option-row" key={j}>
                             <div className="muse-option-main">
                               {opt.type && <span className="muse-option-type">{typeLabels[opt.type] || opt.type}</span>}
-                              {opt.angle && <span className="muse-option-angle">{angleLabels[opt.angle] || opt.angle}</span>}
                               <span className="muse-option-text">{opt.text}</span>
                             </div>
                             <button

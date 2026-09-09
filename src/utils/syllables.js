@@ -119,7 +119,12 @@ export function countLineSyllables(line, lang = 'es') {
     if (!clean) continue;
 
     const count = countWordSyllables(token, lang);
-    const startsWithVowel = vowelRe.test(clean[0]);
+    // A leading h is mute in both Spanish and Catalan, so a word like "hora"
+    // / "home" / "hierba" behaves as vowel-initial for sinalefa purposes —
+    // "una hora" is sung as three syllables, not four. Strip it before the
+    // test (guarding the all-h edge case so an empty head isn't matched).
+    const head = clean.replace(/^h+/, '');
+    const startsWithVowel = head.length > 0 && vowelRe.test(head[0]);
     const endsWithPunctBefore = /^[,;.:!?—–-]/.test(token.trim());
 
     if (prevEndedInVowelNoPunct && startsWithVowel && !endsWithPunctBefore && count > 0) {

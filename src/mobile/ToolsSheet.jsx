@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { findRepeatedWords } from '../utils/repeatedWords.js';
 import { loadAnnotations, addAnnotation, deleteAnnotation } from '../canvas/canvasData.js';
+import { IcClose, IcComment, IcChevronLeft, IcChevronRight } from './icons.jsx';
 
 // A comment about the WHOLE note — not the same thing as a selection-
 // anchored comment (not built yet: taps a text range, shown with an amber
@@ -22,21 +23,21 @@ function WholeVerseCommentTab({ lineId, userId, comments, setComments }) {
 
   return (
     <div className="ts-tab">
-      {comments.length === 0 && <p className="ts-empty">no notes about this verse yet</p>}
+      {comments.length === 0 && <p className="ts-empty">aún no hay apuntes sobre esta parte</p>}
       {comments.map((c) => (
         <div className="ts-annotation-row" key={c.id}>
           <div className="ts-annotation-main">
             <p className="ts-annotation-body">{c.body}</p>
             <div className="ts-row-actions">
-              <button onClick={async () => { await deleteAnnotation(c.id); setComments((prev) => prev.filter((item) => item.id !== c.id)); }}>✕</button>
+              <button title="borrar apunte" onClick={async () => { await deleteAnnotation(c.id); setComments((prev) => prev.filter((item) => item.id !== c.id)); }}><IcClose size={14} /></button>
             </div>
           </div>
         </div>
       ))}
       <div className="ts-add-col">
-        <textarea value={body} placeholder="a note about the whole thing…" onChange={(e) => setBody(e.target.value)} />
+        <textarea value={body} placeholder="un apunte sobre el conjunto…" onChange={(e) => setBody(e.target.value)} />
         <div className="ts-add-row">
-          <button onClick={handleAdd}>+ Add</button>
+          <button onClick={handleAdd}>+ Añadir</button>
         </div>
       </div>
     </div>
@@ -94,11 +95,11 @@ export default function ToolsSheet({
         {sub === 'comment' ? (
           <>
             <div className="ts-sub-head">
-              <button className="ts-back" onClick={() => setSub(null)}>‹</button>
-              <h2>Whole verse comment</h2>
+              <button className="ts-back" onClick={() => setSub(null)}><IcChevronLeft size={20} /></button>
+              <h2>Apunte de la parte</h2>
             </div>
             {loadingComments ? (
-              <p className="ts-empty">loading…</p>
+              <p className="ts-empty">cargando…</p>
             ) : (
               <WholeVerseCommentTab lineId={lineId} userId={userId} comments={comments} setComments={setComments} />
             )}
@@ -108,19 +109,19 @@ export default function ToolsSheet({
             {/* First and visually distinct on purpose — the one genuinely
                 new row here, everything else already existed. */}
             <button className="ts-row ts-row-disclosure ts-row-featured" onClick={() => setSub('comment')}>
-              <span className="ts-row-icon">💬</span>
+              <span className="ts-row-icon"><IcComment size={19} /></span>
               <div className="ts-row-main">
-                <div className="ts-row-label">Whole verse comment</div>
-                <div className="ts-row-sublabel">a note about the whole thing</div>
+                <div className="ts-row-label">Apunte de la parte</div>
+                <div className="ts-row-sublabel">un apunte sobre el conjunto</div>
               </div>
               <span className="ts-row-count">{loadingComments ? '…' : comments.length}</span>
-              <span className="ts-chevron">›</span>
+              <span className="ts-chevron"><IcChevronRight size={15} /></span>
             </button>
 
             <div className="ts-row">
               <div className="ts-row-main">
-                <div className="ts-row-label">Syllable count</div>
-                <div className="ts-row-sublabel">shown in the margin</div>
+                <div className="ts-row-label">Contador de sílabas</div>
+                <div className="ts-row-sublabel">en el margen izquierdo</div>
               </div>
               <label className="ts-toggle">
                 <input type="checkbox" checked={syllableCountOn} onChange={onToggleSyllableCount} />
@@ -130,8 +131,8 @@ export default function ToolsSheet({
 
             <div className="ts-row">
               <div className="ts-row-main">
-                <div className="ts-row-label">Focus mode</div>
-                <div className="ts-row-sublabel">dim everything but this line</div>
+                <div className="ts-row-label">Modo foco</div>
+                <div className="ts-row-sublabel">atenúa todo menos el verso actual</div>
               </div>
               <label className="ts-toggle">
                 <input type="checkbox" checked={focusModeOn} onChange={onToggleFocusMode} />
@@ -141,27 +142,27 @@ export default function ToolsSheet({
 
             <div className="ts-row">
               <div className="ts-row-main">
-                <div className="ts-row-label">Repeated words</div>
-                <div className="ts-row-sublabel">check within this verse</div>
+                <div className="ts-row-label">Palabras repetidas</div>
+                <div className="ts-row-sublabel">dentro de esta parte</div>
               </div>
-              <button className="ts-run" onClick={handleCheckRepeats}>Check</button>
+              <button className="ts-run" onClick={handleCheckRepeats}>Comprobar</button>
             </div>
             {repeatResults && (
               <div className="ts-repeat-results">
                 {repeatResults.length === 0 ? (
-                  <p className="ts-empty">no repeats found in this verse</p>
+                  <p className="ts-empty">sin repeticiones en esta parte</p>
                 ) : (
                   <ul>{repeatResults.map((r) => <li key={r.word}><strong>{r.word}</strong> × {r.count}</li>)}</ul>
                 )}
               </div>
             )}
 
-            <button className="ts-row ts-row-disclosure" disabled title="assign a chord progression — coming soon">
+            <button className="ts-row ts-row-disclosure" disabled title="asignar acordes — próximamente">
               <div className="ts-row-main">
-                <div className="ts-row-label">Assign chords</div>
-                <div className="ts-row-sublabel">{chordSummary || 'none yet'}</div>
+                <div className="ts-row-label">Asignar acordes</div>
+                <div className="ts-row-sublabel">{chordSummary || 'ninguno aún'}</div>
               </div>
-              <span className="ts-chevron">›</span>
+              <span className="ts-chevron"><IcChevronRight size={15} /></span>
             </button>
           </div>
         )}

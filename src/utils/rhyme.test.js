@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { classifyStanzaRhymes, detectRhymeFriction, classifyWordStress, getWordRhymeKey } from './rhyme.js';
-import { stripToLetters, countWordSyllables, normalizeY } from './syllables.js';
+import { classifyStanzaRhymes, detectRhymeFriction, classifyWordStress, getWordRhymeKey, lineMeter } from './rhyme.js';
+import { stripToLetters, countWordSyllables, countLineSyllables, normalizeY } from './syllables.js';
 
 describe('á handling (regression — á was silently stripped in 5 hand-copied regexes)', () => {
   it('stripToLetters keeps á instead of deleting it', () => {
@@ -58,6 +58,43 @@ describe('mid-word consonantal y handling (regression — normalizeY used to del
     // "ra-yo" — 2 syllables, not 1 (which is what deleting the y produced).
     expect(countWordSyllables('rayo', 'es')).toBe(2);
     expect(countWordSyllables('playa', 'es')).toBe(2);
+  });
+});
+
+describe('sinalefa across a silent leading h', () => {
+  it('elides "una hora" to 3 sung syllables, not 4', () => {
+    expect(countLineSyllables('una hora', 'ca')).toBe(3);
+    expect(countLineSyllables('una hora', 'es')).toBe(3);
+  });
+
+  it('still elides before a longer h-word ("la humanitat")', () => {
+    expect(countLineSyllables('la humanitat', 'ca')).toBe(4);
+  });
+
+  it('does not over-merge when the previous word ends in a consonant', () => {
+    // "un home" — "un" ends in n, no sinalefa: un-ho-me = 3
+    expect(countLineSyllables('un home', 'ca')).toBe(3);
+  });
+});
+
+describe('lineMeter — Catalan counts only up to the last stressed syllable', () => {
+  it('drops the post-tonic syllable of a plana ending', () => {
+    expect(lineMeter('la lluna plena', 'ca')).toBe(4);       // la-llu-na-PLE(na)
+    expect(lineMeter('un cor que batega', 'ca')).toBe(5);     // un-cor-que-ba-TE(ga)
+  });
+
+  it('drops two syllables for an esdrúixola ending', () => {
+    expect(lineMeter('la màquina', 'ca')).toBe(2);            // la-MÀ(qui-na)
+  });
+
+  it('leaves an aguda ending untouched', () => {
+    expect(lineMeter('vull cantar', 'ca')).toBe(3);
+  });
+
+  it('is a pure passthrough to countLineSyllables for Spanish', () => {
+    for (const line of ['quiero cantar', 'la luna llena', 'una casa vieja']) {
+      expect(lineMeter(line, 'es')).toBe(countLineSyllables(line, 'es'));
+    }
   });
 });
 

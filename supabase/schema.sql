@@ -766,20 +766,15 @@ create policy baul_entries_owner on baul_entries
   );
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- line_audio — voice memos anchored to a specific physical verse line
--- (hummed melodies, rhythmic phrasing, vocal hooks recorded via the mobile
--- long-press gesture, see src/mobile/AudioRecorderSheet.jsx).
+-- line_audio — voice memos (hummed melodies, rhythmic phrasing, vocal hooks)
+-- that belong to a NOTE (section) as a whole. Surfaced by the always-visible
+-- "🎙 Àudios" bar in the mobile note editor (src/mobile/NoteAudioBar.jsx).
 --
--- NOTE the anchor is (section_id, line_index), not a `lines` row — unlike
--- what the table name might suggest, `lines` holds exactly ONE row per
--- section (see canvasData.js: `insert({ section_id, position: 0, text })`,
--- always position 0), the whole block's text as one string with embedded
--- \n's; individual physical lines only exist as a client-side split
--- (NoteEditorScreen's `splitIntoLines`), so there's no stable per-line row
--- to reference. line_index is the line's position in that split at record
--- time — the exact same "position drifts if lines are inserted/deleted
--- above it" tradeoff `annotations.start_offset/end_offset` already accepts
--- for the same underlying reason, not a new gap this table introduces.
+-- Historical: these used to be anchored to a single physical line
+-- (section_id, line_index) and shown as per-line gutter badges. That gesture
+-- was undiscoverable, so the model moved to per-note. `line_index` is kept
+-- nullable for the old rows; the app no longer reads or writes it. `title`
+-- is a user-editable label (null → the UI shows "Àudio N").
 --
 -- The blob itself lives in Storage (bucket below); this row is just the
 -- pointer + metadata.
@@ -789,14 +784,15 @@ create table if not exists line_audio (
   id                uuid primary key default gen_random_uuid(),
   section_id        uuid not null references sections(id) on delete cascade,
   song_id           uuid not null references songs(id) on delete cascade,
-  line_index        integer not null,
+  line_index        integer,
+  title             text,
   storage_path      text not null,
   duration_seconds  numeric,
   created_by        uuid references auth.users(id),
   created_at        timestamptz not null default now()
 );
 
-create index if not exists idx_line_audio_section on line_audio(section_id, line_index);
+create index if not exists idx_line_audio_section on line_audio(section_id, created_at);
 
 alter table line_audio enable row level security;
 

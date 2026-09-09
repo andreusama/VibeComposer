@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { IcPlus } from './icons.jsx';
 
 // The one FAB-with-pills pattern, reused wherever a screen needs more than
 // one quick action without permanently spending screen space on fixed
@@ -39,9 +40,9 @@ export default function FabMenu({ pills }) {
       <button
         className={`fab-menu-btn${open ? ' open' : ''}`}
         onClick={() => setOpen((v) => !v)}
-        title={open ? 'close' : 'menu'}
+        title={open ? 'cerrar' : 'menú'}
       >
-        +
+        <IcPlus size={24} />
       </button>
     </>
   );

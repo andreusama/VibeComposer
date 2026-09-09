@@ -25,7 +25,7 @@ vi.mock('./lexicon.js', () => ({
 
 import {
   askMuse, parseCompanionResponse, applyMuseVerification, selectDiverseSuggestions,
-  calculateContextWeights, MUSE_ACTION_TYPES, MUSE_TYPES, MUSE_ANGLES,
+  calculateContextWeights, MUSE_ACTION_TYPES, MUSE_TYPES,
   buildCulturalResonance, describeCulturalResonance, extractCulturalFrame,
   buildWordBankFromLexicon, filterWordBankByConcept, getCulturalProvocation,
   proposeConceptWords, guessConceptFromLine, getImageGenealogy,
@@ -46,9 +46,9 @@ const SURGEON_JSON = {
   isRhymeRequest: true,
   rhymeTargetWord: 'cielo',
   suggestions: [
-    { text: 'Todo el mundo pierde el recelo', type: 'CONTINUITY', angle: 'raw' },
-    { text: 'La ciudad entera duerme un rato', type: 'CONTRAST', angle: 'atmospheric' },
-    { text: 'Nadie mas te espera en el camino', type: 'RESOLUTION', angle: 'abstract' },
+    { text: 'Todo el mundo pierde el recelo', type: 'CONTINUITY' },
+    { text: 'La ciudad entera duerme un rato', type: 'CONTRAST' },
+    { text: 'Nadie mas te espera en el camino', type: 'RESOLUTION' },
   ],
   themes: ['miedo', 'ciudad'],
 };
@@ -58,7 +58,7 @@ describe('parseCompanionResponse', () => {
     const result = parseCompanionResponse(JSON.stringify(SURGEON_JSON));
     expect(result.action_type).toBe('SURGEON');
     expect(result.suggestions).toHaveLength(3);
-    expect(result.suggestions[0]).toEqual({ text: 'Todo el mundo pierde el recelo', type: 'CONTINUITY', angle: 'raw' });
+    expect(result.suggestions[0]).toEqual({ text: 'Todo el mundo pierde el recelo', type: 'CONTINUITY' });
     expect(result.isRhymeRequest).toBe(true);
     expect(result.rhymeTargetWord).toBe('cielo');
     expect(result.themes).toEqual(['miedo', 'ciudad']);
@@ -205,7 +205,7 @@ describe('parseCompanionResponse', () => {
   it('drops a suggestion missing a text field instead of throwing', () => {
     const raw = JSON.stringify({
       ...SURGEON_JSON,
-      suggestions: [{ text: 'línea válida', type: 'CONTINUITY', angle: 'raw' }, { type: 'CONTRAST', angle: 'raw' }, 'una cadena suelta'],
+      suggestions: [{ text: 'línea válida', type: 'CONTINUITY' }, { type: 'CONTRAST' }, 'una cadena suelta'],
     });
     const result = parseCompanionResponse(raw);
     expect(result.suggestions).toHaveLength(1);
@@ -235,7 +235,6 @@ describe('parseCompanionResponse', () => {
   it('exports exactly the five documented action types', () => {
     expect(MUSE_ACTION_TYPES).toEqual(['SURGEON', 'ARCHITECT', 'SOCRATIC', 'WORD_BANK', 'OPEN_REFERENCE']);
     expect(MUSE_TYPES).toEqual(['CONTINUITY', 'CONTRAST', 'RESOLUTION']);
-    expect(MUSE_ANGLES).toEqual(['raw', 'atmospheric', 'abstract']);
   });
 });
 
@@ -282,9 +281,9 @@ describe('applyMuseVerification — SURGEON/ARCHITECT', () => {
       targetLineText: 'casa', // 2 syllables
       isRhymeRequest: false, rhymeTargetWord: null,
       suggestions: [
-        { text: 'mesa', type: 'CONTINUITY', angle: 'raw' }, // 2 syllables — survives
-        { text: 'television', type: 'CONTRAST', angle: 'raw' }, // 4 syllables — within ±2, survives
-        { text: 'universidad', type: 'RESOLUTION', angle: 'raw' }, // 5 syllables — filtered out
+        { text: 'mesa', type: 'CONTINUITY' }, // 2 syllables — survives
+        { text: 'television', type: 'CONTRAST' }, // 4 syllables — within ±2, survives
+        { text: 'universidad', type: 'RESOLUTION' }, // 5 syllables — filtered out
       ],
     };
     applyMuseVerification(parsed, { ...baseCtx, verseText: 'casa' });
@@ -299,7 +298,7 @@ describe('applyMuseVerification — SURGEON/ARCHITECT', () => {
       action_type: 'ARCHITECT',
       targetLineText: 'casa',
       isRhymeRequest: false, rhymeTargetWord: null,
-      suggestions: [{ text: 'universidad', type: 'CONTINUITY', angle: 'raw' }],
+      suggestions: [{ text: 'universidad', type: 'CONTINUITY' }],
     };
     applyMuseVerification(parsed, { ...baseCtx, verseText: 'casa' });
     // Nothing passed the metric filter, so the original (only) candidate
@@ -313,8 +312,8 @@ describe('applyMuseVerification — SURGEON/ARCHITECT', () => {
       targetLineText: null,
       isRhymeRequest: false, rhymeTargetWord: null,
       suggestions: [
-        { text: 'Vuelvo a cruzar la misma calle', type: 'CONTINUITY', angle: 'raw' }, // reuses "calle"
-        { text: 'Miro el reloj y sigo esperando', type: 'CONTRAST', angle: 'raw' }, // fresh vocabulary
+        { text: 'Vuelvo a cruzar la misma calle', type: 'CONTINUITY' }, // reuses "calle"
+        { text: 'Miro el reloj y sigo esperando', type: 'CONTRAST' }, // fresh vocabulary
       ],
     };
     applyMuseVerification(parsed, { ...baseCtx, verseText: 'Camino solo por la calle vacía\nY nadie sabe donde ir' });
@@ -330,7 +329,7 @@ describe('applyMuseVerification — SURGEON/ARCHITECT', () => {
       action_type: 'ARCHITECT',
       targetLineText: null,
       isRhymeRequest: false, rhymeTargetWord: null,
-      suggestions: [{ text: 'Y sigo con ese arte que me parte', type: 'CONTINUITY', angle: 'raw' }],
+      suggestions: [{ text: 'Y sigo con ese arte que me parte', type: 'CONTINUITY' }],
     };
     applyMuseVerification(parsed, {
       ...baseCtx,
@@ -344,7 +343,7 @@ describe('applyMuseVerification — SURGEON/ARCHITECT', () => {
       action_type: 'SURGEON',
       targetLineText: 'Camino solo por la calle vacía',
       isRhymeRequest: false, rhymeTargetWord: null,
-      suggestions: [{ text: 'Otra vez por la misma calle', type: 'CONTINUITY', angle: 'raw' }],
+      suggestions: [{ text: 'Otra vez por la misma calle', type: 'CONTINUITY' }],
     };
     // "calle" only appears in the line being replaced itself, not in any
     // OTHER line — so reusing it isn't a violation.
@@ -358,8 +357,8 @@ describe('applyMuseVerification — SURGEON/ARCHITECT', () => {
       targetLineText: null,
       isRhymeRequest: true, rhymeTargetWord: 'cielo',
       suggestions: [
-        { text: 'Todo el mundo pierde el recelo', type: 'CONTINUITY', angle: 'raw' }, // consonant match
-        { text: 'Nadie mas te espera en el camino', type: 'CONTRAST', angle: 'raw' }, // no match at all
+        { text: 'Todo el mundo pierde el recelo', type: 'CONTINUITY' }, // consonant match
+        { text: 'Nadie mas te espera en el camino', type: 'CONTRAST' }, // no match at all
       ],
     };
     applyMuseVerification(parsed, baseCtx);
@@ -376,7 +375,7 @@ describe('applyMuseVerification — SURGEON/ARCHITECT', () => {
       action_type: 'SURGEON',
       targetLineText: null,
       isRhymeRequest: true, rhymeTargetWord: 'cielo',
-      suggestions: [{ text: 'Los planetas ya no tienen credo', type: 'CONTINUITY', angle: 'raw' }],
+      suggestions: [{ text: 'Los planetas ya no tienen credo', type: 'CONTINUITY' }],
     };
     applyMuseVerification(parsed, baseCtx);
     expect(parsed.suggestions.map((s) => s.text)).toContain('Los planetas ya no tienen credo');
@@ -390,7 +389,7 @@ describe('applyMuseVerification — SURGEON/ARCHITECT', () => {
       action_type: 'SURGEON',
       targetLineText: null,
       isRhymeRequest: false, rhymeTargetWord: 'cielo',
-      suggestions: [{ text: 'Nadie mas te espera en el camino', type: 'CONTINUITY', angle: 'raw' }],
+      suggestions: [{ text: 'Nadie mas te espera en el camino', type: 'CONTINUITY' }],
     };
     applyMuseVerification(parsed, baseCtx);
     expect(parsed.suggestions).toHaveLength(1);
@@ -407,13 +406,13 @@ describe('applyMuseVerification — SURGEON/ARCHITECT', () => {
       targetLineText: null,
       isRhymeRequest: false, rhymeTargetWord: null,
       suggestions: [
-        { text: 'uno', type: 'CONTINUITY', angle: 'raw' },
-        { text: 'dos', type: 'CONTINUITY', angle: 'atmospheric' },
-        { text: 'tres', type: 'CONTRAST', angle: 'raw' },
-        { text: 'cuatro', type: 'RESOLUTION', angle: 'raw' },
-        { text: 'cinco', type: 'RESOLUTION', angle: 'abstract' },
-        { text: 'seis', type: 'CONTINUITY', angle: 'abstract' },
-        { text: 'siete', type: 'CONTRAST', angle: 'atmospheric' },
+        { text: 'uno', type: 'CONTINUITY' },
+        { text: 'dos', type: 'CONTINUITY' },
+        { text: 'tres', type: 'CONTRAST' },
+        { text: 'cuatro', type: 'RESOLUTION' },
+        { text: 'cinco', type: 'RESOLUTION' },
+        { text: 'seis', type: 'CONTINUITY' },
+        { text: 'siete', type: 'CONTRAST' },
       ],
     };
     applyMuseVerification(parsed, baseCtx);

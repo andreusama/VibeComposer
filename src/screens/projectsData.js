@@ -153,7 +153,7 @@ export async function deleteSong(id) {
 // title is overridable so debug-only flows (see MuseEyeScreen's "new mock
 // song") can mark what they create — a real song row, nothing fake about
 // it, just clearly labeled so it never gets mistaken for real work.
-export async function createProject(userId, title = 'untitled') {
+export async function createProject(userId, title = 'Sin título') {
   const { data: song, error } = await supabase
     .from('songs')
     .insert({ user_id: userId, title })

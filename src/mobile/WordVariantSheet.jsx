@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { IcRadioOn, IcRadioOff, IcClose, IcPlus } from './icons.jsx';
 
 // Attach / manage alternative wordings for a span of words in a line (see
 // wordVariantData.js). Two ways in:
@@ -51,11 +52,11 @@ export default function WordVariantSheet({ variant, draft, onClose, onCreate, on
     <div className="ts-backdrop" onClick={onClose}>
       <div className="ts-sheet" onClick={(e) => e.stopPropagation()}>
         <div className="ts-grabber" />
-        <div className="ts-sub-head"><h2>{creating ? 'Alternative wording' : 'Wordings'}</h2></div>
+        <div className="ts-sub-head"><h2>{creating ? 'Redacción alternativa' : 'Redacciones'}</h2></div>
         <p className="vc-hint">
           {creating
-            ? 'The line keeps the first wording — tap the underline later to switch.'
-            : 'Tap a wording to place it in the line.'}
+            ? 'El verso conserva la primera redacción — toca el subrayado luego para cambiarla.'
+            : 'Toca una redacción para ponerla en el verso.'}
         </p>
 
         <div className="wv-option-list">
@@ -64,31 +65,31 @@ export default function WordVariantSheet({ variant, draft, onClose, onCreate, on
               <button
                 className="wv-option-radio"
                 onClick={() => setActiveIndex(i)}
-                title="use this wording"
-              >{i === activeIndex ? '●' : '○'}</button>
+                title="usar esta redacción"
+              >{i === activeIndex ? <IcRadioOn size={18} /> : <IcRadioOff size={18} />}</button>
               <input
                 className="wv-option-input"
                 value={opt}
-                placeholder={i === 0 ? 'wording' : 'another wording…'}
+                placeholder={i === 0 ? 'redacción' : 'otra redacción…'}
                 onChange={(e) => setOption(i, e.target.value)}
               />
               {options.length > 1 && (
-                <button className="wv-option-del" onClick={() => removeOption(i)} title="remove">✕</button>
+                <button className="wv-option-del" onClick={() => removeOption(i)} title="quitar"><IcClose size={15} /></button>
               )}
             </div>
           ))}
         </div>
 
-        <button className="wv-add" onClick={addOption}>+ add wording</button>
+        <button className="wv-add" onClick={addOption}><IcPlus size={15} /> añadir redacción</button>
 
         <div className="wv-actions">
           {!creating && (
-            <button className="wv-remove-all" onClick={() => onDelete(variant)}>Remove alternatives</button>
+            <button className="wv-remove-all" onClick={() => onDelete(variant)}>Quitar alternativas</button>
           )}
           <span className="wv-actions-spacer" />
-          <button className="wv-cancel" onClick={onClose}>Cancel</button>
+          <button className="wv-cancel" onClick={onClose}>Cancelar</button>
           <button className="wv-save" disabled={!canSave} onClick={handleSave}>
-            {creating ? 'Add' : 'Save'}
+            {creating ? 'Añadir' : 'Guardar'}
           </button>
         </div>
       </div>

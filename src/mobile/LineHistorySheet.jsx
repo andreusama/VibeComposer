@@ -1,15 +1,16 @@
 // Earlier wordings of one physical line (line_history). Opened from the
-// gutter ⟲ badge. Reuses the ToolsSheet bottom-sheet shell (.ts-* classes).
+// gutter history badge. Reuses the ToolsSheet bottom-sheet shell (.ts-* classes).
+import { IcClose } from './icons.jsx';
 
 function relativeTime(iso) {
   const then = new Date(iso).getTime();
   const mins = Math.round((Date.now() - then) / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
+  if (mins < 1) return 'ahora mismo';
+  if (mins < 60) return `hace ${mins} min`;
   const hrs = Math.round(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
+  if (hrs < 24) return `hace ${hrs} h`;
   const days = Math.round(hrs / 24);
-  return `${days}d ago`;
+  return `hace ${days} d`;
 }
 
 export default function LineHistorySheet({ entries, currentText, onRestore, onDelete, onClose }) {
@@ -17,22 +18,22 @@ export default function LineHistorySheet({ entries, currentText, onRestore, onDe
     <div className="ts-backdrop" onClick={onClose}>
       <div className="ts-sheet" onClick={(e) => e.stopPropagation()}>
         <div className="ts-grabber" />
-        <div className="ts-sub-head"><h2>Line history</h2></div>
+        <div className="ts-sub-head"><h2>Historial del verso</h2></div>
 
         <div className="lh-current">
-          <span className="lh-label">now</span>
-          <p className="lh-text">{currentText || <em>(empty)</em>}</p>
+          <span className="lh-label">ahora</span>
+          <p className="lh-text">{currentText || <em>(vacío)</em>}</p>
         </div>
 
-        {entries.length === 0 && <p className="ts-empty">no earlier versions</p>}
+        {entries.length === 0 && <p className="ts-empty">no hay versiones anteriores</p>}
         <div className="lh-list">
           {entries.map((entry) => (
             <div className="lh-row" key={entry.id}>
               <span className="lh-label">{relativeTime(entry.created_at)}</span>
-              <p className="lh-text">{entry.text || <em>(empty)</em>}</p>
+              <p className="lh-text">{entry.text || <em>(vacío)</em>}</p>
               <div className="lh-row-actions">
-                <button onClick={() => onRestore(entry)}>Restore</button>
-                <button className="lh-del" onClick={() => onDelete(entry)} title="delete this version">✕</button>
+                <button onClick={() => onRestore(entry)}>Restaurar</button>
+                <button className="lh-del" onClick={() => onDelete(entry)} title="borrar esta versión"><IcClose size={14} /></button>
               </div>
             </div>
           ))}

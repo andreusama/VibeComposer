@@ -2,8 +2,10 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { askMuse, getCulturalProvocation, getImageGenealogy, guessConceptFromLine } from '../utils/museApi.js';
 import { saveMuseTurn, loadMuseProfile } from '../canvas/museData.js';
 import { recordMuseTurnAndMaybeUpdateProfile } from '../canvas/museProfileUpdater.js';
+import { useKeyboardInset } from './useKeyboardInset.js';
+import { IcClose, IcMuse, IcRegenerate } from './icons.jsx';
 
-const TYPE_LABELS = { CONTINUITY: 'continuity', CONTRAST: 'contrast', RESOLUTION: 'resolution' };
+const TYPE_LABELS = { CONTINUITY: 'continuidad', CONTRAST: 'contraste', RESOLUTION: 'resolución' };
 
 // Regeneration is capped per turn to prevent decision paralysis: the
 // model's up-to-6 candidates per call (see museApi.js) are held as a local
@@ -24,34 +26,6 @@ const PREVIEW_COMMIT_PX = 20;
 // produce feedback once this ships as a native build.
 function haptic(pattern) {
   try { navigator.vibrate?.(pattern); } catch { /* unsupported — fine */ }
-}
-
-// Tracks how much the on-screen keyboard is covering the viewport, so the
-// sheet can dock flush above it instead of getting hidden underneath (design
-// ref: references/bottomTabMuse.jpg — "el teclado se ancla al fondo real de
-// la pantalla y el sheet se acopla justo encima"). visualViewport shrinks
-// (and offsetTop can grow) exactly when the keyboard opens, on the mobile
-// browsers that support it — the gap between window.innerHeight and that
-// shrunk viewport IS the keyboard's height. 0 (the default, no inline
-// style override) just falls back to .mp-anchored's own `bottom: 0`.
-function useKeyboardInset() {
-  const [inset, setInset] = useState(0);
-  useEffect(() => {
-    const vv = window.visualViewport;
-    if (!vv) return;
-    const onResize = () => {
-      const gap = window.innerHeight - vv.height - vv.offsetTop;
-      setInset(Math.max(0, Math.round(gap)));
-    };
-    vv.addEventListener('resize', onResize);
-    vv.addEventListener('scroll', onResize);
-    onResize();
-    return () => {
-      vv.removeEventListener('resize', onResize);
-      vv.removeEventListener('scroll', onResize);
-    };
-  }, []);
-  return inset;
 }
 
 // A single swipeable card — deliberately only ever ONE rendered at a time
@@ -149,10 +123,10 @@ function SuggestionCard({ suggestion, showReplace, onDiscard, onAccept, onInsert
       {suggestion.type && <span className="mp-card-type">{TYPE_LABELS[suggestion.type] || suggestion.type}</span>}
       <p className="mp-card-text">{suggestion.text}</p>
       <div className="mp-card-actions">
-        <button className="mp-card-btn" onClick={onDiscard}>Discard</button>
-        {showReplace && <button className="mp-card-btn" onClick={onInsertBelow}>Insert below</button>}
+        <button className="mp-card-btn" onClick={onDiscard}>Descartar</button>
+        {showReplace && <button className="mp-card-btn" onClick={onInsertBelow}>Insertar debajo</button>}
         <button className="mp-card-btn mp-card-btn-primary" onClick={onAccept}>
-          {showReplace ? 'Replace' : 'Insert below'}
+          {showReplace ? 'Reemplazar' : 'Insertar debajo'}
         </button>
       </div>
     </div>
@@ -367,9 +341,13 @@ export default function MusePopover({
     // (conceptStage, rendered below) — see handleConceptConfirm for where
     // the actual action fires once the user's confirmed or typed a concept.
     if (mode === 'concept' || mode === 'genealogy') return;
-    const seed = seedMessage || (mode === 'rhyme'
-      ? `palabras que rimen con "${targetVerse.text}"`
-      : `ayúdame con este fragmento: "${targetVerse.text}"`);
+    const seed = seedMessage || (targetVerse
+      ? (mode === 'rhyme'
+        ? `palabras que rimen con "${targetVerse.text}"`
+        : `ayúdame con este fragmento: "${targetVerse.text}"`)
+      // no fragment and no typed message → a plain "look at the whole part"
+      // opener (the muse gets the full verse via verseText regardless)
+      : '¿cómo ves esta parte?');
     send(seed);
     // Only ever runs once, on open — every later call in this popover's
     // life is a deliberate follow-up (a SOCRATIC chip, a re-fetch), not a
@@ -541,8 +519,8 @@ export default function MusePopover({
       >
         <div className="mp-grabber" />
         <div className="mp-head">
-          <span className="mp-eyebrow">+ the muse</span>
-          <button className="mp-close" onClick={onClose} title="close">✕</button>
+          <span className="mp-eyebrow">+ la musa</span>
+          <button className="mp-close" onClick={onClose} title="cerrar"><IcClose size={16} /></button>
         </div>
         {/* Only when there's a genuine line/fragment behind this turn — e.g.
             a typed "Musa, ..." command has no real targetVerse (see
@@ -661,7 +639,7 @@ export default function MusePopover({
                 onChange={(e) => setReplyDraft(e.target.value)}
                 placeholder="tu respuesta…"
               />
-              <button className="mp-reply-send" type="submit" disabled={!replyDraft.trim()}>Send</button>
+              <button className="mp-reply-send" type="submit" disabled={!replyDraft.trim()}>Enviar</button>
             </form>
             {/* Creativity proposal #4 — always available on any SOCRATIC
                 turn, not something the model has to remember to offer as
@@ -670,7 +648,7 @@ export default function MusePopover({
                 handleCulturalProvocationStart. */}
             {provocationStage === 'idle' && !provocationAttempted && !provocationLoading && (
               <button className="mp-chip mp-chip-cultural" onClick={handleCulturalProvocationStart}>
-                ✧ ángulo cultural
+                <IcMuse size={13} /> ángulo cultural
               </button>
             )}
             {provocationStage === 'confirm' && (
@@ -737,21 +715,38 @@ export default function MusePopover({
           </div>
         )}
 
-        {/* OPEN_REFERENCE never got a render branch when the mode shipped —
-            the response saved and loaded fine, but with no case matching
-            'OPEN_REFERENCE' the popover just showed nothing. Same plain
-            text treatment as SOCRATIC's banner (no chips/options either
-            way: an answer has nothing to pick from, and a decline's
-            redirect is meant to be read, not tapped). */}
+        {/* OPEN_REFERENCE — the answer is prose (or an itemised list for
+            example requests), but it's still a conversation: a reply box to
+            drill in ("now the actual lyrics", "more like the first one") and
+            a regenerate for a fresh set. A decline still shows just the
+            redirect text — nothing to follow up on there. */}
         {!loading && !error && response?.action_type === 'OPEN_REFERENCE' && (
           <div className="mp-banner">
             <p className="mp-answer">{response.message}</p>
+            {!response.openReference?.declined && (
+              <>
+                <form className="mp-reply-form" onSubmit={handleReplySubmit}>
+                  <input
+                    className="mp-reply-input"
+                    type="text"
+                    value={replyDraft}
+                    onChange={(e) => setReplyDraft(e.target.value)}
+                    placeholder="pídele más, o otra cosa…"
+                  />
+                  <button className="mp-reply-send" type="submit" disabled={!replyDraft.trim()}>Enviar</button>
+                </form>
+                <button
+                  className="mp-chip"
+                  onClick={() => send('Dame otra respuesta distinta: otros ejemplos / otro ángulo del mismo tema.')}
+                ><IcRegenerate size={13} /> otra respuesta</button>
+              </>
+            )}
           </div>
         )}
 
         {!loading && !error && (response?.action_type === 'SURGEON' || response?.action_type === 'ARCHITECT') && (
           <div className="mp-deck">
-            {queue.length === 0 && <p className="mp-deck-empty">No more options this turn — try editing the line directly.</p>}
+            {queue.length === 0 && <p className="mp-deck-empty">No hay más opciones este turno — prueba a editar el verso directamente.</p>}
             {/* Exactly one card, always — see SuggestionCard's comment for
                 why. `key` on the suggestion's own text forces a clean
                 remount (fresh drag state, no leftover transform) the

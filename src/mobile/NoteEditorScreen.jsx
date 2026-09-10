@@ -244,6 +244,13 @@ export default function NoteEditorScreen({
   // Backspace-merge) actually commits — can't focus synchronously in the
   // same handler, the new/merged row doesn't exist in the DOM yet.
   const pendingFocusRef = useRef(null);
+  // iOS Safari clears the textarea's selection and fires `blur` the instant
+  // you tap the keyboard accessory bar — BEFORE the button's click lands,
+  // and `onMouseDown` preventDefault (a desktop-only guarantee) doesn't stop
+  // it there. So the blur teardown (drop `selection`, hide the bar) is
+  // deferred one beat; a bar action fires inside that window and cancels it
+  // (runBarAction), a real blur lets it run.
+  const blurCleanupRef = useRef(null);
 
   useEffect(() => {
     setLines(ensureTrailingEmpty(toLineObjects(splitIntoLines(note.lines?.[0]?.text || ''))));
@@ -425,16 +432,31 @@ export default function NoteEditorScreen({
     return el ? el.getBoundingClientRect() : null;
   }, [lines]);
 
+  // Cancels the deferred blur teardown — called by every keyboard-bar action
+  // (via runBarAction) and by a refocus, both of which mean "that blur was
+  // just the field handing off, don't tear anything down."
+  const cancelBlurCleanup = useCallback(() => {
+    clearTimeout(blurCleanupRef.current);
+    blurCleanupRef.current = null;
+  }, []);
+
+  const runBarAction = useCallback((fn) => { cancelBlurCleanup(); fn(); }, [cancelBlurCleanup]);
+
   // Shared by onBlur (loses focus) and onFrictionTap's caller — a line is
   // "complete" enough to re-check its rhyme fit against the rest of the
   // stanza once the user has actually stepped away from it.
   const handleBlurLine = useCallback((index) => {
-    setSelection(null);
-    // Drop the "this line is being edited" state so the keyboard action bar
-    // (LineActionBar) goes away with the keyboard. A pill tap keeps focus
-    // (onMouseDown preventDefault), so this only fires on a real blur; an
-    // Enter/Backspace refocus re-sets it via handleRowFocus straight after.
-    setFocusedIndex((cur) => (cur === index ? null : cur));
+    // Defer dropping `selection` / hiding the bar: on iOS the blur beats the
+    // accessory-bar button's click, and clearing `selection` here would make
+    // Rima/Alternativa/Musa no-op (openPopover bails on !selection). If a bar
+    // action fires it calls cancelBlurCleanup; otherwise this runs and the
+    // bar goes away with the keyboard as before.
+    clearTimeout(blurCleanupRef.current);
+    blurCleanupRef.current = setTimeout(() => {
+      blurCleanupRef.current = null;
+      setSelection(null);
+      setFocusedIndex((cur) => (cur === index ? null : cur));
+    }, 300);
     pendingFrictionCheckRef.current = true;
     const line = lines[index];
     if (line) {
@@ -445,10 +467,11 @@ export default function NoteEditorScreen({
   }, [lines, logLineHistory]);
 
   const handleRowFocus = useCallback((index) => {
+    cancelBlurCleanup();
     setFocusedIndex(index);
     const line = lines[index];
     if (line && focusBaselineRef.current[line.id] == null) focusBaselineRef.current[line.id] = line.text;
-  }, [lines]);
+  }, [lines, cancelBlurCleanup]);
 
   // Real editor behavior: Enter splits the line at the caret into two,
   // moving whatever was after the caret down to a new line, caret at its
@@ -537,6 +560,7 @@ export default function NoteEditorScreen({
       anchorRect: getLineRect(selection.lineIndex),
     });
     setSelection(null);
+    setFocusedIndex(null); // the popover owns the screen now; keyboard's gone
   }, [selection, getLineRect]);
 
   // KeyboardAccessoryBar → Musa. With a selection it goes in as the muse's
@@ -551,6 +575,7 @@ export default function NoteEditorScreen({
       anchorRect: getLineRect(idx),
     });
     setSelection(null);
+    setFocusedIndex(null);
   }, [selection, focusedIndex, getLineRect]);
 
   // ─── Word-variant alternatives ────────────────────────────────────────────
@@ -561,7 +586,25 @@ export default function NoteEditorScreen({
     if (!target || !target.text.trim()) return;
     setWordVariantSheet({ draft: { lineIndex: target.lineIndex, before: target.before, text: target.text } });
     setSelection(null);
+    setFocusedIndex(null);
   }, [selection]);
+
+  // KeyboardAccessoryBar → Ángulo cultural. Opens the muse straight into the
+  // cultural-provocation flow (a refrán / trope / archetype to react to),
+  // with the selected phrase as the concept. Only reachable with a
+  // selection — it used to be a stray chip under every SOCRATIC answer.
+  const handleCultureFromSelection = useCallback(() => {
+    if (!selection) return;
+    setActivePopover({
+      mode: 'provocation',
+      targetVerse: { text: selection.text, before: selection.before, after: selection.after },
+      lineIndex: selection.lineIndex,
+      originIsReal: true,
+      anchorRect: getLineRect(selection.lineIndex),
+    });
+    setSelection(null);
+    setFocusedIndex(null);
+  }, [selection, getLineRect]);
 
   const handleVariantTap = useCallback((variantId) => {
     setWordVariantSheet({ variantId });
@@ -650,7 +693,7 @@ export default function NoteEditorScreen({
   const [lastReplacement, setLastReplacement] = useState(null); // {lineIndex, previousText}
   const undoTimerRef = useRef(null);
 
-  useEffect(() => () => clearTimeout(undoTimerRef.current), []);
+  useEffect(() => () => { clearTimeout(undoTimerRef.current); clearTimeout(blurCleanupRef.current); }, []);
 
   const handlePopoverReplace = useCallback((newText) => {
     if (!activePopover?.targetVerse) return;
@@ -779,12 +822,13 @@ export default function NoteEditorScreen({
           hasSelection={!!selection}
           canUndo={undoRef.current.undo.length > 0}
           canRedo={undoRef.current.redo.length > 0}
-          onToggleSyllables={() => setSyllableCountOn((v) => !v)}
-          onMuse={handleAskMuse}
-          onRhyme={() => openPopover('rhyme')}
-          onAlternative={handleAddVariantFromSelection}
-          onUndo={handleUndo}
-          onRedo={handleRedo}
+          onToggleSyllables={() => runBarAction(() => setSyllableCountOn((v) => !v))}
+          onMuse={() => runBarAction(handleAskMuse)}
+          onRhyme={() => runBarAction(() => openPopover('rhyme'))}
+          onAlternative={() => runBarAction(handleAddVariantFromSelection)}
+          onCulture={() => runBarAction(handleCultureFromSelection)}
+          onUndo={() => runBarAction(handleUndo)}
+          onRedo={() => runBarAction(handleRedo)}
         />
       )}
 

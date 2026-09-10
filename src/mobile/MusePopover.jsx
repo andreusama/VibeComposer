@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { askMuse, getCulturalProvocation, getImageGenealogy, guessConceptFromLine } from '../utils/museApi.js';
+import { askMuse, getCulturalProvocation, getImageGenealogy } from '../utils/museApi.js';
 import { saveMuseTurn, loadMuseProfile } from '../canvas/museData.js';
 import { recordMuseTurnAndMaybeUpdateProfile } from '../canvas/museProfileUpdater.js';
 import { useKeyboardInset } from './useKeyboardInset.js';
-import { IcClose, IcMuse, IcRegenerate } from './icons.jsx';
+import { IcClose, IcRegenerate } from './icons.jsx';
 
 const TYPE_LABELS = { CONTINUITY: 'continuidad', CONTRAST: 'contraste', RESOLUTION: 'resolución' };
 
@@ -102,11 +102,11 @@ function SuggestionCard({ suggestion, showReplace, onDiscard, onAccept, onInsert
   // commit threshold (SWIPE_COMMIT_PX, same value handleTouchEnd checks) so
   // the color finishing "filling in" lines up exactly with the point a
   // release would actually commit the swipe. Left = discard (red/--rose),
-  // right = accept (green/--thread) — no color during a vertical
-  // drag-to-preview, that gesture previews inline rather than committing on
-  // release direction.
+  // right = accept (amber/--amber, the muse's own colour) — no color during
+  // a vertical drag-to-preview, that gesture previews inline rather than
+  // committing on release direction.
   const swipeIntensity = axis.current === 'x' ? Math.min(1, Math.abs(dragX) / SWIPE_COMMIT_PX) : 0;
-  const swipeColor = dragX < 0 ? 'var(--rose)' : 'var(--thread)';
+  const swipeColor = dragX < 0 ? 'var(--rose)' : 'var(--amber)';
 
   return (
     <div
@@ -182,11 +182,31 @@ export default function MusePopover({
   originIsReal = true,
   onClose, onReplace, onInsertBelow, onPreviewText = () => {},
 }) {
+  // A plain tap on the Musa button (mode 'ask', no seedMessage) used to
+  // auto-fire "¿cómo ves esta parte?" on mount and let the model pick one of
+  // the 5 modes with zero input from the writer — which reads as the app
+  // acting on its own. Now that case opens a compose step instead (a text
+  // box + explicit intent chips); nothing hits the API until the writer
+  // says what they want. A friction-nudge tap (seedMessage set) or the Rima
+  // button (mode 'rhyme') still fire immediately — those ARE explicit.
+  const askWithoutPrompt = mode === 'ask' && !seedMessage;
+  // Is there anything for the muse to actually work on? A selected fragment,
+  // or a non-blank note. When there isn't, the intent chips (rewrite /
+  // continue / rhymes / references) are meaningless — forcing WORD_BANK on
+  // an empty line just dumps generic words — so the compose step drops them
+  // and offers only free text + a "help me start" (SOCRATIC) opener.
+  const hasSubstance = Boolean(targetVerse?.text?.trim() || (verseText && verseText.trim()));
+
   // Concept AND genealogy modes (creativity proposals #3 and "genealogía de
   // la imagen") don't auto-fire on mount — both need a confirm/ask step
   // first (see conceptStage below), so they start in the confirm/ask UI,
-  // not the loading spinner every other mode shows immediately.
-  const [loading, setLoading] = useState(mode !== 'concept' && mode !== 'genealogy');
+  // not the loading spinner every other mode shows immediately. Same for the
+  // compose step above.
+  const [loading, setLoading] = useState(
+    mode !== 'concept' && mode !== 'genealogy' && mode !== 'provocation' && !askWithoutPrompt,
+  );
+  const [composing, setComposing] = useState(askWithoutPrompt);
+  const [composeDraft, setComposeDraft] = useState('');
   const [error, setError] = useState(null);
   // Shared by BOTH concept and genealogy modes — same confirm-a-concept-
   // first UX either way, just a different action fires once confirmed (see
@@ -255,12 +275,18 @@ export default function MusePopover({
   const [provocation, setProvocation] = useState(null);
   const [provocationLoading, setProvocationLoading] = useState(false);
   const [provocationAttempted, setProvocationAttempted] = useState(false);
-  // 'idle' (button not pressed yet) | 'confirm' (showing the free guess,
-  // guessConceptFromLine) | 'ask' (no guess, or user said "that's not it" —
-  // free-text input). Never fires getCulturalProvocation until the concept
-  // is confirmed/typed — see handleCulturalProvocationStart below.
-  const [provocationStage, setProvocationStage] = useState('idle');
-  const [provocationConceptDraft, setProvocationConceptDraft] = useState('');
+  // 'idle' (not this popover's job) | 'confirm' (review the concept — the
+  // selected phrase) | 'ask' (user rejected it, type another).
+  // getCulturalProvocation never fires until the concept
+  // is confirmed/typed. mode 'provocation' opens straight into this (it's
+  // the whole point of the popover then — see the Ángulo cultural pill in
+  // KeyboardAccessoryBar); every other mode leaves it 'idle'.
+  const [provocationStage, setProvocationStage] = useState(
+    () => (mode === 'provocation' ? (targetVerse?.text?.trim() ? 'confirm' : 'ask') : 'idle'),
+  );
+  const [provocationConceptDraft, setProvocationConceptDraft] = useState(
+    () => (mode === 'provocation' ? (targetVerse?.text?.trim() || '') : ''),
+  );
   const [provocationClarificationDraft, setProvocationClarificationDraft] = useState('');
   // SOCRATIC's free-typed reply (design ref: references/bottomTabMuse.jpg)
   // — sits alongside the model's own chips as the open-ended fallback for
@@ -274,7 +300,7 @@ export default function MusePopover({
     return () => { cancelled = true; };
   }, [sectionId]);
 
-  const send = useCallback(async (message, { isRegen = false } = {}) => {
+  const send = useCallback(async (message, { isRegen = false, forceMode: forceModeArg = null } = {}) => {
     setLoading(true);
     setError(null);
     setProvocation(null);
@@ -295,7 +321,8 @@ export default function MusePopover({
         // own mode judgment. The concept text itself travels as the
         // userMessage (see the seed below); parseWordBank/queryWordBank
         // handle a concept with no rhyme just fine (see museApi.js).
-        forceMode: isFirstTurn && (mode === 'rhyme' || mode === 'concept') ? 'WORD_BANK' : null,
+        forceMode: forceModeArg
+          || (isFirstTurn && (mode === 'rhyme' || mode === 'concept') ? 'WORD_BANK' : null),
         // No debug/inline-panel concept on mobile — but every real call
         // still lands in the debug log automatically (see askMuse), same
         // as desktop, so it shows up in MuseEyeScreen's history too.
@@ -340,7 +367,10 @@ export default function MusePopover({
     // Concept AND genealogy modes need a confirm/ask step first
     // (conceptStage, rendered below) — see handleConceptConfirm for where
     // the actual action fires once the user's confirmed or typed a concept.
-    if (mode === 'concept' || mode === 'genealogy') return;
+    if (mode === 'concept' || mode === 'genealogy' || mode === 'provocation') return;
+    // Plain Musa tap with nothing typed — wait for the compose step, don't
+    // fire a guessed request on the writer's behalf.
+    if (composing) return;
     const seed = seedMessage || (targetVerse
       ? (mode === 'rhyme'
         ? `palabras que rimen con "${targetVerse.text}"`
@@ -381,6 +411,21 @@ export default function MusePopover({
   }, [onInsertBelow, onClose]);
 
   const handleChip = useCallback((chip) => send(chip), [send]);
+
+  // The compose step (askWithoutPrompt) — either the writer's own typed
+  // request, or an intent chip that pins the mode so the result is exactly
+  // what the chip says, no model guess.
+  const startFromCompose = useCallback((message, opts) => {
+    setComposing(false);
+    send(message, opts);
+  }, [send]);
+
+  const handleComposeSubmit = useCallback((e) => {
+    e.preventDefault();
+    const text = composeDraft.trim();
+    if (!text) return;
+    startFromCompose(text);
+  }, [composeDraft, startFromCompose]);
 
   const handleReplySubmit = useCallback((e) => {
     e.preventDefault();
@@ -442,20 +487,12 @@ export default function MusePopover({
     send(`dame palabras que tengan que ver con "${conceptDraft.trim()}"`);
   }, [mode, conceptDraft, send, runGenealogy]);
 
-  // Creativity proposal #4 — direct call to getCulturalProvocation, NOT a
-  // trip back through send()/askMuse: this is a client-forced action, not a
-  // new model turn that has to first decide what mode to answer in.
-  // Never fires on the first tap anymore — guessConceptFromLine's guess (or
-  // a blank ask if there's nothing to guess from) has to be confirmed or
-  // corrected first (provocationStage), same reasoning as the concept-mode
-  // flow above: a real reported bug came from firing on an unconfirmed
-  // guess with no chance to correct it.
-  const handleCulturalProvocationStart = useCallback(() => {
-    const guess = guessConceptFromLine({ verseText, targetVerse });
-    setProvocationConceptDraft(guess || '');
-    setProvocationStage(guess ? 'confirm' : 'ask');
-  }, [verseText, targetVerse]);
-
+  // Ángulo cultural (mode 'provocation', from the KeyboardAccessoryBar pill)
+  // — a direct call to getCulturalProvocation, NOT a trip back through
+  // send()/askMuse: the UI action already decided what's being asked. The
+  // concept (the selected phrase) is reviewed first — "¿Un ángulo cultural
+  // sobre X?" — before it fires, so a wrong guess is catchable, same
+  // reasoning as the concept/genealogy flows above.
   const handleCulturalProvocationChange = useCallback(() => setProvocationStage('ask'), []);
   const handleCulturalProvocationDraftChange = useCallback((e) => setProvocationConceptDraft(e.target.value), []);
 
@@ -529,6 +566,44 @@ export default function MusePopover({
             #EAD9B8 treatment as .ne-row-muse-origin on the line itself. */}
         {originIsReal && targetVerse && (
           <p className="mp-quote-box">&quot;{targetVerse.text}&quot;</p>
+        )}
+
+        {/* Compose step — a plain Musa tap waits here for the writer to say
+            what they want. Free text routes normally; an intent chip pins
+            the mode (forceMode) so it does exactly what it says. */}
+        {composing && (
+          <div className="mp-banner">
+            <form className="mp-reply-form" onSubmit={handleComposeSubmit}>
+              <input
+                className="mp-reply-input"
+                type="text"
+                value={composeDraft}
+                autoFocus
+                onChange={(e) => setComposeDraft(e.target.value)}
+                placeholder={
+                  !hasSubstance ? '¿de qué quieres escribir? o pídele algo…'
+                  : targetVerse ? 'pídele algo sobre esto…'
+                  : 'pídele algo sobre esta parte…'
+                }
+              />
+              <button className="mp-reply-send" type="submit" disabled={!composeDraft.trim()}>Enviar</button>
+            </form>
+            <div className="mp-chips">
+              {hasSubstance ? (
+                <>
+                  {targetVerse && (
+                    <button className="mp-chip" onClick={() => startFromCompose('reescribe este fragmento manteniendo la métrica', { forceMode: 'SURGEON' })}>reescríbelo</button>
+                  )}
+                  <button className="mp-chip" onClick={() => startFromCompose('termina o continúa este verso', { forceMode: 'ARCHITECT' })}>termina el verso</button>
+                  <button className="mp-chip" onClick={() => startFromCompose('dame palabras y rimas para trabajar esta línea', { forceMode: 'WORD_BANK' })}>palabras / rimas</button>
+                  <button className="mp-chip" onClick={() => startFromCompose('dame referencias, imágenes o ejemplos concretos para esta línea', { forceMode: 'OPEN_REFERENCE' })}>referencias</button>
+                  <button className="mp-chip" onClick={() => startFromCompose('hazme una pregunta que me ayude a ver esta parte', { forceMode: 'SOCRATIC' })}>pregúntame</button>
+                </>
+              ) : (
+                <button className="mp-chip" onClick={() => startFromCompose('no sé por dónde empezar con esta parte — ayúdame a arrancar', { forceMode: 'SOCRATIC' })}>ayúdame a arrancar</button>
+              )}
+            </div>
+          </div>
         )}
 
         {/* Concept AND genealogy modes' shared confirm/ask step — renders
@@ -616,46 +691,18 @@ export default function MusePopover({
           </div>
         )}
 
-        {loading && (
-          <div className="mp-loading"><span className="mp-spinner" /></div>
-        )}
-        {error && <p className="mp-error">{error}</p>}
-
-        {!loading && !error && response?.action_type === 'SOCRATIC' && (
+        {/* Ángulo cultural — opened from the KeyboardAccessoryBar pill (only
+            with a selection). A refrán / trope / archetype for the selected
+            phrase, to react to, not copy. Confirm the concept first (same
+            reasoning as concept/genealogy), then getCulturalProvocation. */}
+        {mode === 'provocation' && (
           <div className="mp-banner">
-            <p className="mp-question">{response.question?.text}</p>
-            <div className="mp-chips">
-              {(response.question?.options || []).slice(0, 3).map((opt, i) => (
-                <button key={i} className="mp-chip" onClick={() => handleChip(opt)}>{opt}</button>
-              ))}
-            </div>
-            {/* Open-ended fallback for whenever none of the chips above are
-                actually the answer (design ref: references/bottomTabMuse.jpg). */}
-            <form className="mp-reply-form" onSubmit={handleReplySubmit}>
-              <input
-                className="mp-reply-input"
-                type="text"
-                value={replyDraft}
-                onChange={(e) => setReplyDraft(e.target.value)}
-                placeholder="tu respuesta…"
-              />
-              <button className="mp-reply-send" type="submit" disabled={!replyDraft.trim()}>Enviar</button>
-            </form>
-            {/* Creativity proposal #4 — always available on any SOCRATIC
-                turn, not something the model has to remember to offer as
-                one of its own dynamic chips. Never fires on the first tap —
-                guesses (or asks for) the concept first, see
-                handleCulturalProvocationStart. */}
-            {provocationStage === 'idle' && !provocationAttempted && !provocationLoading && (
-              <button className="mp-chip mp-chip-cultural" onClick={handleCulturalProvocationStart}>
-                <IcMuse size={13} /> ángulo cultural
-              </button>
-            )}
+            <span className="mp-provocation-hint">ángulo cultural</span>
             {provocationStage === 'confirm' && (
               <div className="mp-provocation-ask">
-                <p className="mp-question">¿Un ángulo cultural sobre &quot;{provocationConceptDraft}&quot;?</p>
+                <p className="mp-question">Un refrán, tropo o referencia cultural para esto — algo con lo que dialogar, no para copiar. ¿Tiramos por ahí?</p>
                 <div className="mp-chips">
-                  <button className="mp-chip" onClick={() => handleCulturalProvocationRun(provocationConceptDraft)}>Sí, ese</button>
+                  <button className="mp-chip" onClick={() => handleCulturalProvocationRun(provocationConceptDraft)}>Sí, dale</button>
                   <button className="mp-chip" onClick={handleCulturalProvocationChange}>Es otro concepto</button>
                 </div>
               </div>
@@ -680,9 +727,6 @@ export default function MusePopover({
                 no encontré un ángulo cultural claro para &quot;{provocationConceptDraft}&quot; — prueba con otro concepto
               </p>
             )}
-            {/* Elided-subject clarification (museApi.js's
-                SUBJECT_RESOLUTION_INSTRUCTION) — the model asked instead of
-                guessing who/what the line's real subject is. */}
             {!provocationLoading && provocation?.needsClarification && (
               <form className="mp-concept-ask" onSubmit={handleCulturalProvocationClarify}>
                 <p className="mp-question">{provocation.needsClarification}</p>
@@ -712,6 +756,34 @@ export default function MusePopover({
                 </button>
               </div>
             )}
+          </div>
+        )}
+
+        {loading && (
+          <div className="mp-loading"><span className="mp-spinner" /></div>
+        )}
+        {error && <p className="mp-error">{error}</p>}
+
+        {!loading && !error && response?.action_type === 'SOCRATIC' && (
+          <div className="mp-banner">
+            <p className="mp-question">{response.question?.text}</p>
+            <div className="mp-chips">
+              {(response.question?.options || []).slice(0, 3).map((opt, i) => (
+                <button key={i} className="mp-chip" onClick={() => handleChip(opt)}>{opt}</button>
+              ))}
+            </div>
+            {/* Open-ended fallback for whenever none of the chips above are
+                actually the answer (design ref: references/bottomTabMuse.jpg). */}
+            <form className="mp-reply-form" onSubmit={handleReplySubmit}>
+              <input
+                className="mp-reply-input"
+                type="text"
+                value={replyDraft}
+                onChange={(e) => setReplyDraft(e.target.value)}
+                placeholder="tu respuesta…"
+              />
+              <button className="mp-reply-send" type="submit" disabled={!replyDraft.trim()}>Enviar</button>
+            </form>
           </div>
         )}
 

@@ -4723,6 +4723,7 @@ body::before {
     display: flex;
     flex-direction: column;
     align-items: center;
+    flex-shrink: 0; /* don't let a tall list squash the cards — see .mp-card */
 }
 
 /* The visual dot stays a deliberately small, quiet affordance (20px) — the
@@ -4970,9 +4971,15 @@ body::before {
    (explicit geometric edge) — on a badly-calibrated screen the shadow can
    vanish while the border still delimits the card. Keep both.
    overflow:hidden clips the swipe-reveal action to the rounded corners; the
-   shadow lives here (not on .mp-row) so it isn't clipped by that. */
+   shadow lives here (not on .mp-row) so it isn't clipped by that.
+   flex-shrink:0 is REQUIRED: overflow:hidden makes the flex auto-minimum
+   compute to 0, so without it the column flex .mp-body squashes every card
+   below its content the moment the list is taller than the viewport (phone
+   screenshot 2026-09-10) — the meta line then gets clipped instead of the
+   list scrolling. */
 .mp-card {
     position: relative;
+    flex-shrink: 0;
     overflow: hidden;
     border-radius: 20px;
     background: #FFFFFF;
@@ -5696,7 +5703,7 @@ body::before {
     position: fixed;
     inset: 0;
     z-index: 60;
-    background: rgba(29, 28, 26, 0.32);
+    background: rgba(29, 28, 26, 0.42);
 }
 
 /* Bottom-docked sheet (design ref: references/bottomTabMuse.jpg), not an
@@ -5707,7 +5714,9 @@ body::before {
    docks flush above the keyboard once an input inside it is focused,
    instead of getting covered by it. Solid paper, not glass — it sits above
    an opaque scrim now (.mp-scrim), so there's nothing translucent worth
-   showing through. */
+   showing through. Same white-card material as the rest of the mobile UI
+   (Projects / thread / note sheet): pure white, the shared card elevation,
+   a top border — rising from the dark scrim below it. */
 .mp-anchored {
     position: fixed;
     left: 0;
@@ -5718,8 +5727,9 @@ body::before {
     overflow-y: auto;
     border-radius: var(--r-lg) var(--r-lg) 0 0;
     padding: var(--space-2) var(--space-4) calc(var(--space-4) + env(safe-area-inset-bottom));
-    background: var(--paper);
-    box-shadow: var(--sh-3);
+    background: #FFFFFF;
+    border-top: var(--card-border);
+    box-shadow: var(--card-elev);
 }
 
 /* Drag-handle affordance at the top of the sheet — purely visual (closing
@@ -5786,7 +5796,7 @@ body::before {
     height: 22px;
     border-radius: 50%;
     border: 2px solid var(--hairline);
-    border-top-color: var(--thread);
+    border-top-color: var(--amber);
     animation: mp-spin 0.7s linear infinite;
 }
 @keyframes mp-spin { to { transform: rotate(360deg); } }
@@ -5831,13 +5841,13 @@ body::before {
     font-size: var(--fs-secondary);
     color: var(--ink);
 }
-/* --accent, same indigo the app already uses for chords/desktop muse
-   chips — signals "this exact field is what's about to be sent" the
-   instant the keyboard opens, matching the reference's active-input ring. */
+/* Amber ring — the muse's one accent colour, so the "this field is about to
+   send" cue reads as part of her surface, not a fifth colour borrowed from
+   the chord system. Matches .mp-concept-input:focus. */
 .mp-reply-input:focus {
     outline: none;
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+    border-color: var(--amber);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber) 22%, transparent);
 }
 .mp-reply-send {
     flex-shrink: 0;
@@ -5855,11 +5865,14 @@ body::before {
 .mp-reply-send:disabled { opacity: 0.4; cursor: default; }
 
 .mp-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+/* Amber, not thread green — this panel IS the muse, and her colour is amber
+   everywhere else in the app (eyebrow, quote box, word-bank pills). The
+   green here was a fourth accent doing no semantic work. */
 .mp-chip {
     min-height: 48px;
     padding: 0 var(--space-3-5);
-    background: var(--thread-soft);
-    color: var(--thread);
+    background: var(--amber-soft);
+    color: var(--amber);
     border: none;
     border-radius: var(--radius-pill);
     font-family: var(--font-sans);
@@ -5869,11 +5882,6 @@ body::before {
 }
 .mp-chip:disabled { opacity: 0.55; cursor: default; }
 
-/* Creativity proposal #4 — cultural provocation. Amber, not thread green:
-   deliberately distinct from the model's own dynamic SOCRATIC chips, since
-   this is a separate, always-available affordance rather than one more
-   option among the model's own. */
-.mp-chip-cultural { background: var(--amber-soft); color: var(--amber); align-self: flex-start; }
 .mp-provocation-loading, .mp-provocation-empty {
     font-family: var(--font-body);
     font-style: italic;
@@ -5988,8 +5996,8 @@ body::before {
     font-size: var(--fs-micro);
     letter-spacing: 0.06em;
     text-transform: uppercase;
-    color: var(--thread);
-    background: var(--thread-soft);
+    color: var(--amber);
+    background: var(--amber-soft);
     border-radius: var(--radius-pill);
     padding: 2px 8px;
     margin-bottom: var(--space-1-5);

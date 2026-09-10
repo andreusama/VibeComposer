@@ -64,6 +64,7 @@ export const IcHistory = (p) => (
   </Svg>
 );
 export const IcRegenerate = (p) => <Svg {...p}><path d="M20 11a8 8 0 1 0-.6 4" /><path d="M20 4v6h-6" /></Svg>;
+export const IcBook = (p) => <Svg {...p}><path d="M6.5 3H20v15.5H6.5A2.5 2.5 0 0 0 4 21V5.5A2.5 2.5 0 0 1 6.5 3Z" /><path d="M4 18.5A2.5 2.5 0 0 1 6.5 16H20" /></Svg>;
 
 /* ── list / project chrome ───────────────────────────────────────────────── */
 export const IcSearch = (p) => <Svg {...p}><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></Svg>;

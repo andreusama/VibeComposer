@@ -1,16 +1,36 @@
 #!/usr/bin/env node
 // ─── Cultural Resonance Engine — CoolScore recompute ───────────────────────
 // Replaces the old binary charisma_score heuristic (only ever 5 or 8 — see
-// git history / the conversation this was built from) with a real weighted
+// git history / the conversation this was built from) with a weighted
 // formula:
 //
-//   CoolScore = 0.35·Phonetics + 0.30·Rarity + 0.20·Loanword + 0.15·Density
+//   CoolScore = 0.64·Phonetics + 0.36·Loanword
+//
+// Rarity and Density (the des-/in-/im- negation-prefix heuristic) were
+// REMOVED on purpose (2026-09-10): frequency-rarity does not imply a word
+// is good — it just rewards obscurity, which the word bank's own sort
+// already has to fight — and the prefix heuristic mis-scored perfectly
+// good words (deshielo, insomnio, inmenso, desamparo). What's left is the
+// two mechanical, string-only signals: how the word sounds (Phonetics) and
+// whether it reads as a foreign loan (Loanword). The 0.64/0.36 split keeps
+// the old 0.35 : 0.20 ratio between them, renormalized to span 0..1.
+//
+// freq_rank is STILL computed and stored — it's a separate raw fact used
+// by lexicon.js's "common words first" word-bank sort, which is the
+// OPPOSITE bias (familiarity, not obscurity) and unaffected by this change.
 //
 // Deliberately does NOT re-stream the Kaikki dump — everything this
 // formula needs (word, syllables, stress_type, rhyme_key, tags) is already
 // sitting in the `lexicon` table from the last seed. This just paginates
 // through the existing rows and recomputes two columns (charisma_score,
 // freq_rank) per row.
+//
+// CALIBRATION: removing two of the four terms shifts the raw-score
+// distribution, so COOLSCORE_CALIBRATION below is an ESTIMATE until
+// re-derived. Run `npm run coolscore -- es --dry-run` (and `-- ca
+// --dry-run`): it paginates the whole table, computes every score, prints
+// the real percentile distribution + a suggested {floor, ceiling}, and
+// writes nothing. Update the constants, then run without --dry-run.
 //
 // LANGUAGE-PARAMETERIZED (npm run coolscore -- es|ca, defaults to es):
 // this originally had NO lang_code filter at all on its select/upsert, and
@@ -20,23 +40,16 @@
 // alongside it, running this unmodified would have recomputed
 // charisma_score for BOTH languages using whichever single config was
 // hardcoded — corrupting one or the other. Every query below is now scoped
-// by lang_code, and Phonetics/Rarity/Loanword each pull from a per-language
-// config instead of a hardcoded Spanish assumption. Density (the negation-
-// prefix heuristic) stays language-agnostic on purpose — des-/in-/im- are
-// real negation prefixes in both Spanish and Catalan.
+// by lang_code, and Phonetics/Loanword each pull from a per-language config
+// instead of a hardcoded Spanish assumption.
 //
-// One factual correction vs. how this was originally specified: freq_rank
-// is NOT already populated (verified against the live table — it's null
-// for all rows). Kaikki is a dictionary extract, not a frequency corpus, so
-// it never had rank data to begin with. This script downloads a real
-// frequency source (hermitdave/FrequencyWords — es_full.txt / ca_full.txt,
-// both confirmed live at the same URL pattern) specifically to backfill
-// Rarity, rather than assuming a field that isn't there.
-//
-// Density uses the cheap prefix heuristic (des-/in-/im-), not the "ask
-// Claude to tag a batch" version — that would mean the whole lexicon
-// through the API, which is a real cost/time question, not something to do
-// silently. Swap in an LLM pass later if the heuristic proves too coarse.
+// freq_rank is NOT already populated (verified against the live table —
+// it's null for all rows). Kaikki is a dictionary extract, not a frequency
+// corpus, so it never had rank data to begin with. This script downloads a
+// real frequency source (hermitdave/FrequencyWords — es_full.txt /
+// ca_full.txt, both confirmed live at the same URL pattern) to backfill
+// freq_rank — used ONLY for lexicon.js's "common words first" word-bank
+// sort now, no longer as a CoolScore term.
 //
 // Proper nouns: already excluded before this ever runs — Kaikki tags them
 // pos:"name", distinct from noun/verb/adj, so they never entered the table
@@ -45,7 +58,8 @@
 //
 // Requires: SUPABASE_SERVICE_ROLE_KEY in .env (same as the seed scripts —
 // this is a bulk UPDATE, the anon key can't do it, see migration_lexicon.sql).
-// Usage: npm run coolscore [-- es|ca]   (or: tsx scripts/recompute-coolscore.ts es)
+// Usage: npm run coolscore -- es|ca [--dry-run]
+//   --dry-run: paginate + compute + print the score distribution, write nothing.
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import ws from 'ws';
@@ -70,7 +84,6 @@ const PAGE_SIZE = 1000;
 
 const OPEN_VOWELS = new Set(['a', 'o']); // open/sonorous vowels — same pair in both Spanish and Catalan
 const LIQUIDS = new Set(['l', 'r']); // universal consonant classification, not language-specific
-const NEGATION_PREFIXES = ['des', 'in', 'im']; // real negation prefixes in both languages
 
 // Small hand-built list per language, per the original spec's own
 // recommendation ("cheap version ... beats trying to auto-detect this
@@ -115,6 +128,11 @@ const LOANWORDS: Record<Lang, Set<string>> = {
 // natively in either language (neither has native /w/, /θ/-as-th,
 // /ʃ/-as-sh, /f/-as-ph spellings).
 const LOANWORD_PATTERNS = ['sh', 'th', 'ph'];
+// ...EXCEPT across a native prefix boundary: "des-hielo", "des-honra",
+// "trans-humante", "post-humo" all contain a spurious "sh"/"th" that has
+// nothing to do with being a loan. Strip these leading prefixes before the
+// digraph test (they never form a real foreign digraph with what follows).
+const NATIVE_PREFIXES_RE = /^(des|trans|sub|post|in|en|con)/;
 
 interface LexiconRow {
   id: number;
@@ -140,7 +158,10 @@ function loadEnv(): Record<string, string> {
   return out;
 }
 
-async function loadFrequencyRanks(lang: Lang): Promise<{ ranks: Map<string, number>; maxRank: number }> {
+// freq_rank only — a word's POSITION in the frequency corpus (1 = most
+// frequent). Feeds the freq_rank column, read by lexicon.js's word-bank
+// "common words first" sort. No longer scaled into CoolScore.
+async function loadFrequencyRanks(lang: Lang): Promise<{ ranks: Map<string, number> }> {
   const url = FREQ_LIST_URLS[lang];
   console.log(`Downloading ${url} ...`);
   const res = await fetch(url);
@@ -156,11 +177,11 @@ async function loadFrequencyRanks(lang: Lang): Promise<{ ranks: Map<string, numb
     // First occurrence wins (the list is already frequency-sorted).
     if (!ranks.has(word.toLowerCase())) ranks.set(word.toLowerCase(), rank);
   }
-  console.log(`Loaded ${ranks.size} ranked words (max rank ${rank}).`);
-  return { ranks, maxRank: rank };
+  console.log(`Loaded ${ranks.size} ranked words.`);
+  return { ranks };
 }
 
-// ─── Phonetics (0.35) — fully mechanical, from the word string alone ───────
+// ─── Phonetics (0.64) — fully mechanical, from the word string alone ───────
 // VOWELS now comes from syllables.js's own LANG_RULES (the same source of
 // truth SURGEON/ARCHITECT verification and rhyme.js use) instead of a
 // hand-copied Spanish-only accented-vowel set — Catalan has à/è/ò/ï that
@@ -206,90 +227,62 @@ function computePhonetics(word: string, lang: Lang): number {
   return Math.max(0, Math.min(1, raw));
 }
 
-// ─── Rarity (0.30) — real frequency data, not invented ─────────────────────
-// Two corrections vs. the originally-specified formula (`1 - rank/maxRank`):
-//
-// 1. Direction was inverted. rank here is a POSITION (1 = most frequent
-//    word in the corpus, maxRank = least frequent), so `1 - rank/maxRank`
-//    gave a COMMON word (small rank) a rarity near 1 and a RARE word
-//    (large rank) a rarity near 0 — backwards. Verified concretely: "cosa"
-//    (rank 187) computed 0.9998 vs "claroscuro" (rank 150473) at 0.8749
-//    under the literal formula — cosa would have beaten claroscuro,
-//    contradicting the spec's own worked example.
-//
-// 2. Even direction-corrected (rank/maxRank), LINEAR scaling badly
-//    compresses everything except the extreme tail of a large corpus —
-//    word frequency is Zipfian (power-law), not uniform. Log-scaling the
-//    rank is the standard fix and spreads real vocabulary across the range
-//    (verified for Spanish before running at scale: claroscuro → 0.85,
-//    cosa → 0.37).
-function computeRarity(word: string, ranks: Map<string, number>, maxRank: number): { rarity: number; freqRank: number | null } {
-  const rank = ranks.get(word.toLowerCase());
-  if (rank == null) return { rarity: 1, freqRank: null }; // beyond even the frequency corpus — legitimately maximally rare
-  const rarity = Math.max(0, Math.min(1, Math.log(rank) / Math.log(maxRank)));
-  return { rarity, freqRank: rank };
+// ─── freq_rank lookup — NO LONGER a CoolScore term ─────────────────────────
+// Was "Rarity (0.30)": log(rank)/log(maxRank), rarer = higher score.
+// Removed from CoolScore (2026-09-10) — obscurity is not quality. The raw
+// rank is still returned and stored in freq_rank, but only lexicon.js's
+// word-bank "common words first" sort reads it now.
+function lookupFreqRank(word: string, ranks: Map<string, number>): number | null {
+  return ranks.get(word.toLowerCase()) ?? null;
 }
 
-// ─── Loanword (0.20) ────────────────────────────────────────────────────────
+// ─── Loanword (0.36) ────────────────────────────────────────────────────────
 function computeLoanword(word: string, lang: Lang): number {
   const w = word.toLowerCase();
   if (LOANWORDS[lang].has(w)) return 1;
-  if (LOANWORD_PATTERNS.some((p) => w.includes(p))) return 1;
+  const stem = w.replace(NATIVE_PREFIXES_RE, ''); // "deshielo" → "hielo", so the "sh" boundary artifact doesn't count
+  if (LOANWORD_PATTERNS.some((p) => stem.includes(p))) return 1;
   if (w.includes('w')) return 1; // 'w' doesn't occur in native vocabulary of either language
   return 0;
 }
 
-// ─── Semantic density (0.15) — cheap prefix heuristic ──────────────────────
-function computeDensity(word: string): number {
-  const w = word.toLowerCase();
-  return NEGATION_PREFIXES.some((p) => w.startsWith(p)) ? 0.7 : 0.3;
-}
-
-// Empirically calibrated PER LANGUAGE against a real sample of that
-// language's own lexicon rows — Spanish's numbers came from a 10,000-word
-// Spanish sample (min 0.185, max 0.709) and do NOT transfer to Catalan
-// automatically: different vocabulary, different phonotactics, a smaller/
-// different-shaped source dump all shift where the raw coolScore
-// distribution actually falls. lexicon.js's queryRhymeCandidates filters
-// on charisma_score >= 7, so an uncalibrated mapping risks the Cultural
-// Resonance Engine silently degrade-falling-back on nearly every real call
-// for that language — exactly the failure mode the original Spanish
-// calibration pass (dry-run against a real sample, check the distribution,
-// THEN pick floor/ceiling) exists to avoid. Catalan's values below were
-// derived the same way, not assumed.
-// Catalan recalibrated after the lexicon source itself changed (Kaikki
-// 181,291 rows → Softcatalà 878,631 rows — a much larger, differently-
-// shaped population, including far more conjugated verb forms) — reused a
-// real 4,000-row sample scattered across the full new table (min 0.264,
-// max 0.659, p90 0.501, p92 0.504, p95 0.510). Floor set just below the
-// observed min, ceiling solved so charisma_score >= 7 selects ~p92
-// (roughly the top ~8% of real words), same selectivity target as Spanish
-// and the previous Catalan calibration — reusing Spanish's raw numbers
-// blindly would have been wrong for either Catalan population, and this
-// one shifted enough from the first Catalan pass to be worth redoing
-// rather than assumed stable.
+// Maps the raw 0..1 CoolScore onto charisma_score 1..10, per language.
+// lexicon.js's queryRhymeCandidates filters on charisma_score >= 7, so
+// these must sit where the real distribution actually falls or the Cultural
+// Resonance Engine silently degrades on nearly every call.
+//
+// ESTIMATE (2026-09-10) — the previous values were fit against the OLD
+// 4-term formula; dropping Rarity + Density shifts the whole distribution
+// down and compresses it (only Phonetics 0..~0.6 for the ~99% of words
+// that aren't loanwords). These numbers were reasoned from computePhonetics'
+// own component ranges, NOT measured. Re-derive before trusting the
+// charisma_score >= 7 gate: `npm run coolscore -- es --dry-run` prints the
+// real percentiles + a suggested {floor, ceiling}; same for -- ca.
 const COOLSCORE_CALIBRATION: Record<Lang, { floor: number; ceiling: number }> = {
-  es: { floor: 0.18, ceiling: 0.71 },
-  ca: { floor: 0.26, ceiling: 0.659 },
+  es: { floor: 0.10, ceiling: 0.49 },
+  ca: { floor: 0.12, ceiling: 0.50 },
 };
 
-export function computeCoolScore(word: string, ranks: Map<string, number>, maxRank: number, lang: Lang = 'es') {
+export function computeCoolScore(word: string, ranks: Map<string, number>, lang: Lang = 'es') {
   const phonetics = computePhonetics(word, lang);
-  const { rarity, freqRank } = computeRarity(word, ranks, maxRank);
   const loanword = computeLoanword(word, lang);
-  const density = computeDensity(word);
+  const freqRank = lookupFreqRank(word, ranks);
 
-  const coolScore = (phonetics * 0.35) + (rarity * 0.30) + (loanword * 0.20) + (density * 0.15);
+  const coolScore = (phonetics * 0.64) + (loanword * 0.36);
   const { floor, ceiling } = COOLSCORE_CALIBRATION[lang];
   const normalized = Math.max(0, Math.min(1, (coolScore - floor) / (ceiling - floor)));
   const charismaScore = Math.max(1, Math.min(10, Math.round(normalized * 9) + 1));
 
-  return { coolScore, charismaScore, freqRank, components: { phonetics, rarity, loanword, density } };
+  return { coolScore, charismaScore, freqRank, components: { phonetics, loanword } };
 }
 
-async function processPage(supabase: SupabaseClient, rows: LexiconRow[], ranks: Map<string, number>, maxRank: number, lang: Lang): Promise<void> {
+async function processPage(
+  supabase: SupabaseClient, rows: LexiconRow[], ranks: Map<string, number>, lang: Lang,
+  opts: { dryRun: boolean; rawScores: number[] },
+): Promise<void> {
   const updated = rows.map((row) => {
-    const { charismaScore, freqRank } = computeCoolScore(row.word, ranks, maxRank, lang);
+    const { coolScore, charismaScore, freqRank } = computeCoolScore(row.word, ranks, lang);
+    opts.rawScores.push(coolScore);
     return {
       word: row.word,
       lang_code: row.lang_code,
@@ -301,17 +294,40 @@ async function processPage(supabase: SupabaseClient, rows: LexiconRow[], ranks: 
       freq_rank: freqRank,
     };
   });
+  if (opts.dryRun) return;
   const { error } = await supabase.from('lexicon').upsert(updated, { onConflict: 'word,lang_code' });
   if (error) throw new Error(`Update failed for a page of ${updated.length} rows: ${error.message}`);
 }
 
+// Charisma >= 7 means normalized >= 6/9; solving (p92 - floor)/(ceiling -
+// floor) = 6/9 for `ceiling` with floor = observed min gives the ceiling
+// that makes the >= 7 gate select ~the top 8% of real words — the same
+// selectivity target the original calibration used.
+function reportDistribution(scores: number[], lang: Lang): void {
+  if (!scores.length) { console.log('\n(no scores collected — nothing to report)'); return; }
+  const sorted = [...scores].sort((a, b) => a - b);
+  const at = (p: number) => sorted[Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length))];
+  const f = (n: number) => n.toFixed(4);
+  const floor = sorted[0];
+  const p92 = at(92);
+  const suggestedCeiling = floor + (p92 - floor) / (6 / 9);
+  console.log(`\n─── raw CoolScore distribution (${lang}, n=${scores.length}) ───`);
+  console.log(`  min ${f(sorted[0])}  p50 ${f(at(50))}  p90 ${f(at(90))}  p92 ${f(p92)}  p95 ${f(at(95))}  max ${f(sorted[sorted.length - 1])}`);
+  console.log(`  suggested COOLSCORE_CALIBRATION.${lang} = { floor: ${f(floor)}, ceiling: ${f(suggestedCeiling)} }`);
+  const configured = COOLSCORE_CALIBRATION[lang];
+  console.log(`  currently configured               = { floor: ${configured.floor}, ceiling: ${configured.ceiling} }`);
+}
+
 async function main(): Promise<void> {
-  const langArg = (process.argv[2] || 'es').trim() as Lang;
+  const args = process.argv.slice(2);
+  const dryRun = args.includes('--dry-run');
+  const langArg = (args.find((a) => !a.startsWith('--')) || 'es').trim() as Lang;
   if (!SUPPORTED_LANGS.includes(langArg)) {
     console.error(`\nUnsupported lang "${langArg}" — expected one of: ${SUPPORTED_LANGS.join(', ')}\n`);
     process.exitCode = 1;
     return;
   }
+  if (dryRun) console.log('DRY RUN — computing the distribution only, writing nothing.\n');
 
   const env = loadEnv();
   const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -322,7 +338,8 @@ async function main(): Promise<void> {
   }
   const supabase: SupabaseClient = createClient(SUPABASE_URL, serviceKey, { realtime: { transport: ws as never } });
 
-  const { ranks, maxRank } = await loadFrequencyRanks(langArg);
+  const { ranks } = await loadFrequencyRanks(langArg);
+  const rawScores: number[] = [];
 
   // Scoped by lang_code — the whole reason this script got parameterized:
   // running it unscoped after Catalan rows existed would have recomputed
@@ -335,7 +352,7 @@ async function main(): Promise<void> {
     process.exitCode = 1;
     return;
   }
-  console.log(`Recomputing CoolScore for ${count} existing lexicon rows (lang_code: ${langArg})...`);
+  console.log(`${dryRun ? 'Scanning' : 'Recomputing'} CoolScore for ${count} existing lexicon rows (lang_code: ${langArg})...`);
 
   // Reported live: paginating with .range(offset, offset+PAGE_SIZE-1) (an
   // OFFSET under the hood) started timing out against the much larger
@@ -371,13 +388,14 @@ async function main(): Promise<void> {
     if (lastError) throw new Error(`Failed to fetch page after id ${lastId} after ${MAX_PAGE_RETRIES + 1} attempts: ${lastError.message}`);
     if (!rows || !rows.length) break;
 
-    await processPage(supabase, rows, ranks, maxRank, langArg);
+    await processPage(supabase, rows, ranks, langArg, { dryRun, rawScores });
     processed += rows.length;
     lastId = (rows[rows.length - 1] as { id: number }).id;
-    console.log(`  processed ${processed}/${count}`);
+    console.log(`  ${dryRun ? 'scanned' : 'processed'} ${processed}/${count}`);
   }
 
-  console.log(`\nDone. Recomputed CoolScore for ${processed} rows (lang_code: ${langArg}).`);
+  reportDistribution(rawScores, langArg);
+  console.log(`\nDone. ${dryRun ? 'Scanned' : 'Recomputed CoolScore for'} ${processed} rows (lang_code: ${langArg})${dryRun ? ' — nothing written' : ''}.`);
 }
 
 // Guarded — this file exports computeCoolScore for reuse/dry-run testing

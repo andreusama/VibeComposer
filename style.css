@@ -6093,12 +6093,13 @@ body::before {
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    background: rgba(251, 249, 244, 0.96);
-    backdrop-filter: blur(18px) saturate(160%);
-    -webkit-backdrop-filter: blur(18px) saturate(160%);
-    border-top: 1px solid var(--hairline);
+    /* Solid white + the shared card material, same as .mp-anchored / .ne-sheet
+       — the collapsed "Graba un audio" strip reads as one more raised white
+       surface on the deep ground, not a warm-glass leftover. */
+    background: #FFFFFF;
+    border-top: var(--card-border);
     border-radius: var(--r-lg) var(--r-lg) 0 0;
-    box-shadow: var(--sh-3);
+    box-shadow: var(--card-elev);
     transition: height 0.28s cubic-bezier(0.32, 0.72, 0, 1);
 }
 .na-sheet2.dragging { transition: none; }
@@ -6168,8 +6169,8 @@ body::before {
     height: 40px;
     border-radius: 50%;
     border: none;
-    background: var(--thread-soft, rgba(120,130,200,0.14));
-    color: var(--thread);
+    background: #F1EFE8;
+    color: var(--ink);
     font-size: var(--fs-secondary);
     cursor: pointer;
 }
@@ -6196,7 +6197,7 @@ body::before {
     flex: 1;
     min-width: 0;
     border: none;
-    border-bottom: 1px solid var(--thread);
+    border-bottom: 1px solid var(--ink);
     background: none;
     font-family: var(--font-sans);
     font-weight: 600;
@@ -6205,7 +6206,7 @@ body::before {
 }
 .na-title-input:focus { outline: none; }
 .na-dur { flex-shrink: 0; font-family: var(--font-mono); font-size: var(--fs-micro); color: var(--muted); }
-.na-wave { color: var(--thread); }
+.na-wave { color: var(--graphite); }
 .na-row-bottom { display: flex; align-items: center; justify-content: space-between; }
 .na-date { font-family: var(--font-sans); font-size: var(--fs-micro); color: var(--muted); }
 .na-del {

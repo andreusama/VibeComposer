@@ -6,31 +6,11 @@
 // drift between the two.
 
 import { supabase } from '../utils/supabaseClient.js';
-
-// A cold mobile launch can stall this (waking WiFi/cellular radio, DNS, or a
-// silent token refresh riding along on the first request) with no error —
-// fetch() has no built-in timeout, so an unlucky first request just hangs
-// forever and the caller's loading spinner never resolves. A page refresh
-// "fixes" it only because the connection/token is warm by then. Race against
-// a hard timeout instead so the caller always gets a settled result to show
-// (and retry) rather than an infinite spinner.
-const LOAD_TIMEOUT_MS = 12000;
-
-function withTimeout(promise, ms, message) {
-  let timer;
-  const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new Error(message)), ms);
-  });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
-}
+import { withTimeout } from '../utils/withTimeout.js';
 
 export async function loadProjectSummaries() {
   try {
-    return await withTimeout(
-      fetchProjectSummaries(),
-      LOAD_TIMEOUT_MS,
-      "Couldn't reach the server — check your connection and try again."
-    );
+    return await withTimeout(fetchProjectSummaries());
   } catch (err) {
     return { songs: [], error: err.message };
   }

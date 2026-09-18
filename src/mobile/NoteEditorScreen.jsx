@@ -251,6 +251,11 @@ export default function NoteEditorScreen({
   // deferred one beat; a bar action fires inside that window and cancels it
   // (runBarAction), a real blur lets it run.
   const blurCleanupRef = useRef(null);
+  // One-shot: set by the accessory bar's audio button, read (and cleared)
+  // the render NoteAudioBar actually mounts, so it opens straight to the
+  // half-height take list instead of the usual collapsed handle — a normal
+  // blur (tapping away) still lands on collapsed as before.
+  const audioBarOpenIntentRef = useRef(false);
 
   useEffect(() => {
     setLines(ensureTrailingEmpty(toLineObjects(splitIntoLines(note.lines?.[0]?.text || ''))));
@@ -472,6 +477,18 @@ export default function NoteEditorScreen({
     const line = lines[index];
     if (line && focusBaselineRef.current[line.id] == null) focusBaselineRef.current[line.id] = line.text;
   }, [lines, cancelBlurCleanup]);
+
+  // KeyboardAccessoryBar → audio icon: the common case is finishing a verse
+  // and wanting to hum/record it right away, without a separate tap-away
+  // first. Unlike runBarAction's other handlers, this one *wants* the real
+  // blur to happen (it's what hides the bar and lets NoteAudioBar mount) —
+  // it just also flags that mount to open expanded instead of collapsed.
+  const handleOpenAudioBar = useCallback(() => {
+    audioBarOpenIntentRef.current = true;
+    const line = focusedIndex != null ? lines[focusedIndex] : null;
+    const el = line ? rowRefs.current[line.id] : null;
+    if (el) el.blur(); else { setSelection(null); setFocusedIndex(null); }
+  }, [focusedIndex, lines]);
 
   // Real editor behavior: Enter splits the line at the caret into two,
   // moving whatever was after the caret down to a new line, caret at its
@@ -758,6 +775,15 @@ export default function NoteEditorScreen({
     || wordVariantSheet || lineHistorySheet != null,
   );
 
+  // Consumed exactly once, on the render where NoteAudioBar actually mounts
+  // (any earlier render — e.g. still inside the 300ms blur grace period —
+  // leaves it armed) so the audio-icon's request to open expanded survives
+  // until there's really a mount to apply it to, and never leaks into the
+  // next ordinary tap-away.
+  const audioBarVisible = audioRecording || (focusedIndex == null && !anyOverlayOpen);
+  const audioBarStartExpanded = audioBarVisible && audioBarOpenIntentRef.current;
+  if (audioBarVisible) audioBarOpenIntentRef.current = false;
+
   return (
     <MobileScreen className="ne-screen">
       <div className="ne-body">
@@ -829,6 +855,7 @@ export default function NoteEditorScreen({
           onCulture={() => runBarAction(handleCultureFromSelection)}
           onUndo={() => runBarAction(handleUndo)}
           onRedo={() => runBarAction(handleRedo)}
+          onAudio={handleOpenAudioBar}
         />
       )}
 
@@ -915,13 +942,17 @@ export default function NoteEditorScreen({
 
       {/* Always-present voice-memo affordance (see NoteAudioBar). Kept
           mounted while recording (it becomes the floating red stop button);
-          hidden while a selection is active or any other bottom sheet is
-          open, so it never stacks over another surface. */}
-      {(audioRecording || (!selection && !anyOverlayOpen)) && (
+          hidden whenever KeyboardAccessoryBar owns the bottom edge (any line
+          focused, not just while text is actually selected — a caret with
+          no selection still leaves the accessory bar up) or any other
+          bottom sheet is open, so it never stacks under/over another
+          fixed-bottom surface. */}
+      {audioBarVisible && (
         <NoteAudioBar
           sectionId={note.id}
           songId={songId}
           memos={audioBySection}
+          startExpanded={audioBarStartExpanded}
           onRecorded={handleAudioRecorded}
           onDeleted={handleAudioDeleted}
           onRenamed={handleAudioRenamed}

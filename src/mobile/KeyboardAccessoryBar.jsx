@@ -1,5 +1,5 @@
 import { useKeyboardInset } from './useKeyboardInset.js';
-import { IcSyllables, IcMuse, IcRhyme, IcPencil, IcUndo, IcRedo, IcBook } from './icons.jsx';
+import { IcSyllables, IcMuse, IcRhyme, IcPencil, IcUndo, IcRedo, IcBook, IcMic } from './icons.jsx';
 
 // The one accessory bar, docked to the top edge of the on-screen keyboard
 // the whole time a lyric line is being edited — the iOS-Notes pattern. Web
@@ -11,7 +11,7 @@ const keep = (e) => e.preventDefault(); // fires before click (incl. touch) → 
 
 export default function KeyboardAccessoryBar({
   syllablesOn, hasSelection, canUndo, canRedo,
-  onToggleSyllables, onMuse, onRhyme, onAlternative, onCulture, onUndo, onRedo,
+  onToggleSyllables, onMuse, onRhyme, onAlternative, onCulture, onUndo, onRedo, onAudio,
 }) {
   const kb = useKeyboardInset();
   return (
@@ -32,6 +32,11 @@ export default function KeyboardAccessoryBar({
         <span className="kab-sep" />
         <button className="kab-btn" onMouseDown={keep} onClick={onUndo} disabled={!canUndo} aria-label="Deshacer"><IcUndo /></button>
         <button className="kab-btn" onMouseDown={keep} onClick={onRedo} disabled={!canRedo} aria-label="Rehacer"><IcRedo /></button>
+        <span className="kab-sep" />
+        {/* Jumps straight to the audio sheet without a separate tap-away —
+            the common case is finishing a verse and wanting to hum/record
+            it right away. */}
+        <button className="kab-btn" onMouseDown={keep} onClick={onAudio} aria-label="Grabar audio"><IcMic /></button>
       </div>
     </div>
   );

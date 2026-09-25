@@ -1,5 +1,5 @@
 import { useKeyboardInset } from './useKeyboardInset.js';
-import { IcSyllables, IcMuse, IcRhyme, IcPencil, IcUndo, IcRedo, IcBook, IcMic } from './icons.jsx';
+import { IcSyllables, IcMuse, IcRhyme, IcPencil, IcUndo, IcRedo, IcBook, IcMic, IcQuote } from './icons.jsx';
 
 // The one accessory bar, docked to the top edge of the on-screen keyboard
 // the whole time a lyric line is being edited — the iOS-Notes pattern. Web
@@ -11,7 +11,7 @@ const keep = (e) => e.preventDefault(); // fires before click (incl. touch) → 
 
 export default function KeyboardAccessoryBar({
   syllablesOn, hasSelection, canUndo, canRedo,
-  onToggleSyllables, onMuse, onRhyme, onAlternative, onCulture, onUndo, onRedo, onAudio,
+  onToggleSyllables, onMuse, onRhyme, onAlternative, onCulture, onResource, onUndo, onRedo, onAudio,
 }) {
   const kb = useKeyboardInset();
   return (
@@ -29,6 +29,7 @@ export default function KeyboardAccessoryBar({
         <button className="kab-btn" onMouseDown={keep} onClick={onRhyme} disabled={!hasSelection} aria-label="Rima"><IcRhyme /></button>
         <button className="kab-btn" onMouseDown={keep} onClick={onAlternative} disabled={!hasSelection} aria-label="Alternativa"><IcPencil /></button>
         <button className="kab-btn" onMouseDown={keep} onClick={onCulture} disabled={!hasSelection} aria-label="Ángulo cultural"><IcBook /></button>
+        <button className="kab-btn" onMouseDown={keep} onClick={onResource} disabled={!hasSelection} aria-label="Recursos"><IcQuote /></button>
         <span className="kab-sep" />
         <button className="kab-btn" onMouseDown={keep} onClick={onUndo} disabled={!canUndo} aria-label="Deshacer"><IcUndo /></button>
         <button className="kab-btn" onMouseDown={keep} onClick={onRedo} disabled={!canRedo} aria-label="Rehacer"><IcRedo /></button>

@@ -199,6 +199,45 @@ drop policy if exists songs_owner on songs;
 create policy songs_owner on songs
   for all using (user_id = auth.uid()) with check (user_id = auth.uid());
 
+-- ─── albums ─────────────────────────────────────────────────────────────────────
+-- Groups songs as tracks. A song with album_id = null IS a single (no wrapper
+-- row). No DNA column here on purpose: an album's coherence is derived live
+-- from its tracks' songs.lyric_dna. Deleting an album keeps its songs (they
+-- become singles). Same statements as migration_albums.sql.
+create table if not exists albums (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     uuid not null references auth.users(id) on delete cascade,
+  title       text not null default 'Sin título',
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+
+drop trigger if exists trg_albums_updated_at on albums;
+create trigger trg_albums_updated_at
+  before update on albums
+  for each row execute function set_updated_at();
+
+create index if not exists idx_albums_user on albums(user_id);
+
+alter table albums enable row level security;
+
+drop policy if exists albums_owner on albums;
+create policy albums_owner on albums
+  for all using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+alter table songs add column if not exists album_id       uuid references albums(id) on delete set null;
+alter table songs add column if not exists track_position integer not null default 0;
+
+create index if not exists idx_songs_album on songs(album_id, track_position);
+
+-- Manual ordering of the projects list (singles and albums share one order).
+-- Everything starts at 0, so until something is dragged the list keeps its
+-- old most-recently-edited-first behaviour (ties fall back to updated_at).
+-- New projects get (lowest existing value - 1) so they land on top.
+-- Tracks inside an album are ordered by track_position instead.
+alter table songs  add column if not exists sort_order integer not null default 0;
+alter table albums add column if not exists sort_order integer not null default 0;
+
 drop policy if exists sections_owner on sections;
 create policy sections_owner on sections
   for all using (
@@ -899,3 +938,131 @@ alter table lexicon enable row level security;
 drop policy if exists lexicon_public_read on lexicon;
 create policy lexicon_public_read on lexicon
   for select using (true);
+
+-- ─── baul_items ─────────────────────────────────────────────────────────────────
+-- The inputs shown in the Baúl's glass cabinet (never the extracted ADN). Same statements as
+-- migration_baul_items.sql, including the private baul-items storage bucket + policies.
+create table if not exists baul_items (
+  id            uuid primary key default gen_random_uuid(),
+  song_id       uuid not null references songs(id) on delete cascade,
+  kind          text not null check (kind in ('note', 'image', 'document')),
+  text_content  text,          -- the note's text (kind = 'note')
+  storage_path  text,          -- {song_id}/{id}.{ext} in the baul-items bucket (image/document)
+  file_name     text,          -- original filename, display only
+  mime_type     text,
+  created_at    timestamptz not null default now()
+);
+
+create index if not exists idx_baul_items_song on baul_items(song_id, created_at);
+
+alter table baul_items enable row level security;
+
+drop policy if exists baul_items_owner on baul_items;
+create policy baul_items_owner on baul_items
+  for all using (
+    exists (select 1 from songs s where s.id = baul_items.song_id and s.user_id = auth.uid())
+  ) with check (
+    exists (select 1 from songs s where s.id = baul_items.song_id and s.user_id = auth.uid())
+  );
+
+-- Private bucket for the photo/PDF bytes — same convention as voice-memos:
+-- path {song_id}/..., access only through the policies below.
+insert into storage.buckets (id, name, public)
+values ('baul-items', 'baul-items', false)
+on conflict (id) do nothing;
+
+drop policy if exists baul_items_obj_select on storage.objects;
+create policy baul_items_obj_select on storage.objects
+  for select using (
+    bucket_id = 'baul-items'
+    and exists (select 1 from songs s where s.id::text = (storage.foldername(name))[1] and s.user_id = auth.uid())
+  );
+
+drop policy if exists baul_items_obj_insert on storage.objects;
+create policy baul_items_obj_insert on storage.objects
+  for insert with check (
+    bucket_id = 'baul-items'
+    and exists (select 1 from songs s where s.id::text = (storage.foldername(name))[1] and s.user_id = auth.uid())
+  );
+
+drop policy if exists baul_items_obj_delete on storage.objects;
+create policy baul_items_obj_delete on storage.objects
+  for delete using (
+    bucket_id = 'baul-items'
+    and exists (select 1 from songs s where s.id::text = (storage.foldername(name))[1] and s.user_id = auth.uid())
+  );
+
+-- ─── resources ─────────────────────────────────────────────────────────────────
+-- Artist-level Recursos library (not song-scoped). Same statements as migration_resources.sql,
+-- including flat folders + the resource<->folder join table.
+create table if not exists resources (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null references auth.users(id) on delete cascade,
+  body       text not null,
+  -- Form of the resource (metaphor/proverb/phrase/other) — separate from
+  -- theme (love/loss/anger/...), which is just a free tag like any other,
+  -- not a second fixed field.
+  type       text check (type in ('metaphor', 'proverb', 'phrase', 'lesson', 'other')),
+  tags       text[] not null default '{}',
+  -- Free text on purpose — sources vary too much for a fixed taxonomy
+  -- (a book+page, a person, an overheard moment, a film) to fit cleanly.
+  origin     text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+drop trigger if exists trg_resources_updated_at on resources;
+create trigger trg_resources_updated_at
+  before update on resources
+  for each row execute function set_updated_at();
+
+-- 'lesson' (craft insight/analysis, distinct from a literary 'metaphor')
+-- was added after the initial version of this table — applies the
+-- constraint change even if the table above already existed live.
+alter table resources drop constraint if exists resources_type_check;
+alter table resources add constraint resources_type_check
+  check (type in ('metaphor', 'proverb', 'phrase', 'lesson', 'other'));
+
+create index if not exists idx_resources_user on resources(user_id, created_at desc);
+
+alter table resources enable row level security;
+
+drop policy if exists resources_owner on resources;
+create policy resources_owner on resources
+  for all using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+-- Flat folders (no nesting) — a resource can sit in several at once (the
+-- Rayuela example: one line can live in both a "Rayuela" folder and a
+-- "pérdida" folder), so it's a join table, not a single folder_id column.
+create table if not exists resource_folders (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null references auth.users(id) on delete cascade,
+  name       text not null default 'Sin título',
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_resource_folders_user on resource_folders(user_id, created_at);
+
+alter table resource_folders enable row level security;
+
+drop policy if exists resource_folders_owner on resource_folders;
+create policy resource_folders_owner on resource_folders
+  for all using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+create table if not exists resource_folder_members (
+  resource_id uuid not null references resources(id) on delete cascade,
+  folder_id   uuid not null references resource_folders(id) on delete cascade,
+  primary key (resource_id, folder_id)
+);
+
+create index if not exists idx_resource_folder_members_folder on resource_folder_members(folder_id);
+
+alter table resource_folder_members enable row level security;
+
+drop policy if exists resource_folder_members_owner on resource_folder_members;
+create policy resource_folder_members_owner on resource_folder_members
+  for all using (
+    exists (select 1 from resources r where r.id = resource_folder_members.resource_id and r.user_id = auth.uid())
+  ) with check (
+    exists (select 1 from resources r where r.id = resource_folder_members.resource_id and r.user_id = auth.uid())
+  );

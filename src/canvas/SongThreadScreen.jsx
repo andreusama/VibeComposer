@@ -10,11 +10,14 @@ import { splitIntoLines } from '../utils/textLines.js';
 import MobileScreen from '../mobile/MobileScreen.jsx';
 import FabMenu from '../mobile/FabMenu.jsx';
 import NoteEditorScreen from '../mobile/NoteEditorScreen.jsx';
+import SongPerformanceScreen from './SongPerformanceScreen.jsx';
 import BaulSheet from '../mobile/BaulSheet.jsx';
+import BaulCabinet from '../mobile/BaulCabinet.jsx';
+import useCabinetSwipe from '../mobile/useCabinetSwipe.js';
 import TempoPulse from '../mobile/TempoPulse.jsx';
 import {
   IcChevronLeft, IcChevronRight, IcMore, IcPlus, IcCheck, IcMuse,
-  IcGlobe, IcMetronome, IcRepeat, IcCopy, IcExport, IcTrash,
+  IcGlobe, IcMetronome, IcRepeat, IcCopy, IcExport, IcTrash, IcBook,
 } from '../mobile/icons.jsx';
 
 function describeAdjacentNote(note) {
@@ -193,7 +196,13 @@ function groupNotesByThreadIndex(notes) {
   return [...groups, ...singles];
 }
 
-function SongThreadCard({ note, chordSummary, onOpen }) {
+// Same convention as ProjectRow.jsx's own long-press (a plain button, no
+// native text-selection race to out-run like NoteEditorScreen's per-line
+// copy has, so no need for that one's longer 420ms/mitigation dance).
+const LONG_PRESS_CARD_MS = 380;
+const LONG_PRESS_CARD_SLOP = 8;
+
+function SongThreadCard({ note, chordSummary, onOpen, onCopied, justCopied }) {
   const label = note.type === 'custom' ? (note.custom_label || 'custom') : note.type;
   const text = note.lines?.[0]?.text || '';
   // Real verse lines, not word-wrapped ones — the old version rendered the
@@ -209,8 +218,51 @@ function SongThreadCard({ note, chordSummary, onOpen }) {
   const visibleLines = realLines.slice(0, 3);
   const moreCount = Math.max(0, realLines.length - 3);
 
+  // Long-press the whole card to copy the block's full text (every line,
+  // not just the 3-line preview) without opening it — mirrors the per-line
+  // copy inside the editor, one level up. `consumedRef` suppresses the
+  // click-to-open that the browser still fires after a held-then-released
+  // touch, same "moved"-flag trick ProjectRow.jsx already uses for its own
+  // long-press-vs-tap disambiguation.
+  const pressTimerRef = useRef(null);
+  const pressStartRef = useRef({ x: 0, y: 0 });
+  const consumedRef = useRef(false);
+  const clearPressTimer = useCallback(() => { clearTimeout(pressTimerRef.current); pressTimerRef.current = null; }, []);
+  useEffect(() => clearPressTimer, [clearPressTimer]);
+
+  const handleTouchStart = useCallback((e) => {
+    consumedRef.current = false;
+    const t = e.touches[0];
+    pressStartRef.current = { x: t.clientX, y: t.clientY };
+    clearPressTimer();
+    if (!text.trim()) return; // an empty block — nothing to copy, don't even arm the timer
+    pressTimerRef.current = setTimeout(() => {
+      pressTimerRef.current = null;
+      consumedRef.current = true;
+      onCopied(text);
+    }, LONG_PRESS_CARD_MS);
+  }, [text, onCopied, clearPressTimer]);
+
+  const handleTouchMove = useCallback((e) => {
+    if (!pressTimerRef.current) return;
+    const t = e.touches[0];
+    if (Math.hypot(t.clientX - pressStartRef.current.x, t.clientY - pressStartRef.current.y) > LONG_PRESS_CARD_SLOP) clearPressTimer();
+  }, [clearPressTimer]);
+
+  const handleClick = useCallback(() => {
+    if (consumedRef.current) { consumedRef.current = false; return; } // the long-press already handled this touch
+    onOpen();
+  }, [onOpen]);
+
   return (
-    <button className="thread-card" onClick={onOpen}>
+    <button
+      className={`thread-card${justCopied ? ' thread-card-copied' : ''}`}
+      onClick={handleClick}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={clearPressTimer}
+      onTouchCancel={clearPressTimer}
+    >
       <div className="thread-card-head">
         <span className="thread-card-type">{label}</span>
         {chordSummary && <span className="thread-card-chords">{chordSummary}</span>}
@@ -236,7 +288,7 @@ function SongThreadCard({ note, chordSummary, onOpen }) {
 // count/label beyond the dots themselves (index is purely internal, not
 // user-facing — deliberately just "classic iPhone" dots, current one
 // filled, the rest hollow).
-function ThreadSlot({ group, progressionsById, onOpen }) {
+function ThreadSlot({ group, progressionsById, onOpen, onCopy, copiedNoteId }) {
   const [active, setActive] = useState(0);
   const scrollRef = useRef(null);
 
@@ -268,6 +320,8 @@ function ThreadSlot({ group, progressionsById, onOpen }) {
         note={note}
         chordSummary={summarizeProgression(progressionsById[note.chord_progression_id])}
         onOpen={() => onOpen(note.id)}
+        onCopied={(text) => onCopy(note.id, text)}
+        justCopied={copiedNoteId === note.id}
       />
     );
   }
@@ -281,6 +335,8 @@ function ThreadSlot({ group, progressionsById, onOpen }) {
               note={note}
               chordSummary={summarizeProgression(progressionsById[note.chord_progression_id])}
               onOpen={() => onOpen(note.id)}
+              onCopied={(text) => onCopy(note.id, text)}
+              justCopied={copiedNoteId === note.id}
             />
           </div>
         ))}
@@ -314,6 +370,28 @@ export default function SongThreadScreen({ state, onExit }) {
   // one another.
   const [appending, setAppending] = useState(false);
   const [pendingBetweenIndex, setPendingBetweenIndex] = useState(null);
+  // "Copiado" toast + a brief flash on the exact card, after long-pressing
+  // one to copy its full text — same two-signal pattern (and reasoning:
+  // the toast alone is easy to miss) as NoteEditorScreen's own per-line copy.
+  const [copyToast, setCopyToast] = useState(false);
+  const copyToastTimerRef = useRef(null);
+  const [copiedNoteId, setCopiedNoteId] = useState(null);
+  const copiedFlashTimerRef = useRef(null);
+  useEffect(() => () => { clearTimeout(copyToastTimerRef.current); clearTimeout(copiedFlashTimerRef.current); }, []);
+
+  const handleCardCopy = useCallback((noteId, text) => {
+    const trimmed = text?.trim();
+    if (!trimmed) return;
+    navigator.clipboard?.writeText(trimmed).then(() => {
+      navigator.vibrate?.(12);
+      setCopyToast(true);
+      clearTimeout(copyToastTimerRef.current);
+      copyToastTimerRef.current = setTimeout(() => setCopyToast(false), 1400);
+      setCopiedNoteId(noteId);
+      clearTimeout(copiedFlashTimerRef.current);
+      copiedFlashTimerRef.current = setTimeout(() => setCopiedNoteId(null), 650);
+    }).catch(() => {});
+  }, []);
   // The note currently open in the full-screen editor, or null for the
   // thread list — local state, not a global `screen` change, same reasoning
   // as CanvasScreen's selectedNoteId: this is a view within "being inside a
@@ -325,6 +403,15 @@ export default function SongThreadScreen({ state, onExit }) {
   const [repeatedWordsOpen, setRepeatedWordsOpen] = useState(false);
   const [tempoSheetOpen, setTempoSheetOpen] = useState(false);
   const [baulOpen, setBaulOpen] = useState(false);
+  // "Sing the whole song" — full takeover (see SongPerformanceScreen.jsx),
+  // not a sheet, same reasoning openNote below gets its own early return.
+  const [performanceOpen, setPerformanceOpen] = useState(false);
+  // The Baúl's glass cabinet is a pane to the left of this screen: swipe right
+  // (or tap the handle on the left edge) to bring it in. cabinetRefresh bumps
+  // whenever something is added so an open cabinet reloads its shelves.
+  const [cabinetOpen, setCabinetOpen] = useState(false);
+  const [cabinetRefresh, setCabinetRefresh] = useState(0);
+  const cabinetSwipe = useCabinetSwipe({ open: cabinetOpen, setOpen: setCabinetOpen });
   const [renaming, setRenaming] = useState(false);
   const [titleDraft, setTitleDraft] = useState(song?.title || '');
   // Desktop's CanvasScreen has a toolbar-wide "saving…" indicator
@@ -361,6 +448,7 @@ export default function SongThreadScreen({ state, onExit }) {
   }, [song?.id]);
 
   const handleLyricDnaUpdated = useCallback((next) => setLyricDna(next), []);
+  const handleBaulItemsChanged = useCallback(() => setCabinetRefresh((n) => n + 1), []);
 
   useEffect(() => {
     if (!song?.id) return;
@@ -538,6 +626,10 @@ export default function SongThreadScreen({ state, onExit }) {
     ? `${LANGUAGE_LABELS[lyricLanguage]} · ${capitalize(lyricDialect)}`
     : LANGUAGE_LABELS[lyricLanguage];
 
+  if (performanceOpen) {
+    return <SongPerformanceScreen title={titleDraft} groups={groups} onClose={() => setPerformanceOpen(false)} />;
+  }
+
   const openNote = openNoteId ? notes.find((n) => n.id === openNoteId) : null;
   if (openNote) {
     // "Before"/"after" context for the muse is between *slots*, not
@@ -599,7 +691,7 @@ export default function SongThreadScreen({ state, onExit }) {
         />
       )}
 
-      <div className="thread-body">
+      <div className="thread-body" {...cabinetSwipe.handlers}>
         <div className="thread-header">
           <button className="thread-back" onClick={onExit} title="volver a proyectos"><IcChevronLeft size={24} /></button>
           <div className="thread-title-block">
@@ -629,6 +721,20 @@ export default function SongThreadScreen({ state, onExit }) {
         {loading && <p className="thread-status">Cargando…</p>}
         {loadError && <p className="thread-status thread-status-error">No se pudo cargar esta canción.</p>}
 
+        {/* Prominent on purpose — the previous entry point for this would
+            have been buried in the "···" menu; user feedback explicitly
+            asked for something bigger and more visible than that. */}
+        {!loading && !loadError && groups.length > 0 && (
+          <button className="thread-preview-cta" onClick={() => setPerformanceOpen(true)}>
+            <span className="thread-preview-icon"><IcBook size={22} /></span>
+            <span className="thread-preview-text">
+              <span className="tt">Ver canción completa</span>
+              <span className="ss">Lee toda la letra seguida, en orden</span>
+            </span>
+            <span className="thread-preview-chevron"><IcChevronRight size={16} /></span>
+          </button>
+        )}
+
         {!loading && !loadError && groups.length === 0 && (
           <div className="thread-empty">
             <p>Aún no hay partes.</p>
@@ -637,7 +743,7 @@ export default function SongThreadScreen({ state, onExit }) {
 
         {!loading && !loadError && groups.map((group, i) => (
           <div className="thread-item" key={group.members[0].id}>
-            <ThreadSlot group={group} progressionsById={progressionsById} onOpen={setOpenNoteId} />
+            <ThreadSlot group={group} progressionsById={progressionsById} onOpen={setOpenNoteId} onCopy={handleCardCopy} copiedNoteId={copiedNoteId} />
             {i < groups.length - 1 && (
               <InsertAffordance
                 pending={pendingBetweenIndex === group.threadIndex}
@@ -652,16 +758,41 @@ export default function SongThreadScreen({ state, onExit }) {
           acción distinta de "Añadir parte", que añade al final. */}
       <FabMenu
         pills={[
-          { label: 'Baúl de la inspiración', icon: <IcMuse size={18} />, dark: true, onClick: () => setBaulOpen(true) },
+          { label: 'Baúl de la inspiración', icon: <IcMuse size={18} />, dark: true, onClick: () => setCabinetOpen(true) },
           { label: 'Añadir parte', icon: <IcPlus size={18} />, onClick: handleAppend, disabled: appending },
         ]}
       />
+
+      {copyToast && <div className="ne-undo-toast"><span>Copiado</span></div>}
+
+      {/* A visible handle on the left edge: the swipe is the fast path, but
+          the cabinet must not depend on discovering a gesture. */}
+      {!cabinetOpen && cabinetSwipe.revealed === null && (
+        <button className="cab-handle" onClick={() => setCabinetOpen(true)} title="abrir el baúl">
+          <IcChevronRight size={14} />
+        </button>
+      )}
+
+      <div
+        className={`cab-pane${cabinetSwipe.revealed !== null ? ' dragging' : ''}${cabinetOpen ? ' open' : ''}`}
+        style={{ transform: `translateX(calc(-100% + ${cabinetSwipe.revealed ?? (cabinetOpen ? window.innerWidth : 0)}px))` }}
+        {...cabinetSwipe.handlers}
+      >
+        <BaulCabinet
+          songId={song.id}
+          open={cabinetOpen}
+          refreshKey={cabinetRefresh}
+          onAdd={() => setBaulOpen(true)}
+          onClose={() => setCabinetOpen(false)}
+        />
+      </div>
 
       {baulOpen && (
         <BaulSheet
           songId={song.id}
           lyricDna={lyricDna}
           onLyricDnaUpdated={handleLyricDnaUpdated}
+          onItemsChanged={handleBaulItemsChanged}
           onClose={() => setBaulOpen(false)}
         />
       )}

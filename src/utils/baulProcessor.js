@@ -20,7 +20,7 @@
 //    document content block so it reads the material itself instead of
 //    a text description of it.
 
-import { API_URL, checkAndIncrementLimit } from './api.js';
+import { callClaudeOnce } from './api.js';
 
 // Kept separate from api.js's own API_MODEL and museApi.js's MUSE_MODEL on
 // purpose — this call's shape (a single large structured-JSON extraction,
@@ -49,28 +49,8 @@ export function inputTypeForFile(file) {
   return null;
 }
 
-async function callClaude(system, userContent, maxTokens) {
-  checkAndIncrementLimit();
-  const response = await fetch(API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: BAUL_MODEL,
-      max_tokens: maxTokens,
-      // claude-sonnet-5 defaults to extended thinking, which for a
-      // fixed-shape JSON extraction task like this one can quietly eat the
-      // entire max_tokens budget and leave zero room for the actual answer
-      // (stop_reason "max_tokens", no text block at all) — the same
-      // failure mode already found and fixed in museApi.js. Disabling it
-      // is what makes this reliably return the JSON instead of nothing.
-      thinking: { type: 'disabled' },
-      system,
-      messages: [{ role: 'user', content: userContent }],
-    }),
-  });
-  if (!response.ok) throw new Error(`API error ${response.status}`);
-  const data = await response.json();
-  return data.content.filter((b) => b.type === 'text').map((b) => b.text).join('');
+function callClaude(system, userContent, maxTokens) {
+  return callClaudeOnce({ model: BAUL_MODEL, system, userContent, maxTokens });
 }
 
 // Exported so MuseEyePanel's baúl tab can show the real prompt that

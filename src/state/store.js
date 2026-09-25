@@ -18,6 +18,16 @@ let state = {
   sessionChecked: false,
   activeSong:     null,
   songs:          [],
+  // Albums group songs as tracks (a song with album_id = null is a single).
+  // activeAlbumId is set while inside an album screen, and is also what a
+  // song's back button reads to return there instead of to the projects list.
+  albums:         [],
+  activeAlbumId:  null,
+  // Which page of the bottom tab bar (MobileHomePager.jsx) is active —
+  // 'projects' | 'resources'. Lives here (not local component state) so a
+  // song/album drill-down that fully unmounts the pager and returns to it
+  // doesn't reset you back to the first tab.
+  homeTab:        'projects',
   // Distinguishes "haven't fetched yet" from "fetched, genuinely zero
   // projects" — songs alone can't tell those apart (both are `[]`), which
   // let the projects screens flash an empty state during the real fetch.

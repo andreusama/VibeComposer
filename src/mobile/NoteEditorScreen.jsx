@@ -17,7 +17,8 @@ import LineHighlight from '../components/LineHighlight.jsx';
 import WordVariantSheet from './WordVariantSheet.jsx';
 import { loadLineHistory, addLineHistory, deleteLineHistory } from '../canvas/lineHistoryData.js';
 import LineHistorySheet from './LineHistorySheet.jsx';
-import { IcChevronLeft, IcMore, IcMuse, IcHistory, IcTrash, IcTools, IcPencil } from './icons.jsx';
+import ResourcePickerSheet from '../resources/ResourcePickerSheet.jsx';
+import { IcChevronLeft, IcMore, IcMuse, IcHistory, IcTrash, IcPencil, IcTools } from './icons.jsx';
 
 // The "talk to the muse right inside the lyric" pattern from the design
 // ref — always the same wake word, like addressing Alexa, so it reads
@@ -28,14 +29,23 @@ import { IcChevronLeft, IcMore, IcMuse, IcHistory, IcTrash, IcTools, IcPencil } 
 // inspira..." the lyric).
 const MUSE_COMMAND_RE = /^\s*musa\s*[,:]\s*/i;
 
+// Long-press-to-copy timing — same hold-without-much-movement convention
+// ProjectRow.jsx uses for its own long-press, just a touch longer here
+// since it competes with the OS's own native long-press-to-select on a
+// real <textarea>: firing distinctly before that (typically ~500ms on
+// mobile browsers) is what makes this read as "one deliberate action"
+// instead of a selection UI flickering in first.
+const LONG_PRESS_COPY_MS = 420;
+const LONG_PRESS_COPY_SLOP = 10;
+
 // One physical line's row: number+rhyme-letter gutter + an auto-growing
 // single logical line of text (still wraps visually across more than one
 // screen row, same as any textarea — "single line" here means one entry in
 // the lines array, one row in the margin, not one row of pixels).
 function LineRow({
   id, index, text, previewText, syllables, rhyme, friction, showSyllables, dimmed, showPlaceholder,
-  variantRanges, hasHistory,
-  onChange, onEnter, onBackspaceAtStart, onFocus, onBlurLine, onSelectionChange, onFrictionTap, onVariantTap, onHistoryTap, inputRef,
+  variantRanges, hasHistory, justCopied,
+  onChange, onEnter, onBackspaceAtStart, onFocus, onBlurLine, onSelectionChange, onFrictionTap, onVariantTap, onHistoryTap, onLongPressCopy, inputRef,
 }) {
   // Live, not just on submit — the moment the line reads as addressing the
   // muse (the wake word + its disambiguating comma/colon typed), the row's
@@ -115,9 +125,41 @@ function LineRow({
     if (hit) onVariantTap(hit.variantId);
   }, [variantRanges, onVariantTap]);
 
+  // Long-press the verse to copy its whole text — scoped to .ne-input-wrap
+  // (the textarea's own wrapper, not the gutter's icon buttons) so it reads
+  // as "hold the verse itself," and deliberately never calls
+  // preventDefault() on touchstart — doing so would also block the
+  // textarea's normal tap-to-focus/tap-to-place-caret, which this must not
+  // touch. Best-effort against the native long-press-to-select that mobile
+  // browsers already run on a real <textarea>: firing first (see
+  // LONG_PRESS_COPY_MS) and collapsing whatever selection may have started
+  // is the mitigation, not a guarantee — genuinely device-dependent.
+  const pressTimerRef = useRef(null);
+  const pressStartRef = useRef({ x: 0, y: 0 });
+  const clearPressTimer = useCallback(() => { clearTimeout(pressTimerRef.current); pressTimerRef.current = null; }, []);
+  useEffect(() => clearPressTimer, [clearPressTimer]);
+
+  const handleWrapTouchStart = useCallback((e) => {
+    const t = e.touches[0];
+    pressStartRef.current = { x: t.clientX, y: t.clientY };
+    clearPressTimer();
+    pressTimerRef.current = setTimeout(() => {
+      pressTimerRef.current = null;
+      onLongPressCopy(index);
+      const el = localRef.current;
+      if (el) { const pos = el.selectionStart ?? displayedText.length; el.setSelectionRange(pos, pos); }
+    }, LONG_PRESS_COPY_MS);
+  }, [index, onLongPressCopy, displayedText, clearPressTimer]);
+
+  const handleWrapTouchMove = useCallback((e) => {
+    if (!pressTimerRef.current) return;
+    const t = e.touches[0];
+    if (Math.hypot(t.clientX - pressStartRef.current.x, t.clientY - pressStartRef.current.y) > LONG_PRESS_COPY_SLOP) clearPressTimer();
+  }, [clearPressTimer]);
+
   return (
     <div
-      className={`ne-row${dimmed ? ' ne-row-dimmed' : ''}${isMuseCommand ? ' ne-row-muse' : ''}${previewText != null ? ' ne-row-preview' : ''}`}
+      className={`ne-row${dimmed ? ' ne-row-dimmed' : ''}${isMuseCommand ? ' ne-row-muse' : ''}${previewText != null ? ' ne-row-preview' : ''}${justCopied ? ' ne-row-copied' : ''}`}
     >
       <div className="ne-gutter">
         {/* Syllables/rhyme are lyric-craft metrics — meaningless once this
@@ -137,7 +179,13 @@ function LineRow({
           <button className="ne-gutter-history" title="versiones anteriores de este verso" onClick={() => onHistoryTap(index)}><IcHistory size={13} /></button>
         )}
       </div>
-      <div className="ne-input-wrap">
+      <div
+        className="ne-input-wrap"
+        onTouchStart={handleWrapTouchStart}
+        onTouchMove={handleWrapTouchMove}
+        onTouchEnd={clearPressTimer}
+        onTouchCancel={clearPressTimer}
+      >
         <LineHighlight text={displayedText} ranges={variantRanges} />
         <textarea
           ref={setRefs}
@@ -228,6 +276,11 @@ export default function NoteEditorScreen({
   // line index currently open in LineHistorySheet, or null.
   const [lineHistory, setLineHistory] = useState([]);
   const [lineHistorySheet, setLineHistorySheet] = useState(null);
+  // A captured selection snapshot ({lineIndex, before, text, after}) while
+  // the Recursos picker is open — same "static snapshot at open time"
+  // approach as openPopover/handleCultureFromSelection, since `selection`
+  // itself gets cleared the moment the sheet opens (see handleOpenResourcePicker).
+  const [resourcePicker, setResourcePicker] = useState(null);
   // Text a line held when it last gained focus — compared on blur to decide
   // whether the previous wording is worth logging to line_history.
   const focusBaselineRef = useRef({});
@@ -623,6 +676,52 @@ export default function NoteEditorScreen({
     setFocusedIndex(null);
   }, [selection, getLineRect]);
 
+  // KeyboardAccessoryBar → Recursos. Only reachable with a selection — the
+  // sheet either inserts a saved resource in its place, or hands it to the
+  // Musa as a one-turn reference without touching the lyric.
+  const handleOpenResourcePicker = useCallback(() => {
+    if (!selection) return;
+    setResourcePicker({ ...selection });
+    setSelection(null);
+    setFocusedIndex(null);
+  }, [selection]);
+
+  // Replaces the captured selection with the resource's own text — same
+  // pushUndo + logLineHistory + direct mutation shape as
+  // handleSaveWordVariant, since this is a one-shot programmatic edit, not
+  // continuous typing (handleLineChange's coalescing is for the latter).
+  const handleInsertResource = useCallback((resource) => {
+    const target = resourcePicker;
+    if (!target) return;
+    const lineText = lines[target.lineIndex]?.text ?? '';
+    pushUndo(lines);
+    logLineHistory(target.lineIndex, lineText);
+    const nextText = `${target.before}${resource.body}${target.after}`;
+    const next = [...lines];
+    next[target.lineIndex] = { ...next[target.lineIndex], text: nextText };
+    setLines(ensureTrailingEmpty(next));
+    persist(next);
+    setResourcePicker(null);
+  }, [resourcePicker, lines, persist, pushUndo, logLineHistory]);
+
+  // Hands the resource to the Musa as an explicit reference for this turn —
+  // seeded and fired immediately (same "already-explicit intent" pattern as
+  // the friction nudge and Ángulo cultural), not routed through the blank
+  // compose step.
+  const handleAskMusaWithResource = useCallback((resource) => {
+    const target = resourcePicker;
+    if (!target) return;
+    setActivePopover({
+      mode: 'ask',
+      targetVerse: { text: target.text, before: target.before, after: target.after },
+      lineIndex: target.lineIndex,
+      originIsReal: true,
+      seedMessage: `Ten en cuenta esta referencia que he guardado: "${resource.body}"`,
+      anchorRect: getLineRect(target.lineIndex),
+    });
+    setResourcePicker(null);
+  }, [resourcePicker, getLineRect]);
+
   const handleVariantTap = useCallback((variantId) => {
     setWordVariantSheet({ variantId });
   }, []);
@@ -697,6 +796,30 @@ export default function NoteEditorScreen({
     });
   }, [getLineRect]);
 
+  // LineRow's long-press-the-verse gesture. Silently no-ops on an empty
+  // line (nothing to copy) or if the Clipboard API isn't available in this
+  // context — same defensive style as MuseEyeScreen's own clipboard write,
+  // the only other place this app touches it.
+  const handleLongPressCopy = useCallback((index) => {
+    const text = lines[index]?.text?.trim();
+    if (!text) return;
+    navigator.clipboard?.writeText(text).then(() => {
+      navigator.vibrate?.(12);
+      setCopyToast(true);
+      clearTimeout(copyToastTimerRef.current);
+      copyToastTimerRef.current = setTimeout(() => setCopyToast(false), 1400);
+      // Deliberately no requestAnimationFrame-based "clear then re-set" dance
+      // here to force the keyframe animation to restart on a same-line
+      // re-copy — rAF is throttled/suspended in backgrounded or inactive
+      // tabs (confirmed while testing this: it silently never fired at
+      // all), which would make the flash randomly not show rather than
+      // just not replaying cleanly on the rare back-to-back-same-line case.
+      setCopiedIndex(index);
+      clearTimeout(copiedFlashTimerRef.current);
+      copiedFlashTimerRef.current = setTimeout(() => setCopiedIndex(null), 650);
+    }).catch(() => {});
+  }, [lines]);
+
   // Accepting a muse suggestion force-overwrites the textarea's controlled
   // value with no real keystroke behind it — which silently clears the
   // browser's own undo stack for that field (shake-to-undo/Ctrl+Z do
@@ -709,8 +832,23 @@ export default function NoteEditorScreen({
   // seconds via a snackbar, no new table/round trip needed.
   const [lastReplacement, setLastReplacement] = useState(null); // {lineIndex, previousText}
   const undoTimerRef = useRef(null);
+  // "Copiado" toast + a brief flash on the row itself, after a
+  // long-press-the-verse copy (see handleLongPressCopy). Two signals on
+  // purpose — a bottom toast alone is easy to miss since a long-press
+  // keeps your eyes on the line, not the bottom of the screen; the flash
+  // is the one that actually answers "did that work?" where you're
+  // already looking.
+  const [copyToast, setCopyToast] = useState(false);
+  const copyToastTimerRef = useRef(null);
+  const [copiedIndex, setCopiedIndex] = useState(null);
+  const copiedFlashTimerRef = useRef(null);
 
-  useEffect(() => () => { clearTimeout(undoTimerRef.current); clearTimeout(blurCleanupRef.current); }, []);
+  useEffect(() => () => {
+    clearTimeout(undoTimerRef.current);
+    clearTimeout(blurCleanupRef.current);
+    clearTimeout(copyToastTimerRef.current);
+    clearTimeout(copiedFlashTimerRef.current);
+  }, []);
 
   const handlePopoverReplace = useCallback((newText) => {
     if (!activePopover?.targetVerse) return;
@@ -772,7 +910,7 @@ export default function NoteEditorScreen({
   // this so nothing ever stacks over an open sheet.
   const anyOverlayOpen = Boolean(
     activePopover || noteMenuOpen || toolsOpen || baulOpen || variantSheetOpen
-    || wordVariantSheet || lineHistorySheet != null,
+    || wordVariantSheet || lineHistorySheet != null || resourcePicker,
   );
 
   // Consumed exactly once, on the render where NoteAudioBar actually mounts
@@ -831,6 +969,8 @@ export default function NoteEditorScreen({
             onFrictionTap={handleFrictionTap}
             onVariantTap={handleVariantTap}
             onHistoryTap={handleHistoryTap}
+            onLongPressCopy={handleLongPressCopy}
+            justCopied={copiedIndex === i}
             inputRef={(id, el) => {
               if (el) rowRefs.current[id] = el;
               else delete rowRefs.current[id];
@@ -853,6 +993,7 @@ export default function NoteEditorScreen({
           onRhyme={() => runBarAction(() => openPopover('rhyme'))}
           onAlternative={() => runBarAction(handleAddVariantFromSelection)}
           onCulture={() => runBarAction(handleCultureFromSelection)}
+          onResource={() => runBarAction(handleOpenResourcePicker)}
           onUndo={() => runBarAction(handleUndo)}
           onRedo={() => runBarAction(handleRedo)}
           onAudio={handleOpenAudioBar}
@@ -888,6 +1029,10 @@ export default function NoteEditorScreen({
         </div>
       )}
 
+      {copyToast && !lastReplacement && !anyOverlayOpen && (
+        <div className="ne-undo-toast"><span>Copiado</span></div>
+      )}
+
       {wordVariantSheet && (
         <WordVariantSheet
           variant={wordVariantSheet.variantId ? wordVariants.find((v) => v.id === wordVariantSheet.variantId) : null}
@@ -896,6 +1041,15 @@ export default function NoteEditorScreen({
           onCreate={handleCreateWordVariant}
           onSave={handleSaveWordVariant}
           onDelete={handleDeleteWordVariant}
+        />
+      )}
+
+      {resourcePicker && (
+        <ResourcePickerSheet
+          userId={userId}
+          onInsert={handleInsertResource}
+          onAskMusa={handleAskMusaWithResource}
+          onClose={() => setResourcePicker(null)}
         />
       )}
 
@@ -927,15 +1081,18 @@ export default function NoteEditorScreen({
         </div>
       )}
 
-      {/* FAB (Baúl / Herramientas / Variante). Hidden while a word is
-          selected (focused single-purpose moment), while recording, or while
-          any bottom sheet owns the space (anyOverlayOpen). */}
+      {/* FAB (Baúl / Variante / Herramientas). Hidden while a word is
+          selected (focused single-purpose moment), while recording, or
+          while any bottom sheet owns the space (anyOverlayOpen). The
+          syllable toggle moved to KeyboardAccessoryBar, but ToolsSheet
+          still owns whole-verse comments, Focus Mode and the per-note
+          repeated-words check, so it keeps its own entry point here. */}
       {!selection && !audioRecording && !anyOverlayOpen && (
         <FabMenu
           pills={[
             { label: 'Baúl de la inspiración', icon: <IcMuse size={18} />, dark: true, onClick: () => setBaulOpen(true) },
-            { label: 'Herramientas', icon: <IcTools size={18} />, iconVariant: 'chord', onClick: () => setToolsOpen(true) },
             { label: 'Variante', icon: <IcPencil size={18} />, iconVariant: 'thread', onClick: () => setVariantSheetOpen(true) },
+            { label: 'Herramientas', icon: <IcTools size={18} />, onClick: () => setToolsOpen(true) },
           ]}
         />
       )}

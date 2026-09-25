@@ -58,6 +58,35 @@ export function getUsageRemaining() {
   return { used: count, remaining: Math.max(0, DAILY_LIMIT - count), limit: DAILY_LIMIT };
 }
 
+// One-shot, non-conversational Claude call used by every "process a big blob
+// of raw material into structured JSON, no back-and-forth" feature
+// (baulProcessor.js's ADN extraction, resourceImportProcessor.js's import
+// segmentation) — pulled out here so the shape (thinking disabled, response
+// text-block extraction, error handling) is fixed in one place instead of
+// copy-pasted per feature.
+export async function callClaudeOnce({ model, system, userContent, maxTokens }) {
+  checkAndIncrementLimit();
+  const response = await fetch(API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model,
+      max_tokens: maxTokens,
+      // These are fixed-shape JSON extraction tasks, not conversation —
+      // claude-sonnet-5 defaults to extended thinking, which can quietly eat
+      // the entire max_tokens budget and leave zero room for the actual
+      // answer (stop_reason "max_tokens", no text block at all). Disabling
+      // it is what makes this reliably return the JSON instead of nothing.
+      thinking: { type: 'disabled' },
+      system,
+      messages: [{ role: 'user', content: userContent }],
+    }),
+  });
+  if (!response.ok) throw new Error(`API error ${response.status}`);
+  const data = await response.json();
+  return data.content.filter((b) => b.type === 'text').map((b) => b.text).join('');
+}
+
 export function checkAndIncrementLimit() {
   // No cap while running the local dev server (`npm run dev`) — the
   // production build (`npm run build`/`vite preview`) still enforces the

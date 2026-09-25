@@ -1,7 +1,8 @@
 import { useState, useCallback, useRef } from 'react';
 import { processBaulInput, readFileAsBase64, inputTypeForFile, emptyAdnLirico } from '../utils/baulProcessor.js';
 import { saveLyricDna, insertBaulEntry, clearBaulEntries } from '../canvas/canvasData.js';
-import { IcMuse, IcCheck, IcNote, IcMic, IcImage, IcPaperclip, IcTrash, IcChevronLeft } from './icons.jsx';
+import { addBaulItem, clearBaulItems, MAX_ITEM_BYTES } from '../canvas/baulItemsData.js';
+import { IcMuse, IcCheck, IcNote, IcImage, IcPaperclip, IcTrash, IcChevronLeft } from './icons.jsx';
 
 // The mobile "tap to attach" entry point (design ref, 2026-08-11 mockup) —
 // same processBaulInput/saveLyricDna calls desktop's BaulFloatNode uses,
@@ -9,7 +10,7 @@ import { IcMuse, IcCheck, IcNote, IcMic, IcImage, IcPaperclip, IcTrash, IcChevro
 // float over on mobile. Never shows what it extracted (see the "black box"
 // note on hasAbsorbedSomething in BaulFloatNode) — this sheet only ever
 // shows *that* something was absorbed, never *what*.
-export default function BaulSheet({ songId, lyricDna, onLyricDnaUpdated, onClose }) {
+export default function BaulSheet({ songId, lyricDna, onLyricDnaUpdated, onItemsChanged, onClose }) {
   const [mode, setMode] = useState('menu'); // 'menu' | 'note' | 'confirmClear'
   const [noteText, setNoteText] = useState('');
   const [processing, setProcessing] = useState(false);
@@ -18,7 +19,9 @@ export default function BaulSheet({ songId, lyricDna, onLyricDnaUpdated, onClose
   const photoInputRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  const absorb = useCallback(async (rawInput, inputType, sourceLabel) => {
+  // `file` is the picked File for photo/PDF input — kept in the cabinet next to
+  // the absorbed ADN (see baulItemsData.js); text input is stored as-is.
+  const absorb = useCallback(async (rawInput, inputType, sourceLabel, file) => {
     setProcessing(true);
     setError(null);
     try {
@@ -28,6 +31,12 @@ export default function BaulSheet({ songId, lyricDna, onLyricDnaUpdated, onClose
       // Best-effort, never blocks the real save — see canvasData.js's
       // insertBaulEntry comment (dev-only audit log, not real product data).
       insertBaulEntry(songId, entry).catch(() => {});
+      // Keep the input itself for the cabinet. Best-effort like the log above:
+      // the ADN is already saved, and until migration_baul_items.sql has been
+      // run this just fails quietly and the cabinet stays empty.
+      addBaulItem({ songId, inputType, text: file ? null : rawInput, file })
+        .then(() => onItemsChanged?.())
+        .catch(() => {});
       onLyricDnaUpdated?.(adnLirico);
       setMode('menu');
       setNoteText('');
@@ -38,7 +47,7 @@ export default function BaulSheet({ songId, lyricDna, onLyricDnaUpdated, onClose
     } finally {
       setProcessing(false);
     }
-  }, [lyricDna, songId, onLyricDnaUpdated]);
+  }, [lyricDna, songId, onLyricDnaUpdated, onItemsChanged]);
 
   const handleSubmitNote = useCallback(() => {
     const text = noteText.trim();
@@ -52,8 +61,9 @@ export default function BaulSheet({ songId, lyricDna, onLyricDnaUpdated, onClose
     if (!file) return;
     const inputType = inputTypeForFile(file);
     if (!inputType) { setError('only images or PDF'); return; }
+    if (file.size > MAX_ITEM_BYTES) { setError('el archivo pesa más de 10 MB'); return; }
     const base64 = await readFileAsBase64(file);
-    absorb({ base64, mimeType: file.type }, inputType, file.name);
+    absorb({ base64, mimeType: file.type }, inputType, file.name, file);
   }, [absorb]);
 
   const handleClear = useCallback(async () => {
@@ -62,12 +72,13 @@ export default function BaulSheet({ songId, lyricDna, onLyricDnaUpdated, onClose
       const { error: saveError } = await saveLyricDna(songId, emptyAdnLirico());
       if (saveError) { setError(saveError.message); return; }
       clearBaulEntries(songId).catch(() => {});
+      clearBaulItems(songId).then(() => onItemsChanged?.()).catch(() => {});
       onLyricDnaUpdated?.(emptyAdnLirico());
       onClose();
     } finally {
       setProcessing(false);
     }
-  }, [songId, onLyricDnaUpdated, onClose]);
+  }, [songId, onLyricDnaUpdated, onItemsChanged, onClose]);
 
   return (
     <div className="baul-sheet-scrim" onClick={mode === 'confirmClear' ? undefined : onClose}>
@@ -105,10 +116,6 @@ export default function BaulSheet({ songId, lyricDna, onLyricDnaUpdated, onClose
                 <span className="aic aic-thread"><IcNote size={18} /></span>
                 <span className="tt">Escribir un apunte</span>
               </button>
-              <button className="attach-option" disabled title="próximamente — necesita voz-a-texto">
-                <span className="aic aic-chord"><IcMic size={18} /></span>
-                <span className="tt">Grabar una nota de voz</span>
-              </button>
               <button className="attach-option" onClick={() => photoInputRef.current?.click()} disabled={processing}>
                 <span className="aic aic-amber"><IcImage size={18} /></span>
                 <span className="tt">Elegir una foto</span>
@@ -138,7 +145,7 @@ export default function BaulSheet({ songId, lyricDna, onLyricDnaUpdated, onClose
             <div className="confirm-card">
               <div className="confirm-text">
                 <div className="tt">¿Vaciar el baúl?</div>
-                <div className="ss">Elimina todos los apuntes, notas de voz, fotos y archivos que hayas añadido — la musa también los olvida. No se puede deshacer.</div>
+                <div className="ss">Elimina todos los apuntes, fotos y archivos que hayas añadido — la musa también los olvida. No se puede deshacer.</div>
               </div>
               <button className="confirm-btn destructive" onClick={handleClear} disabled={processing}>
                 {processing ? '…' : 'Vaciar todo'}

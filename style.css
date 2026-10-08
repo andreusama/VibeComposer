@@ -5432,6 +5432,10 @@ body::before {
    before the toolbar. */
 .ne-row + .ne-row { margin-top: 8px; }
 .ne-row-dimmed { opacity: 0.25; }
+/* A resource dragged from ResourcePickerSheet is currently hovering this
+   line — same amber the rest of the drag-and-drop vocabulary (.mp-card's
+   own drop-ready/drop-active) already uses for "this is where it'll land". */
+.ne-row-drop-target { background-color: var(--amber-soft); box-shadow: inset 0 0 0 1.5px var(--amber); }
 
 /* Fires alongside the "Copiado" toast on a long-press copy (see
    NoteEditorScreen.jsx's handleLongPressCopy) — a toast alone is easy to
@@ -7814,46 +7818,189 @@ body::before {
 .res-delete-btn { margin-top: var(--space-4); }
 
 /* Resource picker sheet — reached from the note editor's keyboard bar
-   (src/resources/ResourcePickerSheet.jsx). Reuses .baul-sheet's shell. */
-.res-picker-sheet { max-height: 78vh; display: flex; flex-direction: column; }
-.res-picker-body { display: flex; flex-direction: column; min-height: 0; padding: var(--space-2) var(--space-4) calc(var(--space-4) + env(safe-area-inset-bottom)); }
-.res-picker-search { margin: var(--space-2) 0 var(--space-3); }
-.res-picker-list { overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-2); }
+   (src/resources/ResourcePickerSheet.jsx). Reuses .baul-sheet's shell, but
+   its own header (title/search/folder-filter) and list are two SEPARATE
+   flex children now, not one shared-padding wrapper — the header stays
+   put, only the list scrolls, same split .mp-header/content already uses
+   on the main Recursos library screen. Redesigned 2026-10-08: was a flat,
+   low-contrast list with no folder filter (reported); now mirrors that
+   same library screen's actual card/chip look instead of a stripped-down
+   version of it. 85vh (was 78) so it reads as a real view, not a sliver. */
+.res-picker-sheet { max-height: 85vh; display: flex; flex-direction: column; }
+
+.res-picker-head {
+    /* Flex-shrink:0 for the same reason .res-picker-row below needs it: a
+       column-flex parent will compress a child below its content size
+       before letting its sibling (.res-picker-list) do the scrolling it's
+       actually built for. The header has no line-clamp to break, but
+       there's no reason to leave it exposed to the same bug class. */
+    flex-shrink: 0;
+    padding: var(--space-2) var(--space-4) var(--space-3);
+    border-bottom: 1px solid var(--hairline);
+}
+.res-picker-head .attach-title { margin-bottom: var(--space-2); }
+.res-picker-search { margin-bottom: var(--space-2); }
+.res-picker-head .res-folder-filter { margin-bottom: 0; }
+
+.res-picker-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2-5);
+    padding: var(--space-3) var(--space-4) calc(var(--space-4) + env(safe-area-inset-bottom));
+}
 .res-picker-empty { text-align: center; padding: var(--space-5) var(--space-3); font-family: var(--font-sans); font-size: var(--fs-secondary); color: var(--muted); }
+
 .res-picker-row {
+    position: relative;
+    /* .res-picker-list (the scrollable parent) is itself a column flexbox,
+       which makes every row a flex item on the vertical axis too — without
+       this, the default flex-shrink:1 lets the browser compress rows below
+       their own content height whenever the list's rows don't all fit,
+       instead of actually scrolling (which .res-picker-list is already set
+       up for). A row forced shorter than its text needs doesn't clip
+       visibly like normal text would — the -webkit-line-clamp this used to
+       use rendered broken/blank instead, and it hit short (1-line)
+       resources hardest since they have the least height headroom before
+       that compression crosses whatever threshold breaks it. Found
+       2026-10-08: most saved resources appeared to render as empty rows;
+       reproduced it with the real data in a bare harness, confirmed this
+       is the fix. */
+    flex-shrink: 0;
+    border-radius: 16px;
+    background: #FFFFFF;
+    border: var(--card-border);
+    box-shadow: var(--card-elev);
+    overflow: hidden;
+    transition: transform 0.12s ease, box-shadow 0.12s ease;
+    -webkit-touch-callout: none;
+    user-select: none;
+    -webkit-user-select: none;
+}
+/* Immediate touch feedback — same values as .mp-card.pressed elsewhere.
+   Driven by React state (see ResourcePickerRow's onTouchStart/End), not a
+   bare CSS :active, for the same reason .mp-card doesn't use one either. */
+.res-picker-row.pressed {
+    transform: scale(0.97);
+    box-shadow: var(--card-elev-pressed);
+}
+.res-picker-row.pressed .res-picker-row-slide { background: #F1ECE0; }
+/* Swipe-left-to-reveal-insert — same mechanic and values as ProjectRow's
+   own delete action (REVEAL=84, the snap-at-half-threshold, the
+   cubic-bezier) so the app has one swipe vocabulary, not two. The slide
+   is the opaque foreground (covers the action at rest); the action itself
+   sits underneath, absolutely positioned, revealed as the slide moves. */
+.res-picker-row-add-action {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 84px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    border: none;
+    /* Not var(--accent) — that's the song's own vibe color (set per-song at
+       boot, see main.js's setAccentFromState) and would make this action
+       shift hue unpredictably from one song to the next, sometimes landing
+       on a pale/low-contrast tone. --thread is already this app's stable
+       "constructive action" color (FabMenu's own Variante pill). */
+    background: var(--thread);
+    color: #FFFFFF;
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: var(--fs-secondary);
+    cursor: pointer;
+}
+.res-picker-row-slide {
+    position: relative;
     display: flex;
     align-items: stretch;
-    gap: var(--space-2);
-    border-radius: var(--r-md);
-    border: 1px solid var(--hairline);
-    background: var(--surface);
-    overflow: hidden;
+    background: #FFFFFF;
+    transition: transform 0.2s cubic-bezier(0.32, 0.72, 0, 1);
+    touch-action: pan-y;
 }
 .res-picker-text {
+    position: relative;
     flex: 1;
+    min-width: 0;
     text-align: left;
-    padding: var(--space-2-5) var(--space-3);
+    padding: var(--space-3) var(--space-3-5);
     border: none;
     background: none;
+    font-family: var(--font-serif);
+    font-size: var(--fs-body);
+    line-height: 1.5;
+    color: var(--ink);
+    /* Plain max-height + overflow:hidden, not -webkit-line-clamp — same
+       swap .thread-card-preview already made (see its own comment) and the
+       same reasoning that made line-clamp break under a shrinking flex
+       parent above: a hard clip plus a fade reads as "there's more below",
+       a clamp's abrupt mid-glyph cutoff (reported 2026-10-08, a stray
+       partial 4th line poking out under the card's rounded corner) reads
+       as broken. */
+    max-height: calc(3 * 1.5em);
+    overflow: hidden;
+}
+.res-picker-text::after {
+    content: '';
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    height: 22px;
+    background: linear-gradient(to bottom, rgba(255, 255, 255, 0), #FFFFFF);
+    pointer-events: none;
+}
+/* Solid amber, not amber-soft-on-amber — the picker's one deliberately
+   high-contrast element, so the secondary action (reference the Musa)
+   reads as clearly distinct from the primary one (tap the text to insert)
+   instead of blending into the card the way the old icon-only, low-
+   contrast rail did. */
+
+/* Drag-to-a-line: picking up a resource (long-press) shrinks the sheet
+   down to a thin strip and fades the scrim near-transparent so the editor
+   underneath becomes the thing you're actually looking at and touching —
+   the sheet reopens full-size the moment the drag ends (drop or cancel).
+   Transition timing matches .res-picker-row-slide's own snap-back so the
+   two motions (sheet collapsing, row un-revealing) read as one gesture. */
+.res-picker-scrim-dragging { background: rgba(29, 28, 26, 0.04); transition: background 0.2s ease; }
+.res-picker-sheet-shrunk {
+    max-height: 56px;
+    transition: max-height 0.2s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.res-picker-sheet:not(.res-picker-sheet-shrunk) { transition: max-height 0.2s cubic-bezier(0.32, 0.72, 0, 1); }
+.res-picker-drag-hint {
+    margin: 0;
+    padding: var(--space-1) var(--space-4) var(--space-3);
+    text-align: center;
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    font-weight: 600;
+    color: var(--amber);
+}
+/* The lifted resource itself, following the finger — fixed to the
+   viewport (not the shrinking sheet) so it stays put over whatever line
+   it's currently hovering, left/top driven inline from the live touch
+   point. Centered on the finger, not anchored to its top-left corner. */
+.res-picker-drag-pill {
+    position: fixed;
+    z-index: 60;
+    max-width: 220px;
+    transform: translate(-50%, -115%);
+    padding: var(--space-2) var(--space-3);
+    border-radius: 12px;
+    background: #FFFFFF;
+    border: var(--card-border);
+    box-shadow: var(--sh-3);
+    opacity: 0.94;
     font-family: var(--font-serif);
     font-size: var(--fs-secondary);
     line-height: 1.4;
     color: var(--ink);
-    display: -webkit-box;
-    -webkit-line-clamp: 3;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-}
-.res-picker-musa {
-    flex-shrink: 0;
-    width: 44px;
-    border: none;
-    border-left: 1px solid var(--hairline);
-    background: var(--amber-soft);
-    color: var(--amber);
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    pointer-events: none;
 }
 
 /* Resource import (paste → segment → review) — ResourceImportSheet.jsx.

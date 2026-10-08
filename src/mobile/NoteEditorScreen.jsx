@@ -43,8 +43,8 @@ const LONG_PRESS_COPY_SLOP = 10;
 // screen row, same as any textarea — "single line" here means one entry in
 // the lines array, one row in the margin, not one row of pixels).
 function LineRow({
-  id, index, text, previewText, syllables, rhyme, friction, showSyllables, dimmed, showPlaceholder,
-  variantRanges, hasHistory, justCopied,
+  id, index, text, previewText, syllables, rhyme, friction, dimmed, showPlaceholder,
+  variantRanges, hasHistory, justCopied, dropTarget,
   onChange, onEnter, onBackspaceAtStart, onFocus, onBlurLine, onSelectionChange, onFrictionTap, onVariantTap, onHistoryTap, onLongPressCopy, inputRef,
 }) {
   // Live, not just on submit — the moment the line reads as addressing the
@@ -159,13 +159,14 @@ function LineRow({
 
   return (
     <div
-      className={`ne-row${dimmed ? ' ne-row-dimmed' : ''}${isMuseCommand ? ' ne-row-muse' : ''}${previewText != null ? ' ne-row-preview' : ''}${justCopied ? ' ne-row-copied' : ''}`}
+      className={`ne-row${dimmed ? ' ne-row-dimmed' : ''}${isMuseCommand ? ' ne-row-muse' : ''}${previewText != null ? ' ne-row-preview' : ''}${justCopied ? ' ne-row-copied' : ''}${dropTarget ? ' ne-row-drop-target' : ''}`}
+      data-line-index={index}
     >
       <div className="ne-gutter">
         {/* Syllables/rhyme are lyric-craft metrics — meaningless once this
             row has switched to "message to the muse," so they're hidden
             rather than showing a stale/nonsense reading. */}
-        {!isMuseCommand && showSyllables && syllables != null && <span className="ne-gutter-count">{syllables}</span>}
+        {!isMuseCommand && syllables != null && <span className="ne-gutter-count">{syllables}</span>}
         {!isMuseCommand && rhyme?.letter && <span className={`ne-gutter-letter ${rhyme.type}`}>{rhyme.letter}</span>}
         {isMuseCommand && <span className="ne-gutter-muse-icon"><IcMuse size={13} /></span>}
         {/* Content-driven Socratic nudge — this line broke the stanza's
@@ -243,7 +244,6 @@ export default function NoteEditorScreen({
   const [type, setType] = useState(note.type);
   const [customLabel, setCustomLabel] = useState(note.custom_label || '');
   const [lines, setLines] = useState(() => ensureTrailingEmpty(toLineObjects(splitIntoLines(note.lines?.[0]?.text || ''))));
-  const [syllableCountOn, setSyllableCountOn] = useState(true);
   const [focusModeOn, setFocusModeOn] = useState(false);
   const [focusedIndex, setFocusedIndex] = useState(null);
   const [toolsOpen, setToolsOpen] = useState(false);
@@ -286,6 +286,10 @@ export default function NoteEditorScreen({
   // approach as openPopover/handleCultureFromSelection, since `selection`
   // itself gets cleared the moment the sheet opens (see handleOpenResourcePicker).
   const [resourcePicker, setResourcePicker] = useState(null);
+  // Which line a dragged resource is currently hovering over (see
+  // ResourcePickerSheet's long-press-drag) — drives LineRow's own
+  // dropTarget highlight. null outside of an active drag.
+  const [dropTargetIndex, setDropTargetIndex] = useState(null);
   // Text a line held when it last gained focus — compared on blur to decide
   // whether the previous wording is worth logging to line_history.
   const focusBaselineRef = useRef({});
@@ -707,15 +711,30 @@ export default function NoteEditorScreen({
     setFocusedIndex(null);
   }, [selection, getLineRect]);
 
-  // KeyboardAccessoryBar → Recursos. Only reachable with a selection — the
-  // sheet either inserts a saved resource in its place, or hands it to the
-  // Musa as a one-turn reference without touching the lyric.
+  // KeyboardAccessoryBar → Recursos. Unlike Rima/Alternativa/Ángulo
+  // cultural, this doesn't need a selected phrase to act on — a resource is
+  // a saved line you're bringing IN, not an operation on something already
+  // there. With a selection it replaces it (unchanged); with just a caret
+  // it reads the live position straight off the focused textarea (still
+  // mounted/focused here, kept alive by the bar's own onMouseDown
+  // preventDefault — same trick handleEnter's caller relies on) and inserts
+  // there instead. handleInsertResource's before+resource.body+after join
+  // already handles both shapes identically; nothing there needed to change.
   const handleOpenResourcePicker = useCallback(() => {
-    if (!selection) return;
-    setResourcePicker({ ...selection });
-    setSelection(null);
+    if (selection) {
+      setResourcePicker({ ...selection });
+      setSelection(null);
+      setFocusedIndex(null);
+      return;
+    }
+    if (focusedIndex == null) return;
+    const line = lines[focusedIndex];
+    const el = rowRefs.current[line?.id];
+    const caret = el ? el.selectionStart : (line?.text.length ?? 0);
+    const text = line?.text ?? '';
+    setResourcePicker({ lineIndex: focusedIndex, text: '', before: text.slice(0, caret), after: text.slice(caret) });
     setFocusedIndex(null);
-  }, [selection]);
+  }, [selection, focusedIndex, lines]);
 
   // Replaces the captured selection with the resource's own text — same
   // pushUndo + logLineHistory + direct mutation shape as
@@ -735,23 +754,25 @@ export default function NoteEditorScreen({
     setResourcePicker(null);
   }, [resourcePicker, lines, persist, pushUndo, logLineHistory]);
 
-  // Hands the resource to the Musa as an explicit reference for this turn —
-  // seeded and fired immediately (same "already-explicit intent" pattern as
-  // the friction nudge and Ángulo cultural), not routed through the blank
-  // compose step.
-  const handleAskMusaWithResource = useCallback((resource) => {
-    const target = resourcePicker;
-    if (!target) return;
-    setActivePopover({
-      mode: 'ask',
-      targetVerse: { text: target.text, before: target.before, after: target.after },
-      lineIndex: target.lineIndex,
-      originIsReal: true,
-      seedMessage: `Ten en cuenta esta referencia que he guardado: "${resource.body}"`,
-      anchorRect: getLineRect(target.lineIndex),
-    });
-    setResourcePicker(null);
-  }, [resourcePicker, getLineRect]);
+  // ResourcePickerSheet's long-press-and-drag → dropped on this line. Unlike
+  // handleInsertResource (replaces a captured selection/caret spot),
+  // dropping targets a whole LINE picked by hit-testing where the finger
+  // let go — there's no sub-line caret to resolve from a touch drop the way
+  // there is from a real text cursor, so this always appends to the line's
+  // end rather than guessing a position inside it.
+  const handleDropResourceOnLine = useCallback((lineIndex, resource) => {
+    const line = lines[lineIndex];
+    if (!line) return;
+    const current = line.text;
+    pushUndo(lines);
+    logLineHistory(lineIndex, current);
+    const next = [...lines];
+    const joined = current && !/\s$/.test(current) ? `${current} ${resource.body}` : `${current}${resource.body}`;
+    next[lineIndex] = { ...next[lineIndex], text: joined };
+    setLines(ensureTrailingEmpty(next));
+    persist(next);
+    setDropTargetIndex(null);
+  }, [lines, persist, pushUndo, logLineHistory]);
 
   const handleVariantTap = useCallback((variantId) => {
     setWordVariantSheet({ variantId });
@@ -985,7 +1006,6 @@ export default function NoteEditorScreen({
             syllables={syllableCounts[i]}
             rhyme={rhymeLines[i]}
             friction={frictionFlags[i]}
-            showSyllables={syllableCountOn}
             showPlaceholder={i === lines.length - 1}
             dimmed={focusModeOn && focusedIndex !== null && focusedIndex !== i}
             variantRanges={variantRangesByLine[i]}
@@ -1001,6 +1021,7 @@ export default function NoteEditorScreen({
             onHistoryTap={handleHistoryTap}
             onLongPressCopy={handleLongPressCopy}
             justCopied={copiedIndex === i}
+            dropTarget={dropTargetIndex === i}
             inputRef={(id, el) => {
               if (el) rowRefs.current[id] = el;
               else delete rowRefs.current[id];
@@ -1011,14 +1032,13 @@ export default function NoteEditorScreen({
       </div>
 
       {/* The one bar docked above the keyboard while editing a line. Rima
-          and Alternativa go disabled when there's no text selection. */}
+          and Alternativa go disabled when there's no text selection;
+          Recursos doesn't need one (see handleOpenResourcePicker). */}
       {focusedIndex != null && !anyOverlayOpen && (
         <KeyboardAccessoryBar
-          syllablesOn={syllableCountOn}
           hasSelection={!!selection}
           canUndo={undoRef.current.undo.length > 0}
           canRedo={undoRef.current.redo.length > 0}
-          onToggleSyllables={() => runBarAction(() => setSyllableCountOn((v) => !v))}
           onMuse={() => runBarAction(handleAskMuse)}
           onRhyme={() => runBarAction(() => openPopover('rhyme'))}
           onAlternative={() => runBarAction(handleAddVariantFromSelection)}
@@ -1078,8 +1098,9 @@ export default function NoteEditorScreen({
         <ResourcePickerSheet
           userId={userId}
           onInsert={handleInsertResource}
-          onAskMusa={handleAskMusaWithResource}
           onClose={() => setResourcePicker(null)}
+          onDragHoverLine={setDropTargetIndex}
+          onDropOnLine={handleDropResourceOnLine}
         />
       )}
 
@@ -1161,8 +1182,6 @@ export default function NoteEditorScreen({
         userId={userId}
         noteText={currentText}
         chordSummary={chordSummary}
-        syllableCountOn={syllableCountOn}
-        onToggleSyllableCount={() => setSyllableCountOn((v) => !v)}
         focusModeOn={focusModeOn}
         onToggleFocusMode={() => setFocusModeOn((v) => !v)}
       />

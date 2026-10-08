@@ -55,7 +55,7 @@ function WholeVerseCommentTab({ lineId, userId, comments, setComments }) {
 export default function ToolsSheet({
   open, onClose, lineId, userId, chordSummary,
   noteText,
-  syllableCountOn, onToggleSyllableCount, focusModeOn, onToggleFocusMode,
+  focusModeOn, onToggleFocusMode,
 }) {
   const [sub, setSub] = useState(null); // null | 'comment'
   const [loadingComments, setLoadingComments] = useState(true);
@@ -117,17 +117,6 @@ export default function ToolsSheet({
               <span className="ts-row-count">{loadingComments ? '…' : comments.length}</span>
               <span className="ts-chevron"><IcChevronRight size={15} /></span>
             </button>
-
-            <div className="ts-row">
-              <div className="ts-row-main">
-                <div className="ts-row-label">Contador de sílabas</div>
-                <div className="ts-row-sublabel">en el margen izquierdo</div>
-              </div>
-              <label className="ts-toggle">
-                <input type="checkbox" checked={syllableCountOn} onChange={onToggleSyllableCount} />
-                <span className="ts-toggle-track"><span className="ts-toggle-thumb" /></span>
-              </label>
-            </div>
 
             <div className="ts-row">
               <div className="ts-row-main">

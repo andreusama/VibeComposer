@@ -4,6 +4,7 @@
 // per note — variants/annotations UI for canvas notes is a later pass).
 
 import { supabase } from '../utils/supabaseClient.js';
+import { withTimeout } from '../utils/withTimeout.js';
 
 export const SECTION_TYPES = ['verse', 'chorus', 'pre-chorus', 'bridge', 'outro', 'custom'];
 // Display labels only — the stored value stays the English key (saveNoteType).
@@ -29,6 +30,14 @@ export function saveSongLyricSettings(id, language, dialect) {
 }
 
 export async function loadCanvasData(songId) {
+  try {
+    return await withTimeout(fetchCanvasData(songId));
+  } catch (err) {
+    return { notes: [], progressions: [], links: [], error: err };
+  }
+}
+
+async function fetchCanvasData(songId) {
   const [{ data: sections, error: sectionsError }, { data: progressions, error: progError }, { data: links, error: linksError }] =
     await Promise.all([
       supabase.from('sections')
@@ -175,7 +184,11 @@ export async function deleteNoteLink(id) {
 // DB row + canvas_x/y/width/height like every other content node.
 
 export async function loadTempoNodes(songId) {
-  return supabase.from('tempo_nodes').select('*').eq('song_id', songId);
+  try {
+    return await withTimeout(supabase.from('tempo_nodes').select('*').eq('song_id', songId));
+  } catch (err) {
+    return { data: null, error: err };
+  }
 }
 
 export async function createTempoNode(songId, { x, y }) {
@@ -205,7 +218,11 @@ export async function deleteTempoNode(id) {
 // if someone adds more than one black hole to the canvas.
 
 export async function loadBaulNodes(songId) {
-  return supabase.from('baul_nodes').select('*').eq('song_id', songId);
+  try {
+    return await withTimeout(supabase.from('baul_nodes').select('*').eq('song_id', songId));
+  } catch (err) {
+    return { data: null, error: err };
+  }
 }
 
 export async function createBaulNode(songId, { x, y }) {
@@ -231,7 +248,11 @@ export async function saveLyricDna(songId, lyricDna) {
 }
 
 export async function loadLyricDna(songId) {
-  return supabase.from('songs').select('lyric_dna').eq('id', songId).single();
+  try {
+    return await withTimeout(supabase.from('songs').select('lyric_dna').eq('id', songId).single());
+  } catch (err) {
+    return { data: null, error: err };
+  }
 }
 
 // ─── Baúl entry log — dev-only audit trail, see schema.sql's baul_entries
@@ -265,6 +286,14 @@ export async function clearBaulEntries(songId) {
 // to plug into; from there they're created and deleted like any other node.
 
 export async function loadOutputNodes(songId) {
+  try {
+    return await withTimeout(fetchOutputNodes(songId));
+  } catch (err) {
+    return { error: err };
+  }
+}
+
+async function fetchOutputNodes(songId) {
   const { data: existing, error: fetchError } = await supabase
     .from('song_outputs').select('*').eq('song_id', songId).order('created_at');
   if (fetchError) return { error: fetchError };

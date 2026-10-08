@@ -17,7 +17,8 @@ import LineHighlight from '../components/LineHighlight.jsx';
 import WordVariantSheet from './WordVariantSheet.jsx';
 import { loadLineHistory, addLineHistory, deleteLineHistory } from '../canvas/lineHistoryData.js';
 import LineHistorySheet from './LineHistorySheet.jsx';
-import { IcChevronLeft, IcMore, IcMuse, IcHistory, IcTrash, IcTools, IcPencil } from './icons.jsx';
+import ResourcePickerSheet from '../resources/ResourcePickerSheet.jsx';
+import { IcChevronLeft, IcMuse, IcHistory, IcTrash, IcPencil, IcTools } from './icons.jsx';
 
 // The "talk to the muse right inside the lyric" pattern from the design
 // ref — always the same wake word, like addressing Alexa, so it reads
@@ -28,14 +29,23 @@ import { IcChevronLeft, IcMore, IcMuse, IcHistory, IcTrash, IcTools, IcPencil } 
 // inspira..." the lyric).
 const MUSE_COMMAND_RE = /^\s*musa\s*[,:]\s*/i;
 
+// Long-press-to-copy timing — same hold-without-much-movement convention
+// ProjectRow.jsx uses for its own long-press, just a touch longer here
+// since it competes with the OS's own native long-press-to-select on a
+// real <textarea>: firing distinctly before that (typically ~500ms on
+// mobile browsers) is what makes this read as "one deliberate action"
+// instead of a selection UI flickering in first.
+const LONG_PRESS_COPY_MS = 420;
+const LONG_PRESS_COPY_SLOP = 10;
+
 // One physical line's row: number+rhyme-letter gutter + an auto-growing
 // single logical line of text (still wraps visually across more than one
 // screen row, same as any textarea — "single line" here means one entry in
 // the lines array, one row in the margin, not one row of pixels).
 function LineRow({
   id, index, text, previewText, syllables, rhyme, friction, showSyllables, dimmed, showPlaceholder,
-  variantRanges, hasHistory,
-  onChange, onEnter, onBackspaceAtStart, onFocus, onBlurLine, onSelectionChange, onFrictionTap, onVariantTap, onHistoryTap, inputRef,
+  variantRanges, hasHistory, justCopied,
+  onChange, onEnter, onBackspaceAtStart, onFocus, onBlurLine, onSelectionChange, onFrictionTap, onVariantTap, onHistoryTap, onLongPressCopy, inputRef,
 }) {
   // Live, not just on submit — the moment the line reads as addressing the
   // muse (the wake word + its disambiguating comma/colon typed), the row's
@@ -115,9 +125,41 @@ function LineRow({
     if (hit) onVariantTap(hit.variantId);
   }, [variantRanges, onVariantTap]);
 
+  // Long-press the verse to copy its whole text — scoped to .ne-input-wrap
+  // (the textarea's own wrapper, not the gutter's icon buttons) so it reads
+  // as "hold the verse itself," and deliberately never calls
+  // preventDefault() on touchstart — doing so would also block the
+  // textarea's normal tap-to-focus/tap-to-place-caret, which this must not
+  // touch. Best-effort against the native long-press-to-select that mobile
+  // browsers already run on a real <textarea>: firing first (see
+  // LONG_PRESS_COPY_MS) and collapsing whatever selection may have started
+  // is the mitigation, not a guarantee — genuinely device-dependent.
+  const pressTimerRef = useRef(null);
+  const pressStartRef = useRef({ x: 0, y: 0 });
+  const clearPressTimer = useCallback(() => { clearTimeout(pressTimerRef.current); pressTimerRef.current = null; }, []);
+  useEffect(() => clearPressTimer, [clearPressTimer]);
+
+  const handleWrapTouchStart = useCallback((e) => {
+    const t = e.touches[0];
+    pressStartRef.current = { x: t.clientX, y: t.clientY };
+    clearPressTimer();
+    pressTimerRef.current = setTimeout(() => {
+      pressTimerRef.current = null;
+      onLongPressCopy(index);
+      const el = localRef.current;
+      if (el) { const pos = el.selectionStart ?? displayedText.length; el.setSelectionRange(pos, pos); }
+    }, LONG_PRESS_COPY_MS);
+  }, [index, onLongPressCopy, displayedText, clearPressTimer]);
+
+  const handleWrapTouchMove = useCallback((e) => {
+    if (!pressTimerRef.current) return;
+    const t = e.touches[0];
+    if (Math.hypot(t.clientX - pressStartRef.current.x, t.clientY - pressStartRef.current.y) > LONG_PRESS_COPY_SLOP) clearPressTimer();
+  }, [clearPressTimer]);
+
   return (
     <div
-      className={`ne-row${dimmed ? ' ne-row-dimmed' : ''}${isMuseCommand ? ' ne-row-muse' : ''}${previewText != null ? ' ne-row-preview' : ''}`}
+      className={`ne-row${dimmed ? ' ne-row-dimmed' : ''}${isMuseCommand ? ' ne-row-muse' : ''}${previewText != null ? ' ne-row-preview' : ''}${justCopied ? ' ne-row-copied' : ''}`}
     >
       <div className="ne-gutter">
         {/* Syllables/rhyme are lyric-craft metrics — meaningless once this
@@ -137,7 +179,13 @@ function LineRow({
           <button className="ne-gutter-history" title="versiones anteriores de este verso" onClick={() => onHistoryTap(index)}><IcHistory size={13} /></button>
         )}
       </div>
-      <div className="ne-input-wrap">
+      <div
+        className="ne-input-wrap"
+        onTouchStart={handleWrapTouchStart}
+        onTouchMove={handleWrapTouchMove}
+        onTouchEnd={clearPressTimer}
+        onTouchCancel={clearPressTimer}
+      >
         <LineHighlight text={displayedText} ranges={variantRanges} />
         <textarea
           ref={setRefs}
@@ -184,6 +232,12 @@ export default function NoteEditorScreen({
   note, userId, lyricLanguage, lyricDialect, chordSummary, bpm,
   songId, lyricDna, songStructure, onLyricDnaUpdated,
   onClose, onTextChange, onTypeChange, onDeleted, onCreateVariant,
+  // Latest text SongThreadScreen knows about for this note, kept fresh by
+  // its realtime subscription (see useLiveSongSync.js) — only ever adopted
+  // when it's a genuine remote change and it's safe to (see the effect
+  // below), never a prop this component treats as its real source of truth
+  // the way `note` itself is.
+  liveText,
 }) {
   const lineId = note.lines?.[0]?.id;
   const [type, setType] = useState(note.type);
@@ -195,7 +249,6 @@ export default function NoteEditorScreen({
   const [toolsOpen, setToolsOpen] = useState(false);
   const [variantSheetOpen, setVariantSheetOpen] = useState(false);
   const [baulOpen, setBaulOpen] = useState(false);
-  const [noteMenuOpen, setNoteMenuOpen] = useState(false);
   // The live native text selection inside whichever row currently has one —
   // drives the Rima/Alternativa buttons in KeyboardAccessoryBar (disabled without one).
   const [selection, setSelection] = useState(null);
@@ -228,6 +281,11 @@ export default function NoteEditorScreen({
   // line index currently open in LineHistorySheet, or null.
   const [lineHistory, setLineHistory] = useState([]);
   const [lineHistorySheet, setLineHistorySheet] = useState(null);
+  // A captured selection snapshot ({lineIndex, before, text, after}) while
+  // the Recursos picker is open — same "static snapshot at open time"
+  // approach as openPopover/handleCultureFromSelection, since `selection`
+  // itself gets cleared the moment the sheet opens (see handleOpenResourcePicker).
+  const [resourcePicker, setResourcePicker] = useState(null);
   // Text a line held when it last gained focus — compared on blur to decide
   // whether the previous wording is worth logging to line_history.
   const focusBaselineRef = useRef({});
@@ -251,11 +309,18 @@ export default function NoteEditorScreen({
   // deferred one beat; a bar action fires inside that window and cancels it
   // (runBarAction), a real blur lets it run.
   const blurCleanupRef = useRef(null);
+  // One-shot: set by the accessory bar's audio button, read (and cleared)
+  // the render NoteAudioBar actually mounts, so it opens straight to the
+  // half-height take list instead of the usual collapsed handle — a normal
+  // blur (tapping away) still lands on collapsed as before.
+  const audioBarOpenIntentRef = useRef(false);
 
   useEffect(() => {
     setLines(ensureTrailingEmpty(toLineObjects(splitIntoLines(note.lines?.[0]?.text || ''))));
     setType(note.type);
     setCustomLabel(note.custom_label || '');
+    lastSavedTextRef.current = note.lines?.[0]?.text || '';
+    pendingSaveRef.current = false;
   }, [note.id]);
 
   useEffect(() => {
@@ -342,15 +407,39 @@ export default function NoteEditorScreen({
   // affordance, not real content — stripped before it ever reaches the
   // parent's card-preview mirror or the DB, so saved text never picks up a
   // dangling newline from just having opened the editor.
+  // Tracks what WE last wrote (vs. what the server has) so a realtime echo
+  // of our own save never gets mistaken for a collaborator's edit, and
+  // whether a local edit is still debouncing — both read by the live-merge
+  // effect further down, which must never clobber text out from under an
+  // in-flight local save.
+  const lastSavedTextRef = useRef(note.lines?.[0]?.text || '');
+  const pendingSaveRef = useRef(false);
+
   const persist = useCallback((nextLines) => {
     const content = nextLines[nextLines.length - 1].text === '' ? nextLines.slice(0, -1) : nextLines;
     const joined = content.map((l) => l.text).join('\n');
     onTextChange?.(note.id, joined);
     if (saveTimer.current) clearTimeout(saveTimer.current);
+    pendingSaveRef.current = true;
     saveTimer.current = setTimeout(() => {
+      saveTimer.current = null;
       if (lineId) saveNoteText(lineId, joined);
+      lastSavedTextRef.current = joined;
+      pendingSaveRef.current = false;
     }, 500);
   }, [note.id, lineId, onTextChange]);
+
+  // A collaborator's edit to this exact note, picked up live. Only ever
+  // adopted when it's safe: not our own write echoing back, nobody's
+  // actively focused in a line here, and no local edit is still mid-save —
+  // otherwise this would yank text out from under an active keystroke,
+  // which no amount of "but it's more current" justifies.
+  useEffect(() => {
+    if (liveText == null || liveText === lastSavedTextRef.current) return;
+    if (focusedIndex !== null || pendingSaveRef.current) return;
+    lastSavedTextRef.current = liveText;
+    setLines(ensureTrailingEmpty(toLineObjects(splitIntoLines(liveText))));
+  }, [liveText, focusedIndex]);
 
   // `persist` calls the parent's onTextChange, which sets state on
   // SongThreadScreen — that can never happen from inside a setLines
@@ -472,6 +561,18 @@ export default function NoteEditorScreen({
     const line = lines[index];
     if (line && focusBaselineRef.current[line.id] == null) focusBaselineRef.current[line.id] = line.text;
   }, [lines, cancelBlurCleanup]);
+
+  // KeyboardAccessoryBar → audio icon: the common case is finishing a verse
+  // and wanting to hum/record it right away, without a separate tap-away
+  // first. Unlike runBarAction's other handlers, this one *wants* the real
+  // blur to happen (it's what hides the bar and lets NoteAudioBar mount) —
+  // it just also flags that mount to open expanded instead of collapsed.
+  const handleOpenAudioBar = useCallback(() => {
+    audioBarOpenIntentRef.current = true;
+    const line = focusedIndex != null ? lines[focusedIndex] : null;
+    const el = line ? rowRefs.current[line.id] : null;
+    if (el) el.blur(); else { setSelection(null); setFocusedIndex(null); }
+  }, [focusedIndex, lines]);
 
   // Real editor behavior: Enter splits the line at the caret into two,
   // moving whatever was after the caret down to a new line, caret at its
@@ -606,6 +707,52 @@ export default function NoteEditorScreen({
     setFocusedIndex(null);
   }, [selection, getLineRect]);
 
+  // KeyboardAccessoryBar → Recursos. Only reachable with a selection — the
+  // sheet either inserts a saved resource in its place, or hands it to the
+  // Musa as a one-turn reference without touching the lyric.
+  const handleOpenResourcePicker = useCallback(() => {
+    if (!selection) return;
+    setResourcePicker({ ...selection });
+    setSelection(null);
+    setFocusedIndex(null);
+  }, [selection]);
+
+  // Replaces the captured selection with the resource's own text — same
+  // pushUndo + logLineHistory + direct mutation shape as
+  // handleSaveWordVariant, since this is a one-shot programmatic edit, not
+  // continuous typing (handleLineChange's coalescing is for the latter).
+  const handleInsertResource = useCallback((resource) => {
+    const target = resourcePicker;
+    if (!target) return;
+    const lineText = lines[target.lineIndex]?.text ?? '';
+    pushUndo(lines);
+    logLineHistory(target.lineIndex, lineText);
+    const nextText = `${target.before}${resource.body}${target.after}`;
+    const next = [...lines];
+    next[target.lineIndex] = { ...next[target.lineIndex], text: nextText };
+    setLines(ensureTrailingEmpty(next));
+    persist(next);
+    setResourcePicker(null);
+  }, [resourcePicker, lines, persist, pushUndo, logLineHistory]);
+
+  // Hands the resource to the Musa as an explicit reference for this turn —
+  // seeded and fired immediately (same "already-explicit intent" pattern as
+  // the friction nudge and Ángulo cultural), not routed through the blank
+  // compose step.
+  const handleAskMusaWithResource = useCallback((resource) => {
+    const target = resourcePicker;
+    if (!target) return;
+    setActivePopover({
+      mode: 'ask',
+      targetVerse: { text: target.text, before: target.before, after: target.after },
+      lineIndex: target.lineIndex,
+      originIsReal: true,
+      seedMessage: `Ten en cuenta esta referencia que he guardado: "${resource.body}"`,
+      anchorRect: getLineRect(target.lineIndex),
+    });
+    setResourcePicker(null);
+  }, [resourcePicker, getLineRect]);
+
   const handleVariantTap = useCallback((variantId) => {
     setWordVariantSheet({ variantId });
   }, []);
@@ -680,6 +827,30 @@ export default function NoteEditorScreen({
     });
   }, [getLineRect]);
 
+  // LineRow's long-press-the-verse gesture. Silently no-ops on an empty
+  // line (nothing to copy) or if the Clipboard API isn't available in this
+  // context — same defensive style as MuseEyeScreen's own clipboard write,
+  // the only other place this app touches it.
+  const handleLongPressCopy = useCallback((index) => {
+    const text = lines[index]?.text?.trim();
+    if (!text) return;
+    navigator.clipboard?.writeText(text).then(() => {
+      navigator.vibrate?.(12);
+      setCopyToast(true);
+      clearTimeout(copyToastTimerRef.current);
+      copyToastTimerRef.current = setTimeout(() => setCopyToast(false), 1400);
+      // Deliberately no requestAnimationFrame-based "clear then re-set" dance
+      // here to force the keyframe animation to restart on a same-line
+      // re-copy — rAF is throttled/suspended in backgrounded or inactive
+      // tabs (confirmed while testing this: it silently never fired at
+      // all), which would make the flash randomly not show rather than
+      // just not replaying cleanly on the rare back-to-back-same-line case.
+      setCopiedIndex(index);
+      clearTimeout(copiedFlashTimerRef.current);
+      copiedFlashTimerRef.current = setTimeout(() => setCopiedIndex(null), 650);
+    }).catch(() => {});
+  }, [lines]);
+
   // Accepting a muse suggestion force-overwrites the textarea's controlled
   // value with no real keystroke behind it — which silently clears the
   // browser's own undo stack for that field (shake-to-undo/Ctrl+Z do
@@ -692,8 +863,23 @@ export default function NoteEditorScreen({
   // seconds via a snackbar, no new table/round trip needed.
   const [lastReplacement, setLastReplacement] = useState(null); // {lineIndex, previousText}
   const undoTimerRef = useRef(null);
+  // "Copiado" toast + a brief flash on the row itself, after a
+  // long-press-the-verse copy (see handleLongPressCopy). Two signals on
+  // purpose — a bottom toast alone is easy to miss since a long-press
+  // keeps your eyes on the line, not the bottom of the screen; the flash
+  // is the one that actually answers "did that work?" where you're
+  // already looking.
+  const [copyToast, setCopyToast] = useState(false);
+  const copyToastTimerRef = useRef(null);
+  const [copiedIndex, setCopiedIndex] = useState(null);
+  const copiedFlashTimerRef = useRef(null);
 
-  useEffect(() => () => { clearTimeout(undoTimerRef.current); clearTimeout(blurCleanupRef.current); }, []);
+  useEffect(() => () => {
+    clearTimeout(undoTimerRef.current);
+    clearTimeout(blurCleanupRef.current);
+    clearTimeout(copyToastTimerRef.current);
+    clearTimeout(copiedFlashTimerRef.current);
+  }, []);
 
   const handlePopoverReplace = useCallback((newText) => {
     if (!activePopover?.targetVerse) return;
@@ -754,9 +940,18 @@ export default function NoteEditorScreen({
   // line-history sheet. The keyboard bar, the FAB and the audio bar all check
   // this so nothing ever stacks over an open sheet.
   const anyOverlayOpen = Boolean(
-    activePopover || noteMenuOpen || toolsOpen || baulOpen || variantSheetOpen
-    || wordVariantSheet || lineHistorySheet != null,
+    activePopover || toolsOpen || baulOpen || variantSheetOpen
+    || wordVariantSheet || lineHistorySheet != null || resourcePicker,
   );
+
+  // Consumed exactly once, on the render where NoteAudioBar actually mounts
+  // (any earlier render — e.g. still inside the 300ms blur grace period —
+  // leaves it armed) so the audio-icon's request to open expanded survives
+  // until there's really a mount to apply it to, and never leaks into the
+  // next ordinary tap-away.
+  const audioBarVisible = audioRecording || (focusedIndex == null && !anyOverlayOpen);
+  const audioBarStartExpanded = audioBarVisible && audioBarOpenIntentRef.current;
+  if (audioBarVisible) audioBarOpenIntentRef.current = false;
 
   return (
     <MobileScreen className="ne-screen">
@@ -776,7 +971,6 @@ export default function NoteEditorScreen({
             />
           )}
           <TempoPulse bpm={bpm} />
-          <button className="ne-menu-btn" onClick={() => setNoteMenuOpen(true)} title="más"><IcMore size={20} /></button>
           <button className="ne-done" onClick={onClose}>Hecho</button>
         </div>
 
@@ -805,6 +999,8 @@ export default function NoteEditorScreen({
             onFrictionTap={handleFrictionTap}
             onVariantTap={handleVariantTap}
             onHistoryTap={handleHistoryTap}
+            onLongPressCopy={handleLongPressCopy}
+            justCopied={copiedIndex === i}
             inputRef={(id, el) => {
               if (el) rowRefs.current[id] = el;
               else delete rowRefs.current[id];
@@ -827,8 +1023,10 @@ export default function NoteEditorScreen({
           onRhyme={() => runBarAction(() => openPopover('rhyme'))}
           onAlternative={() => runBarAction(handleAddVariantFromSelection)}
           onCulture={() => runBarAction(handleCultureFromSelection)}
+          onResource={() => runBarAction(handleOpenResourcePicker)}
           onUndo={() => runBarAction(handleUndo)}
           onRedo={() => runBarAction(handleRedo)}
+          onAudio={handleOpenAudioBar}
         />
       )}
 
@@ -861,6 +1059,10 @@ export default function NoteEditorScreen({
         </div>
       )}
 
+      {copyToast && !lastReplacement && !anyOverlayOpen && (
+        <div className="ne-undo-toast"><span>Copiado</span></div>
+      )}
+
       {wordVariantSheet && (
         <WordVariantSheet
           variant={wordVariantSheet.variantId ? wordVariants.find((v) => v.id === wordVariantSheet.variantId) : null}
@@ -869,6 +1071,15 @@ export default function NoteEditorScreen({
           onCreate={handleCreateWordVariant}
           onSave={handleSaveWordVariant}
           onDelete={handleDeleteWordVariant}
+        />
+      )}
+
+      {resourcePicker && (
+        <ResourcePickerSheet
+          userId={userId}
+          onInsert={handleInsertResource}
+          onAskMusa={handleAskMusaWithResource}
+          onClose={() => setResourcePicker(null)}
         />
       )}
 
@@ -882,46 +1093,41 @@ export default function NoteEditorScreen({
         />
       )}
 
-      {noteMenuOpen && (
-        <div className="ts-backdrop" onClick={() => setNoteMenuOpen(false)}>
-          <div className="ts-sheet" onClick={(e) => e.stopPropagation()}>
-            <div className="ts-grabber" />
-            <button
-              className="ts-row ts-row-danger"
-              onClick={() => { setNoteMenuOpen(false); handleDelete(); }}
-            >
-              <span className="ts-row-icon"><IcTrash size={20} /></span>
-              <div className="ts-row-main">
-                <div className="ts-row-label">Eliminar esta parte</div>
-                <div className="ts-row-sublabel">no se puede deshacer</div>
-              </div>
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* FAB (Baúl / Herramientas / Variante). Hidden while a word is
-          selected (focused single-purpose moment), while recording, or while
-          any bottom sheet owns the space (anyOverlayOpen). */}
+      {/* FAB (Baúl / Variante / Herramientas / Eliminar). Hidden while a
+          word is selected (focused single-purpose moment), while
+          recording, or while any bottom sheet owns the space
+          (anyOverlayOpen). The syllable toggle moved to
+          KeyboardAccessoryBar, but ToolsSheet still owns whole-verse
+          comments, Focus Mode and the per-note repeated-words check, so it
+          keeps its own entry point here. "Eliminar esta parte" used to be
+          its own "···" menu in the header (a whole button, backdrop and
+          sheet for exactly one action) — folded in here instead so there's
+          one less tappable thing in the header; handleDelete still runs
+          its own confirm() before anything happens. */}
       {!selection && !audioRecording && !anyOverlayOpen && (
         <FabMenu
           pills={[
             { label: 'Baúl de la inspiración', icon: <IcMuse size={18} />, dark: true, onClick: () => setBaulOpen(true) },
-            { label: 'Herramientas', icon: <IcTools size={18} />, iconVariant: 'chord', onClick: () => setToolsOpen(true) },
             { label: 'Variante', icon: <IcPencil size={18} />, iconVariant: 'thread', onClick: () => setVariantSheetOpen(true) },
+            { label: 'Herramientas', icon: <IcTools size={18} />, onClick: () => setToolsOpen(true) },
+            { label: 'Eliminar esta parte', icon: <IcTrash size={18} />, danger: true, onClick: handleDelete },
           ]}
         />
       )}
 
       {/* Always-present voice-memo affordance (see NoteAudioBar). Kept
           mounted while recording (it becomes the floating red stop button);
-          hidden while a selection is active or any other bottom sheet is
-          open, so it never stacks over another surface. */}
-      {(audioRecording || (!selection && !anyOverlayOpen)) && (
+          hidden whenever KeyboardAccessoryBar owns the bottom edge (any line
+          focused, not just while text is actually selected — a caret with
+          no selection still leaves the accessory bar up) or any other
+          bottom sheet is open, so it never stacks under/over another
+          fixed-bottom surface. */}
+      {audioBarVisible && (
         <NoteAudioBar
           sectionId={note.id}
           songId={songId}
           memos={audioBySection}
+          startExpanded={audioBarStartExpanded}
           onRecorded={handleAudioRecorded}
           onDeleted={handleAudioDeleted}
           onRenamed={handleAudioRenamed}

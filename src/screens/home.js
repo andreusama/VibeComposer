@@ -134,8 +134,8 @@ export async function attach(state, justEntered) {
 // ─── Data ──────────────────────────────────────────────────────────────────────
 
 async function loadSongs() {
-  const { songs, error } = await loadProjectSummaries();
-  setState({ songs, projectError: error, songsLoaded: true });
+  const { songs, albums, error } = await loadProjectSummaries();
+  setState({ songs, albums, projectError: error, songsLoaded: true });
 }
 
 async function createProject(state) {

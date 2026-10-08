@@ -109,6 +109,10 @@ if __name__ == "__main__":
     # Serve from the directory where this script lives
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-    with http.server.HTTPServer(("", PORT), Handler) as server:
+    # Loopback only: this proxy attaches the API key to whatever it's sent, so
+    # it must not be reachable from other devices on the network. Vite's dev
+    # proxy (vite.config.js) reaches it from this same machine, so nothing
+    # else needs access — phone testing goes through Vite, not this port.
+    with http.server.HTTPServer(("127.0.0.1", PORT), Handler) as server:
         print(f"Vibe Composer running at http://localhost:{PORT}")
         server.serve_forever()

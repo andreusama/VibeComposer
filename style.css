@@ -4458,6 +4458,43 @@ body::before {
 
 /* Top-level nav (src/mobile/MobileTabBar.jsx) — mounted only on screens that
    sit at the root of a tab (Projects), not on drill-down screens. */
+/* Opt-out for a screen mounted as one page of MobileHomePager's swipeable
+   strip — see MobileScreen.jsx's `fixed` prop. Combined-class selector
+   always wins over the plain `.mobile-screen` rule regardless of source
+   order, so this only takes effect where explicitly requested. */
+.mobile-screen.mobile-screen-relative {
+    position: relative;
+    inset: auto;
+    width: 100%;
+    height: 100%;
+    flex-shrink: 0; /* one fixed-width slot in the horizontal track, never squashed */
+}
+
+/* Bottom-tab-bar home screen (src/screens/MobileHomePager.jsx): Proyectos
+   and Recursos as two pages of one swipeable strip. The viewport clips the
+   track; the track is wider than the screen (one 100%-width slot per page,
+   flex-shrink:0 so flexbox doesn't compress them) and is moved by
+   translateX in JS (useSwipePager.js), not by scroll. */
+.home-pager-viewport {
+    position: relative;
+    flex: 1;
+    overflow: hidden;
+    touch-action: pan-y;
+}
+.home-pager-track {
+    /* `left`, not `transform`, moves this track — a CSS transform on an
+       ancestor creates a new containing block for `position: fixed`
+       descendants (any sheet/scrim a page renders), which would silently
+       place every sheet off-screen the moment a page sits at a nonzero
+       offset (i.e. always, on any tab past the first). `left` has no such
+       side effect. */
+    position: relative;
+    display: flex;
+    height: 100%;
+    transition: left 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.home-pager-track > .mobile-screen { width: 100vw; flex-shrink: 0; }
+
 .mobile-tabbar {
     position: absolute;
     left: 0; right: 0; bottom: 0;
@@ -4479,11 +4516,18 @@ body::before {
     flex-direction: column;
     align-items: center;
     gap: 2px;
+    border: none;
+    background: none;
+    padding: var(--space-1) 0;
     font-family: var(--font-sans);
     font-size: var(--fs-eyebrow);
     color: var(--graphite-soft);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
 }
-.mobile-tab-icon { font-size: var(--fs-h2); line-height: 1; }
+/* Icons here are the real stroke-icon set (src/mobile/icons.jsx), sized via
+   their own `size` prop, not font-size — this just centers the SVG. */
+.mobile-tab-icon { display: flex; line-height: 1; }
 .mobile-tab-active { color: var(--ink); }
 
 /* ─── Song thread (mobile) ────────────────────────────────────────────────────
@@ -4773,6 +4817,11 @@ body::before {
     overflow-x: auto;
     scroll-snap-type: x mandatory;
     overscroll-behavior-x: contain;
+    /* .thread-body sets touch-action: pan-y so horizontal drags default to
+       the Baúl cabinet swipe — but touch-action is inherited by descendant
+       scrollers, so without this override this carousel would lose native
+       horizontal panning too. pan-x here reclaims it locally. */
+    touch-action: pan-x;
     /* Hides the native scrollbar without disabling scroll — this is a
        swipeable card stack, not a document that happens to overflow. */
     scrollbar-width: none;
@@ -4820,6 +4869,103 @@ body::before {
     transform: scale(0.97);
     box-shadow: var(--card-elev-pressed);
 }
+
+/* "Ver canción completa" — deliberately NOT another white .thread-card, so
+   it reads as a distinct action (opens the read-through performance view,
+   SongPerformanceScreen.jsx) rather than one more section in the list.
+   Dark, same "this is special" signal the FAB's own dark pills already use
+   for the Baúl. */
+.thread-preview-cta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    width: 100%;
+    padding: var(--space-4);
+    margin-bottom: var(--space-4);
+    background: var(--ink);
+    border: none;
+    border-radius: var(--r-lg);
+    box-shadow: var(--card-elev);
+    text-align: left;
+    cursor: pointer;
+}
+.thread-preview-cta:active { transform: scale(0.98); }
+.thread-preview-icon {
+    flex-shrink: 0;
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: var(--amber-soft);
+    color: var(--amber);
+}
+.thread-preview-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.thread-preview-text .tt { font-family: var(--font-serif); font-weight: 600; font-size: var(--fs-body); color: var(--paper); }
+.thread-preview-text .ss { font-family: var(--font-sans); font-size: var(--fs-utility); color: rgba(251, 249, 244, 0.6); }
+.thread-preview-chevron { flex-shrink: 0; color: rgba(251, 249, 244, 0.45); display: flex; }
+
+/* Full-screen "sing the whole song" read-through (SongPerformanceScreen.jsx)
+   — large type, generous line height, manual scroll. Deliberately plain:
+   this is for reading, not editing, so no cards/chrome beyond a header. */
+.mobile-screen.perf-screen { background: var(--paper); }
+.perf-header {
+    position: sticky;
+    top: env(safe-area-inset-top);
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    background: var(--paper);
+    border-bottom: 1px solid var(--hairline);
+    flex-shrink: 0;
+}
+.perf-title {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--font-serif);
+    font-weight: 600;
+    font-size: var(--fs-h2);
+    color: var(--ink);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.perf-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--space-5) var(--space-5) calc(var(--space-8) + env(safe-area-inset-bottom));
+}
+.perf-section { margin-bottom: var(--space-6); }
+.perf-section-label {
+    font-family: var(--font-sans);
+    font-size: var(--fs-utility);
+    font-weight: 600;
+    color: var(--amber);
+    text-transform: capitalize;
+    letter-spacing: 0.02em;
+    margin-bottom: var(--space-2);
+}
+.perf-line {
+    font-family: var(--font-serif);
+    font-size: 21px;
+    line-height: 1.6;
+    color: var(--ink);
+    margin: 0;
+}
+
+/* Long-press-to-copy the whole card's text (SongThreadScreen.jsx). A
+   dedicated keyframes rather than reusing .ne-row-copied's — that one ends
+   at `background: transparent`, correct for a plain .ne-row (no background
+   of its own), but this card has an explicit white background, so ending
+   there would flicker to transparent for a frame before the class comes off. */
+@keyframes thread-card-copy-flash {
+    0% { background: var(--amber-soft); }
+    100% { background: #FFFFFF; }
+}
+.thread-card-copied { animation: thread-card-copy-flash 0.6s ease-out; }
 
 .thread-card-head {
     display: flex;
@@ -4994,6 +5140,56 @@ body::before {
 }
 .mp-card.pressed .mp-row { background: #F1ECE0; }
 
+/* Drag & drop. Text selection and the long-press callout are off so holding a
+   card lifts it instead of selecting its title. While lifted the card follows
+   the finger (inline transform), floats above its siblings, and ignores
+   pointer hit-testing so the drop target underneath can be found. */
+.mp-card { -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
+.mp-card.dragging {
+    z-index: 30;
+    pointer-events: none;
+    transition: none;
+    box-shadow: var(--sh-3);
+    opacity: 0.96;
+}
+.mp-card.drop-ready { outline: 2px dashed var(--amber); outline-offset: -2px; }
+.mp-card.drop-active {
+    outline: 2px solid var(--amber);
+    outline-offset: -2px;
+    background: var(--amber-soft);
+    transform: scale(1.02);
+}
+.mp-card.drop-active .mp-row { background: var(--amber-soft); }
+
+/* Where a reorder drop will land: a bar in the gap above/below the card,
+   drawn as a hard shadow so it needs no layout shift (which would move rows
+   out from under the finger mid-drag). The card's own box-shadow is kept. */
+.mp-card.mark-before { box-shadow: 0 -7px 0 -1px var(--amber), var(--card-elev); }
+.mp-card.mark-after  { box-shadow: 0 7px 0 -1px var(--amber), var(--card-elev); }
+
+/* Album screen's "take it out" target — replaces the FAB while a track is
+   being dragged. */
+.mp-dropzone {
+    position: absolute;
+    left: var(--space-4);
+    right: var(--space-4);
+    bottom: calc(var(--space-5) + env(safe-area-inset-bottom));
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    padding: var(--space-4);
+    border-radius: 20px;
+    border: 2px dashed var(--amber);
+    background: #FFFFFF;
+    color: var(--amber);
+    font-family: var(--font-sans);
+    font-size: var(--fs-body);
+    font-weight: 500;
+}
+.mp-dropzone.active { border-style: solid; background: var(--amber-soft); }
+
 .mp-row-delete-action {
     position: absolute;
     top: 0;
@@ -5036,6 +5232,29 @@ body::before {
 .mp-thumb-svg { width: 100%; height: 100%; }
 .mp-thumb-svg line { stroke: var(--thread); stroke-width: 3; opacity: 0.5; }
 .mp-thumb-svg circle { fill: var(--thread); opacity: 0.7; }
+
+.mp-thumb-album {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--amber-soft);
+    color: var(--amber);
+}
+
+.mp-album-delete {
+    align-self: center;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-top: var(--space-4);
+    padding: var(--space-2-5) var(--space-4);
+    background: none;
+    border: none;
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    color: var(--rose);
+    cursor: pointer;
+}
 
 .mp-row-body { flex: 1; min-width: 0; }
 .mp-row-title {
@@ -5143,31 +5362,14 @@ body::before {
     flex: 1;
     min-width: 0;
 }
-/* Was "···" (ellipsis) wired straight to delete — the ellipsis glyph is
-   the system-wide signal for "show me a menu," and this had no menu
-   behind it, it deleted the note on tap (behind a confirm()). Tapping the
-   universal "more options" icon and getting an immediate destructive
-   action instead of a menu is a real convention break, not a styling
-   nit. Simplest correct fix: use the same 🗑 this app already uses for
-   delete everywhere else (MobileProjectsScreen, home.js) instead of
-   inventing a menu for a single action — consistent icon language instead
-   of a false "more options" promise. */
-/* "···" in the editor header — delete lives behind it now, not as a bare
-   trash icon next to "Hecho". */
-.ne-menu-btn {
-    margin-left: auto;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 40px;
-    min-height: 44px;
-    background: none;
-    border: none;
-    color: var(--muted);
-    font-size: var(--fs-h2);
-    line-height: 1;
-    cursor: pointer;
-}
+/* .ne-menu-btn ("···" in the editor header) is gone — it only ever held one
+   action (delete, behind a confirm()), which is exactly the "more options"
+   icon promising a menu it didn't have that an earlier pass here already
+   flagged as a convention break. Rather than keep fixing that same tension
+   (bare trash icon → "···" pretending to be a menu → now this), delete
+   moved into the FAB's own pill stack (see NoteEditorScreen.jsx), which
+   genuinely is a menu — one less tappable thing in the header, same action
+   reachable from a surface that already means "more actions here". */
 
 .ne-done {
     display: flex;
@@ -5230,6 +5432,16 @@ body::before {
    before the toolbar. */
 .ne-row + .ne-row { margin-top: 8px; }
 .ne-row-dimmed { opacity: 0.25; }
+
+/* Fires alongside the "Copiado" toast on a long-press copy (see
+   NoteEditorScreen.jsx's handleLongPressCopy) — a toast alone is easy to
+   miss since a long-press keeps your eyes on the line, not the bottom of
+   the screen; this answers "did that work?" right where you're looking. */
+@keyframes ne-row-copy-flash {
+    0% { background: var(--amber-soft); }
+    100% { background: transparent; }
+}
+.ne-row-copied { animation: ne-row-copy-flash 0.6s ease-out; }
 
 /* Live the instant the wake-word + comma/colon is typed (see
    MUSE_COMMAND_RE) — the row visually becomes a message-to-the-muse
@@ -5969,6 +6181,17 @@ body::before {
    against or bleed through. Discarding just swaps the next queued
    candidate into this same slot (MusePopover.jsx's handleDiscard). */
 .mp-deck { position: relative; }
+/* The one-line diagnosis above the deck (SURGEON's "qué estaba roto",
+   ARCHITECT's own reasoning) — a caption for the cards below, not prose on
+   its own, so it's deliberately lighter than .mp-answer's full-weight
+   OPEN_REFERENCE treatment (same muted/italic/secondary pattern as
+   .mp-deck-empty and .mp-wb-note, this sheet's existing "small aside" style). */
+.mp-surgeon-diagnosis {
+    font-style: italic;
+    font-size: var(--fs-secondary);
+    color: var(--muted);
+    margin-bottom: var(--space-2);
+}
 .mp-deck-empty {
     font-family: var(--font-body);
     font-style: italic;
@@ -6399,6 +6622,13 @@ body::before {
 }
 .fab-menu-pill-dark .fab-menu-pill-icon { color: var(--amber); }
 
+/* Same "label stays dark, only the destructive bit reads red" treatment as
+   .ts-row-danger — a pill in the FAB's own stack, not a separate menu, but
+   still needs to read as the odd one out (delete) among Baúl/Variante/
+   Herramientas (open a tool). */
+.fab-menu-pill-danger .fab-menu-pill-label { color: var(--rose); }
+.fab-menu-pill-danger .fab-menu-pill-icon { color: var(--rose); }
+
 /* Small colored circle behind a light pill's icon — Tools (indigo/chord,
    matches the desktop chord-progression identity) and Variant (thread
    green, matches the main-thread edge color) each get their own accent so
@@ -6672,6 +6902,54 @@ body::before {
 }
 .attach-option:disabled { opacity: 0.5; cursor: default; }
 .attach-option .tt { font-family: var(--font-sans); font-size: var(--fs-body); font-weight: 500; color: var(--ink); flex: 1; }
+
+/* A chooser option that also carries a tap-to-explain (i) button (see
+   MobileResourcesScreen.jsx's NewResourceChooser) — a real nested button
+   next to the pick action, not inside it, same "div role=button, not a
+   real <button>, so it can host an independently-tappable child" fix
+   ProjectRow's own row needed. */
+/* Explicit width, not auto — a flex item with no width shrink-wraps to its
+   own content under .baul-sheet-body's align-items:center, so without this
+   each option row sized itself off its own label length instead of the
+   sheet's real width (visible as mismatched margins/row sizes between
+   "Escribir un recurso" and "Importar texto", reported 2026-10-01). The
+   nested .attach-option's own width:100% needs a definite-width parent to
+   resolve against, same as it already gets everywhere .attach-option is
+   used WITHOUT this wrapper (BaulSheet.jsx, MobileProjectsScreen.jsx). */
+.attach-option-wrap { width: 100%; margin-bottom: var(--space-2-5); }
+.attach-option-wrap .attach-option-row { margin-bottom: 0; gap: 0; padding-right: var(--space-2); }
+.attach-option-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    cursor: pointer;
+}
+.attach-option-info-btn {
+    flex-shrink: 0;
+    width: 30px;
+    height: 30px;
+    margin-left: var(--space-2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 50%;
+    background: none;
+    color: var(--muted);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+.attach-option-info-btn:active { background: var(--bg-deep); color: var(--ink); }
+.attach-option-desc {
+    margin: var(--space-1-5) 0 0;
+    padding: 0 var(--space-3-5);
+    font-family: var(--font-sans);
+    font-size: var(--fs-utility);
+    line-height: 1.5;
+    color: var(--muted);
+}
 .aic {
     width: 34px;
     height: 34px;
@@ -7123,3 +7401,802 @@ body::before {
 .mobile-fab-spinner { width: 20px; height: 20px; color: var(--paper); }
 .thread-insert-spinner { width: 11px; height: 11px; border-width: 1.5px; }
 
+
+/* ─── Baúl — glass cabinet ─────────────────────────────────────────────────
+   A pane that lives to the LEFT of the song screen (src/mobile/BaulCabinet.jsx,
+   slid in by useCabinetSwipe). A display case: shelves of the things the
+   artist put in — paper notes, framed photos, documents — behind glass. Only
+   inputs are shown, never the extracted ADN. */
+
+.thread-body { touch-action: pan-y; } /* horizontal moves belong to the cabinet swipe */
+
+.cab-pane {
+    position: absolute;
+    inset: 0;
+    z-index: 40;
+    background: var(--paper-deeper);
+    box-shadow: 8px 0 24px rgba(29, 28, 26, 0.18);
+    transition: transform 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+    touch-action: pan-y;
+    pointer-events: none; /* away = not there: never steals a tap from the song screen */
+}
+.cab-pane.open, .cab-pane.dragging { pointer-events: auto; }
+.cab-pane.dragging { transition: none; }
+
+/* Left-edge handle — the swipe is the fast path, this is the discoverable one. */
+.cab-handle {
+    position: absolute;
+    left: 0;
+    top: 46%;
+    z-index: 4;
+    width: 22px;
+    height: 72px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 1.5px solid rgba(255, 255, 255, 0.7);
+    border-left: none;
+    border-radius: 0 14px 14px 0;
+    background: linear-gradient(160deg, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.35));
+    color: var(--amber);
+    box-shadow: var(--card-elev);
+    cursor: pointer;
+}
+
+.cab-screen {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    padding-top: env(safe-area-inset-top);
+}
+.cab-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding: var(--space-4) var(--space-4) var(--space-3);
+}
+.cab-title { font-family: var(--font-serif); font-weight: 600; font-size: var(--fs-h1); color: var(--ink); }
+.cab-sub { font-family: var(--font-sans); font-size: var(--fs-secondary); color: var(--muted); margin-top: 2px; }
+.cab-close {
+    flex-shrink: 0;
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 50%;
+    background: #FFFFFF;
+    color: var(--ink);
+    box-shadow: var(--card-elev);
+    cursor: pointer;
+}
+.cab-body { flex: 1; overflow-y: auto; padding: 0 var(--space-4) calc(var(--space-8) + env(safe-area-inset-bottom)); }
+
+/* The case: a wooden frame around tinted glass. */
+.cab-glass {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    padding: var(--space-3) var(--space-3) var(--space-2);
+    border-radius: 18px;
+    border: 7px solid #6B5638;
+    background: linear-gradient(180deg, rgba(232, 240, 240, 0.7), rgba(206, 220, 222, 0.55));
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.5), inset 0 8px 24px rgba(29, 28, 26, 0.12), var(--card-elev);
+    overflow: hidden;
+}
+/* Diagonal glare across the glass, over everything but not clickable. */
+.cab-shine {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(115deg, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0) 30%, rgba(255, 255, 255, 0) 62%, rgba(255, 255, 255, 0.18) 78%, rgba(255, 255, 255, 0) 90%);
+}
+
+.cab-shelf {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr)); /* SHELF_SIZE in BaulCabinet.jsx */
+    align-items: end;
+    gap: var(--space-3);
+    min-height: 118px;
+    padding: var(--space-3) var(--space-1) 0;
+}
+.cab-plank {
+    position: absolute;
+    left: -12px;
+    right: -12px;
+    bottom: 0;
+    height: 12px;
+    background: linear-gradient(180deg, #8A6E47, #6B5638);
+    box-shadow: 0 3px 6px rgba(29, 28, 26, 0.25);
+}
+
+.cab-tile {
+    position: relative;
+    z-index: 1; /* above the plank */
+    height: 92px;
+    margin-bottom: 12px; /* stands on the plank */
+    padding: 0;
+    border: none;
+    text-align: left;
+    cursor: pointer;
+    box-shadow: 0 6px 8px -4px rgba(29, 28, 26, 0.4);
+    -webkit-tap-highlight-color: transparent;
+}
+.cab-tile:active { transform: scale(0.97); }
+.cab-tilt-0 { transform: rotate(-1.6deg); }
+.cab-tilt-1 { transform: rotate(1.2deg); }
+.cab-tilt-2 { transform: rotate(-0.4deg); }
+
+.cab-note {
+    padding: 9px 9px 6px;
+    background: #FFFBEF;
+    border-radius: 3px;
+    background-image: repeating-linear-gradient(180deg, transparent 0 15px, rgba(184, 132, 42, 0.16) 15px 16px);
+}
+.cab-note-text {
+    display: -webkit-box;
+    -webkit-line-clamp: 5;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    font-family: var(--font-serif);
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--ink);
+}
+
+.cab-photo {
+    background: #FFFFFF;
+    padding: 5px;
+    border-radius: 2px;
+}
+.cab-photo img, .cab-photo-pending {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-deep);
+    color: var(--muted);
+}
+
+.cab-doc {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    padding: var(--space-2);
+    background: var(--amber-soft);
+    color: var(--amber);
+    border-radius: 3px;
+    border-top: 5px solid var(--amber);
+}
+.cab-doc-name {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-sans);
+    font-size: 11px;
+    color: var(--ink);
+}
+
+.cab-add {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    background: rgba(255, 255, 255, 0.5);
+    border: 1.5px dashed var(--amber);
+    border-radius: 6px;
+    color: var(--amber);
+    box-shadow: none;
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+}
+
+.cab-empty {
+    margin: var(--space-4) var(--space-2) 0;
+    text-align: center;
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    line-height: 1.5;
+    color: var(--muted);
+}
+
+/* Full view of one shelf item. */
+.cab-viewer {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-4);
+    background: rgba(29, 28, 26, 0.5);
+}
+.cab-viewer-card {
+    position: relative;
+    width: 100%;
+    max-height: 82%;
+    overflow-y: auto;
+    padding: var(--space-5) var(--space-4) var(--space-4);
+    border-radius: 20px;
+    background: #FFFFFF;
+    box-shadow: var(--card-elev);
+}
+.cab-viewer-close { position: absolute; top: var(--space-2); right: var(--space-2); box-shadow: none; background: var(--bg-deep); }
+.cab-viewer-text { margin: 0 0 var(--space-3); padding-right: 40px; white-space: pre-wrap; font-family: var(--font-serif); font-size: var(--fs-body); line-height: 1.55; color: var(--ink); }
+.cab-viewer-img { display: block; max-width: 100%; max-height: 60vh; margin: var(--space-4) auto 0; border-radius: 6px; }
+.cab-viewer-open { display: inline-block; margin-bottom: var(--space-3); font-family: var(--font-sans); font-size: var(--fs-body); color: var(--amber); font-weight: 600; }
+.cab-viewer-date { font-family: var(--font-sans); font-size: var(--fs-utility); color: var(--muted); }
+
+/* ─── Resources ("Recursos") ─────────────────────────────────────────────
+   Artist-level library screen (src/resources/MobileResourcesScreen.jsx) +
+   its create/edit sheet (ResourceEditorSheet.jsx). Reuses the projects
+   screen's header/search/loading/empty chrome (.mp-*) and the Baúl sheet's
+   scrim/grabber/note-input/confirm chrome — new classes only for what's
+   genuinely different: the resource card and the chip-based type/tag/
+   folder pickers. */
+
+.mobile-screen.res-screen { background: var(--paper-deeper); }
+.res-body { gap: var(--space-3); }
+
+.res-chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin-bottom: var(--space-1);
+}
+/* pan-x so native horizontal scroll here isn't fought by the pager
+   ancestor's own pan-y (see useSwipePager.js's NESTED_GESTURE_SELECTOR,
+   which also stops the pager's JS layer from engaging on this element). */
+.res-folder-filter { flex-wrap: nowrap; overflow-x: auto; touch-action: pan-x; padding-bottom: 2px; }
+/* Now lives inside .mp-header (see MobileResourcesScreen.jsx) so it's
+   always reachable without scrolling, not a separate flow element below
+   the sticky header that a long list made hard to scroll back up to. */
+.mp-header .res-folder-filter { margin-top: var(--space-3); }
+
+.res-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+    padding: var(--space-1-5) var(--space-3);
+    border-radius: 999px;
+    border: 1.5px solid var(--card-border, var(--hairline));
+    background: #FFFFFF;
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    color: var(--graphite);
+    cursor: pointer;
+    white-space: nowrap;
+}
+.res-chip-active { background: var(--amber); border-color: var(--amber); color: #FFFFFF; }
+.res-chip-add { color: var(--amber); border-style: dashed; background: none; }
+
+.res-new-folder { display: inline-flex; align-items: center; gap: var(--space-1); }
+.res-new-folder-input {
+    width: 100px;
+    padding: var(--space-1-5) var(--space-2);
+    border-radius: 999px;
+    border: 1.5px solid var(--amber);
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+}
+.res-new-folder button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border: none;
+    border-radius: 50%;
+    background: var(--amber);
+    color: #FFFFFF;
+    cursor: pointer;
+}
+/* FolderChipPicker.jsx — a failed "create folder" surfaces right here,
+   inline, since this picker always lives inside a full-screen sheet that
+   visually covers whatever error banner the screen underneath renders. */
+.res-folder-error { margin: var(--space-1-5) 0 0; font-family: var(--font-sans); font-size: var(--fs-utility); color: var(--rose); }
+
+/* The resource card — a raised block like .mp-card, but sized to variable-
+   height body text instead of a fixed thumb+title row. */
+.res-card {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: var(--space-3-5);
+    border-radius: 16px;
+    background: #FFFFFF;
+    border: var(--card-border);
+    box-shadow: var(--card-elev);
+    cursor: pointer;
+}
+.res-card:active { transform: scale(0.98); }
+.res-card-body {
+    font-family: var(--font-serif);
+    font-size: var(--fs-body);
+    line-height: 1.5;
+    color: var(--ink);
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+/* Its own row, between the body text and the type/origin line — see
+   ResourceCard's own comment for why it's not folded into .res-card-tags. */
+.res-card-folders { display: flex; flex-wrap: wrap; gap: var(--space-1-5); margin-top: var(--space-2); }
+.res-card-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-top: var(--space-2);
+    font-family: var(--font-sans);
+    font-size: var(--fs-utility);
+    color: var(--muted);
+}
+.res-card-type {
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: var(--amber-soft);
+    color: var(--amber);
+    font-weight: 600;
+}
+.res-card-origin { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* "p. 214, l. 6" — physical location, separate from .res-card-origin
+   ("which book"). Its own small badge so it reads as a jump-back-here
+   coordinate, not just more free-text metadata. */
+.res-card-loc { flex-shrink: 0; padding: 1px 7px; border-radius: 999px; background: var(--bg-deep); font-weight: 600; }
+.res-card-tags { display: flex; flex-wrap: wrap; gap: var(--space-1-5); margin-top: var(--space-2); }
+.res-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--bg-deep);
+    font-family: var(--font-sans);
+    font-size: var(--fs-utility);
+    color: var(--graphite);
+}
+.res-tag-folder { background: var(--amber-soft); color: var(--amber); }
+
+/* Editor sheet — reuses .baul-sheet's scrim/card shell. */
+.res-editor-sheet { max-height: 92vh; }
+.res-editor-body { align-items: stretch; text-align: left; }
+.res-editor-body .attach-title { align-self: center; }
+.res-body-input {
+    width: 100%;
+    min-height: 90px;
+    font-family: var(--font-serif);
+    font-size: var(--fs-body);
+    line-height: 1.5;
+    color: var(--ink);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    padding: var(--space-3);
+    margin-bottom: var(--space-3);
+    background: var(--surface);
+    resize: vertical;
+}
+.res-field-label {
+    font-family: var(--font-sans);
+    font-size: var(--fs-utility);
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin: var(--space-3) 0 var(--space-1-5);
+}
+.res-text-input {
+    width: 100%;
+    padding: var(--space-2-5) var(--space-3);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    font-family: var(--font-sans);
+    font-size: var(--fs-body);
+    color: var(--ink);
+    background: var(--surface);
+}
+/* Page + line side by side — two short, independent values, not one field
+   worth a full-width row each. */
+.res-source-loc-row { display: flex; gap: var(--space-2); }
+.res-source-loc-input { width: 0; flex: 1; }
+.res-save-btn { margin-top: var(--space-5); }
+.res-delete-btn { margin-top: var(--space-4); }
+
+/* Resource picker sheet — reached from the note editor's keyboard bar
+   (src/resources/ResourcePickerSheet.jsx). Reuses .baul-sheet's shell. */
+.res-picker-sheet { max-height: 78vh; display: flex; flex-direction: column; }
+.res-picker-body { display: flex; flex-direction: column; min-height: 0; padding: var(--space-2) var(--space-4) calc(var(--space-4) + env(safe-area-inset-bottom)); }
+.res-picker-search { margin: var(--space-2) 0 var(--space-3); }
+.res-picker-list { overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-2); }
+.res-picker-empty { text-align: center; padding: var(--space-5) var(--space-3); font-family: var(--font-sans); font-size: var(--fs-secondary); color: var(--muted); }
+.res-picker-row {
+    display: flex;
+    align-items: stretch;
+    gap: var(--space-2);
+    border-radius: var(--r-md);
+    border: 1px solid var(--hairline);
+    background: var(--surface);
+    overflow: hidden;
+}
+.res-picker-text {
+    flex: 1;
+    text-align: left;
+    padding: var(--space-2-5) var(--space-3);
+    border: none;
+    background: none;
+    font-family: var(--font-serif);
+    font-size: var(--fs-secondary);
+    line-height: 1.4;
+    color: var(--ink);
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.res-picker-musa {
+    flex-shrink: 0;
+    width: 44px;
+    border: none;
+    border-left: 1px solid var(--hairline);
+    background: var(--amber-soft);
+    color: var(--amber);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Resource import (paste → segment → review) — ResourceImportSheet.jsx.
+   Reuses .res-editor-sheet's shell + .res-body-input's textarea look. */
+.res-import-input { min-height: 160px; }
+.res-import-hint { font-family: var(--font-sans); font-size: var(--fs-utility); color: var(--muted); margin: -var(--space-2) 0 var(--space-3); }
+
+/* Photo-instead-of-paste (ResourceImportSheet.jsx) — fresh, mobile-scaled
+   CSS rather than reusing BaulFloatNode's .baul-attach-btn/.baul-file-chip,
+   which are sized off --canvas-scale (the DESKTOP canvas's own fluid-zoom
+   variable) and would scale inconsistently with the rest of this screen. */
+.res-import-attach-btn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    padding: var(--space-3);
+    margin-bottom: var(--space-3);
+    border: 1.5px dashed var(--amber);
+    border-radius: var(--r-md);
+    background: none;
+    color: var(--amber);
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    cursor: pointer;
+}
+.res-import-attach-btn:disabled { opacity: 0.5; cursor: default; }
+/* .baul-file-chip's own font-size is scaled by --canvas-scale (the desktop
+   canvas's fluid-zoom variable) — override it here rather than let this
+   mobile chip inherit that. */
+.res-import-file-chip { margin-bottom: var(--space-3); font-size: var(--fs-secondary); padding: var(--space-2-5) var(--space-3); }
+/* Sits right under the file chip — its own field, not folded into the
+   review-step page/line pair, since it's set once up front per photo. */
+.res-import-page-input { margin-bottom: var(--space-3); }
+/* Plain-text entry into bulk mode, not another dashed attach-style button —
+   it's a secondary path off the main one-photo flow, not a peer action. */
+.res-bulk-link {
+    display: block;
+    width: 100%;
+    text-align: center;
+    padding: var(--space-2) 0 var(--space-3);
+    border: none;
+    background: none;
+    color: var(--muted);
+    font-family: var(--font-sans);
+    font-size: var(--fs-utility);
+    text-decoration: underline;
+    cursor: pointer;
+}
+.res-bulk-link:disabled { opacity: 0.5; cursor: default; }
+.res-bulk-back-link { display: block; width: 100%; text-align: center; margin-top: var(--space-2); border: none; background: none; color: var(--muted); font-family: var(--font-sans); font-size: var(--fs-utility); cursor: pointer; }
+.res-bulk-back-link:disabled { opacity: 0.5; cursor: default; }
+.res-bulk-list { display: flex; flex-direction: column; gap: var(--space-2); margin: 0 0 var(--space-3); max-height: 40vh; overflow-y: auto; }
+.res-bulk-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-2-5);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    background: var(--surface);
+}
+.res-bulk-row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-sans); font-size: var(--fs-utility); color: var(--ink); }
+.res-bulk-row-page { flex-shrink: 0; width: 64px; padding: var(--space-1-5) var(--space-2); font-size: var(--fs-utility); }
+.res-import-list { display: flex; flex-direction: column; gap: var(--space-2); margin: var(--space-3) 0; max-height: 50vh; overflow-y: auto; }
+.res-import-row {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-1-5);
+    width: 100%;
+    padding: var(--space-2-5) var(--space-2-5) var(--space-2-5) var(--space-3);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    background: var(--surface);
+}
+.res-import-row-checked { border-color: var(--amber); background: var(--amber-soft); }
+/* The row's own accept/reject toggle — everything but the pencil button
+   (see the "div, not a nested button" note in ResourceImportSheet.jsx). */
+.res-import-row-main {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2-5);
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+    cursor: pointer;
+}
+.res-import-edit-btn {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    margin-top: -2px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 50%;
+    background: none;
+    color: var(--muted);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+.res-import-edit-btn:active { background: var(--bg-deep); color: var(--ink); }
+
+/* A candidate open for editing — column layout instead of the row's normal
+   checkbox+text+pencil arrangement, same fields as ResourceEditorSheet
+   (body/type/tags/origin) but scaled down since it's editing a candidate,
+   not yet a real resource (no folders — that's picked once for the whole
+   accepted batch below, not per candidate). */
+.res-import-row-editing { flex-direction: column; align-items: stretch; gap: var(--space-2); cursor: default; }
+.res-import-edit-body { min-height: 70px; margin-bottom: 0; font-size: var(--fs-secondary); }
+.res-import-edit-field { padding: var(--space-2) var(--space-2-5); }
+.res-import-edit-field-label { margin: var(--space-2) 0 var(--space-1); }
+.res-import-edit-done {
+    align-self: flex-end;
+    padding: var(--space-1-5) var(--space-4);
+    border: none;
+    border-radius: 999px;
+    background: var(--ink);
+    color: var(--paper);
+    font-family: var(--font-sans);
+    font-size: var(--fs-utility);
+    font-weight: 600;
+    cursor: pointer;
+}
+.res-import-edit-done:disabled { opacity: 0.5; cursor: default; }
+.res-import-check {
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    margin-top: 2px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    border: 1.5px solid var(--hairline);
+    background: #FFFFFF;
+    color: var(--amber);
+}
+.res-import-row-checked .res-import-check { border-color: var(--amber); background: var(--amber); color: #FFFFFF; }
+.res-import-row-body { flex: 1; min-width: 0; }
+.res-import-row-text { display: block; font-family: var(--font-serif); font-size: var(--fs-secondary); line-height: 1.4; color: var(--ink); }
+.res-import-row-meta { display: flex; flex-wrap: wrap; gap: var(--space-1-5); margin-top: var(--space-1-5); font-family: var(--font-sans); font-size: var(--fs-utility); }
+.res-import-row-folders { display: flex; flex-wrap: wrap; gap: var(--space-1-5); margin-top: var(--space-1-5); }
+
+/* Manage-folders entry point (folder-filter row) + sheet
+   (ManageFoldersSheet.jsx) — the one place resourcesData.js's deleteFolder
+   is actually wired to anything. */
+.res-manage-folders-btn {
+    flex-shrink: 0;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1.5px solid var(--card-border, var(--hairline));
+    border-radius: 50%;
+    background: #FFFFFF;
+    color: var(--muted);
+    cursor: pointer;
+}
+.res-manage-folders-body { align-items: stretch; text-align: left; }
+.res-manage-folders-body .attach-title { align-self: center; margin-bottom: var(--space-3); }
+.res-manage-folders-list { display: flex; flex-direction: column; gap: var(--space-2); }
+.res-manage-folder-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-height: 48px;
+    padding: 0 var(--space-1) 0 var(--space-3);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    background: var(--surface);
+}
+.res-manage-folder-name {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-family: var(--font-sans);
+    font-size: var(--fs-body);
+    color: var(--ink);
+}
+.res-manage-folder-delete {
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: none;
+    color: var(--rose);
+    cursor: pointer;
+}
+.res-manage-folder-confirm-text { flex: 1; font-family: var(--font-sans); font-size: var(--fs-utility); color: var(--ink); line-height: 1.4; padding: var(--space-2) 0; }
+.res-manage-folder-confirm-actions { flex-shrink: 0; display: flex; gap: var(--space-1); }
+.res-manage-folder-cancel, .res-manage-folder-confirm-btn {
+    padding: var(--space-1-5) var(--space-3);
+    border: none;
+    border-radius: 999px;
+    font-family: var(--font-sans);
+    font-size: var(--fs-utility);
+    font-weight: 600;
+    cursor: pointer;
+}
+.res-manage-folder-cancel { background: var(--bg-deep); color: var(--graphite); }
+.res-manage-folder-confirm-btn { background: var(--rose); color: #FFFFFF; }
+.res-manage-folder-confirm-btn:disabled, .res-manage-folder-cancel:disabled { opacity: 0.5; cursor: default; }
+
+/* ── Collaboration: presence stack (thread header) + collaborators sheet ── */
+.thread-presence-stack {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    margin-right: var(--space-1);
+    border: none;
+    background: none;
+    cursor: pointer;
+    padding: 0;
+}
+.thread-presence-avatar {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-sans);
+    font-size: 11px;
+    font-weight: 700;
+    color: #FFFFFF;
+    background: var(--accent);
+    border: 2px solid var(--paper-deeper);
+    margin-left: -8px;
+}
+.thread-presence-avatar:first-child { margin-left: 0; }
+.thread-presence-more { background: var(--muted); }
+
+.collab-sheet-body { align-items: stretch; text-align: left; }
+.collab-sheet-body .attach-title {
+    align-self: center;
+    display: flex;
+    align-items: center;
+    gap: var(--space-1-5);
+}
+.collab-sheet-body .attach-sub { align-self: center; text-align: center; }
+.collab-list { display: flex; flex-direction: column; gap: var(--space-2); margin-bottom: var(--space-3); }
+.collab-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2-5);
+    min-height: 52px;
+    padding: var(--space-1-5) var(--space-1) var(--space-1-5) var(--space-3);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    background: var(--surface);
+}
+.collab-avatar {
+    flex-shrink: 0;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-sans);
+    font-weight: 700;
+    font-size: var(--fs-utility);
+    color: #FFFFFF;
+    background: var(--accent);
+}
+.collab-row-info { flex: 1; display: flex; flex-direction: column; gap: 1px; }
+.collab-row-name { font-family: var(--font-sans); font-size: var(--fs-body); color: var(--ink); }
+.collab-row-role { font-family: var(--font-sans); font-size: var(--fs-utility); color: var(--muted); text-transform: capitalize; }
+.collab-row-remove {
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: none;
+    color: var(--rose);
+    cursor: pointer;
+}
+.collab-row-remove:disabled { opacity: 0.5; cursor: default; }
+
+.collab-divider { height: 1px; background: var(--hairline); margin: var(--space-3) 0; }
+.collab-invites-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    margin-bottom: var(--space-2);
+}
+.collab-invites-label { margin-bottom: 0 !important; max-width: none; }
+.collab-new-invite-btn {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: var(--space-1-5) var(--space-3);
+    border: none;
+    border-radius: 999px;
+    background: var(--accent);
+    color: #FFFFFF;
+    font-family: var(--font-sans);
+    font-size: var(--fs-utility);
+    font-weight: 600;
+    cursor: pointer;
+}
+.collab-new-invite-btn:disabled { opacity: 0.5; cursor: default; }
+.collab-invite-list { display: flex; flex-direction: column; gap: var(--space-1-5); }
+.collab-invite-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    min-height: 44px;
+    padding: 0 var(--space-1) 0 var(--space-3);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    background: var(--surface);
+}
+.collab-invite-code {
+    flex: 1;
+    font-family: var(--font-sans);
+    font-size: var(--fs-utility);
+    color: var(--muted);
+    letter-spacing: 0.02em;
+}
+.collab-invite-copy, .collab-invite-revoke {
+    flex-shrink: 0;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: none;
+    color: var(--muted);
+    cursor: pointer;
+}
+.collab-invite-revoke { color: var(--rose); }

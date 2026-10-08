@@ -121,9 +121,9 @@ function nearestSnap(h, pts) {
 // back down to collapse — same interaction as an iOS bottom sheet. Voice
 // memos belong to the whole note (see lineAudioData.js); this replaced the
 // old undiscoverable long-press-the-gutter gesture and the per-line badges.
-export default function NoteAudioBar({ sectionId, songId, memos, onRecorded, onDeleted, onRenamed, onRecordingChange }) {
+export default function NoteAudioBar({ sectionId, songId, memos, startExpanded, onRecorded, onDeleted, onRenamed, onRecordingChange }) {
   const [pts, setPts] = useState(snapPoints);
-  const [height, setHeight] = useState(pts.collapsed);
+  const [height, setHeight] = useState(() => (startExpanded ? pts.half : pts.collapsed));
   const [dragging, setDragging] = useState(false);
   const [recording, setRecording] = useState(false);
   const dragRef = useRef(null); // { startY, startHeight, moved }

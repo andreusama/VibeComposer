@@ -6,47 +6,66 @@
 // drift between the two.
 
 import { supabase } from '../utils/supabaseClient.js';
-
-// A cold mobile launch can stall this (waking WiFi/cellular radio, DNS, or a
-// silent token refresh riding along on the first request) with no error —
-// fetch() has no built-in timeout, so an unlucky first request just hangs
-// forever and the caller's loading spinner never resolves. A page refresh
-// "fixes" it only because the connection/token is warm by then. Race against
-// a hard timeout instead so the caller always gets a settled result to show
-// (and retry) rather than an infinite spinner.
-const LOAD_TIMEOUT_MS = 12000;
-
-function withTimeout(promise, ms, message) {
-  let timer;
-  const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new Error(message)), ms);
-  });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
-}
+import { withTimeout } from '../utils/withTimeout.js';
 
 export async function loadProjectSummaries() {
   try {
-    return await withTimeout(
-      fetchProjectSummaries(),
-      LOAD_TIMEOUT_MS,
-      "Couldn't reach the server — check your connection and try again."
-    );
+    return await withTimeout(fetchProjectSummaries());
   } catch (err) {
-    return { songs: [], error: err.message };
+    return { songs: [], albums: [], error: err.message };
   }
 }
 
-async function fetchProjectSummaries() {
-  const { data, error } = await supabase
-    .from('songs')
-    .select('id, title, updated_at, lyric_language, lyric_dialect')
-    .order('updated_at', { ascending: false });
+// One song by id, same column shape + preview defaults as a row out of
+// loadProjectSummaries — used when a song needs to become state.activeSong
+// without having gone through the normal projects-list flow first, e.g.
+// landing straight on a shared song after redeeming a collaboration invite
+// (see src/screens/inviteFlow.js). RLS (is_song_participant) is what
+// actually decides whether this resolves at all.
+export async function loadSongById(id) {
+  try {
+    const { data, error } = await withTimeout(
+      supabase.from('songs').select(`${SONG_COLUMNS}, album_id, track_position, sort_order`).eq('id', id).single()
+    );
+    if (error) return { song: null, error: error.message };
+    return { song: { ...data, lineCount: 0, progressionCount: 0, nodeCount: 0, previewNodes: [], previewLinks: [] }, error: null };
+  } catch (err) {
+    return { song: null, error: err.message };
+  }
+}
 
-  if (error) return { songs: [], error: error.message };
+// user_id is the actual DB owner (songs_delete/invite-management's RLS
+// check — see is_song_owner in migration_project_collaboration.sql), needed
+// client-side so the UI knows who gets owner-only controls without a
+// separate round trip for it.
+const SONG_COLUMNS = 'id, title, updated_at, lyric_language, lyric_dialect, user_id';
+
+async function fetchProjectSummaries() {
+  // album_id/track_position come from migration_albums.sql, which creates
+  // the albums table in the same script — so the two queries below either
+  // both succeed or both belong to a not-yet-migrated DB, and nothing about
+  // one depends on the other's result. Run them together instead of paying
+  // two sequential round trips on every project-screen load.
+  const [songsRes, albumsRes] = await Promise.all([
+    supabase.from('songs').select(`${SONG_COLUMNS}, album_id, track_position, sort_order`).order('updated_at', { ascending: false }),
+    supabase.from('albums').select('id, title, updated_at, sort_order').order('updated_at', { ascending: false }),
+  ]);
+  let { data, error } = songsRes;
+  let albums = albumsRes.data || [];
+
+  if (error) {
+    // Pre-migration DB: the plain columns still work (every song then reads
+    // as a single, no albums) rather than taking the whole projects screen
+    // down over a pending migration. The albums table isn't there either.
+    ({ data, error } = await supabase.from('songs').select(SONG_COLUMNS).order('updated_at', { ascending: false }));
+    albums = [];
+  }
+
+  if (error) return { songs: [], albums: [], error: error.message };
 
   const withLines = await attachLineCounts(data);
   const songs = await attachPreviewData(withLines);
-  return { songs, error: null };
+  return { songs, albums, error: null };
 }
 
 // One extra round trip to show a lyrics status chip with the same weight as
@@ -153,13 +172,106 @@ export async function deleteSong(id) {
 // title is overridable so debug-only flows (see MuseEyeScreen's "new mock
 // song") can mark what they create — a real song row, nothing fake about
 // it, just clearly labeled so it never gets mistaken for real work.
-export async function createProject(userId, title = 'Sin título') {
+export async function createProject(userId, title = 'Sin título', { albumId = null, trackPosition = 0, sortOrder = 0 } = {}) {
+  // album_id/track_position/sort_order are only sent when they matter, so
+  // creating a plain single keeps working even before migration_albums.sql
+  // has run.
+  const albumFields = albumId
+    ? { album_id: albumId, track_position: trackPosition }
+    : (sortOrder ? { sort_order: sortOrder } : {});
   const { data: song, error } = await supabase
     .from('songs')
-    .insert({ user_id: userId, title })
+    .insert({ user_id: userId, title, ...albumFields })
     .select()
     .single();
 
   if (error) return { error: error.message };
   return { song: { ...song, lineCount: 0, progressionCount: 0, nodeCount: 0, previewNodes: [], previewLinks: [] } };
+}
+
+// ─── Albums ─────────────────────────────────────────────────────────────────
+// An album is only a container — a song with album_id = null is a single.
+// Its tracks are just the songs pointing at it (state.songs filtered by
+// album_id), so there's no per-album song list to keep in sync.
+
+export async function createAlbum(userId, title = 'Sin título', sortOrder = 0) {
+  const { data, error } = await supabase
+    .from('albums')
+    .insert({ user_id: userId, title, ...(sortOrder ? { sort_order: sortOrder } : {}) })
+    .select()
+    .single();
+  if (error) return { error: error.message };
+  return { album: data };
+}
+
+export async function renameAlbum(id, title) {
+  return supabase.from('albums').update({ title }).eq('id', id);
+}
+
+// Deleting an album keeps its songs — `songs.album_id` is `on delete set
+// null` (migration_albums.sql), so they simply become singles again.
+export async function deleteAlbum(id) {
+  return supabase.from('albums').delete().eq('id', id);
+}
+
+export function tracksOfAlbum(songs, albumId) {
+  return songs
+    .filter((s) => s.album_id === albumId)
+    .sort((a, b) => (a.track_position || 0) - (b.track_position || 0));
+}
+
+// Moves a song into an album (albumId) or back out to being a single (null).
+// Moving in appends it as the last track (trackPosition); moving out puts it
+// at the top of the projects list (sortOrder) instead of leaving it at a
+// stale value that would collide with the current order.
+export async function moveSongToAlbum(songId, albumId, { trackPosition = 0, sortOrder = 0 } = {}) {
+  return supabase
+    .from('songs')
+    .update(albumId
+      ? { album_id: albumId, track_position: trackPosition }
+      : { album_id: null, track_position: 0, sort_order: sortOrder })
+    .eq('id', songId);
+}
+
+// Pure counterpart for the local state.songs copy, so the UI can update
+// optimistically and revert on a failed write.
+export function applySongMove(songs, songId, albumId, { trackPosition = 0, sortOrder = 0 } = {}) {
+  return songs.map((s) => {
+    if (s.id !== songId) return s;
+    return albumId
+      ? { ...s, album_id: albumId, track_position: trackPosition }
+      : { ...s, album_id: null, track_position: 0, sort_order: sortOrder };
+  });
+}
+
+export function nextTrackPosition(songs, albumId) {
+  return songs
+    .filter((s) => s.album_id === albumId)
+    .reduce((max, s) => Math.max(max, s.track_position || 0), 0) + 1;
+}
+
+// A sort_order that lands above everything in the projects list (singles and
+// albums share one order; tracks inside albums don't count).
+export function topSortOrder(songs, albums) {
+  const orders = [
+    ...songs.filter((s) => !s.album_id).map((s) => s.sort_order || 0),
+    ...albums.map((a) => a.sort_order || 0),
+  ];
+  return orders.length ? Math.min(...orders) - 1 : 0;
+}
+
+// Persists a new order after a drag. Only rows whose value actually changed
+// are written. `table`/`column` pick the projects order (songs+albums by
+// sort_order) or an album's track order (songs by track_position).
+async function writeOrder(updates) {
+  const results = await Promise.all(updates.map(({ table, id, column, value }) => supabase.from(table).update({ [column]: value }).eq('id', id)));
+  return results.find((r) => r.error)?.error || null;
+}
+
+export function saveProjectOrder(changes) {
+  return writeOrder(changes.map((c) => ({ table: c.kind === 'album' ? 'albums' : 'songs', id: c.id, column: 'sort_order', value: c.value })));
+}
+
+export function saveTrackOrder(changes) {
+  return writeOrder(changes.map((c) => ({ table: 'songs', id: c.id, column: 'track_position', value: c.value })));
 }

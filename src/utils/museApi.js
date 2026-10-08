@@ -155,8 +155,16 @@ ESE texto directamente, no archives ni des por sentada una interpretación previ
 
 === 4. MODOS DE ACTUACIÓN (elige ÚNICAMENTE UNO) ===
 
-1. SURGEON: Reemplazo o ajuste quirúrgico de un fragmento/línea concreta ("targetVerse").
-   Mantiene la métrica exacta y la acentuación del compás de la línea que sustituye.
+1. SURGEON: Corrección TÉCNICA y ACOTADA de un fragmento/línea concreta ("targetVerse") — no
+   una reescritura creativa. Antes de proponer nada, diagnostica en UNA frase concreta qué está
+   roto: métrica que no cuadra con la línea vecina/el patrón de la estrofa, una rima forzada o
+   floja, una palabra prohibida por la REGLA DE ADUANA LÉXICA, o una palabra ya usada en otra
+   parte de la nota. Luego arréglalo con el MENOR cambio posible — conserva el resto de la línea
+   (palabras, orden, imagen) tal cual; esto no es "dame otra versión de esta línea", es "arregla
+   justo lo que falla". Si lo que falla es la rima y el motor de resonancia cultural (abajo) te
+   dio una palabra obligatoria, el arreglo tiene que usar esa palabra — no inventes una rima
+   alternativa habiendo una ya verificada. Mantiene la métrica exacta y la acentuación del compás
+   de la línea que sustituye.
 2. ARCHITECT: Resolución o remate de un verso incompleto/estrofa. Mantiene la continuidad
    narrativa y rítmica.
 3. SOCRATIC: Se activa en CUATRO escenarios específicos:
@@ -274,9 +282,15 @@ material histórico se puede nombrar con honestidad (una esvástica como símbol
 fue, un campo de concentración como lugar real y su peso), pero JAMÁS en tono admirativo, ni
 como aspiración, ni maquillado de "solo estética".
 
-Para SURGEON y ARCHITECT: genera 5-6 candidatos en "suggestions" repartidos en los 3 tipos.
-No reutilices palabras significativas que ya aparezcan 1 sola vez en esta nota (salvo si ya
-aparecen 2+ veces como gancho).
+Para ARCHITECT: genera 5-6 candidatos en "suggestions" repartidos en los 3 tipos (CONTINUITY/
+CONTRAST/RESOLUTION) — aquí sí hay margen narrativo real, son continuaciones distintas, no
+arreglos de un defecto concreto.
+Para SURGEON: genera 2-3 candidatos como mucho — cada uno es UN arreglo distinto del MISMO
+defecto diagnosticado (p. ej. tres formas distintas de resolver la misma rima floja), no tres
+reescrituras con ángulos narrativos distintos. Omite "type" (o usa null) en cada uno — la
+clasificación continuidad/contraste/resolución es para ARCHITECT, no aplica a un arreglo técnico.
+Para ambos: no reutilices palabras significativas que ya aparezcan 1 sola vez en esta nota (salvo
+si ya aparecen 2+ veces como gancho).
 
 === 5. FORMATO DE SALIDA (JSON ESTRICTO DE UNA SOLA LÍNEA) ===
 Responde EXCLUSIVAMENTE con el JSON correspondiente al modo ejecutado, sin explicaciones
@@ -293,7 +307,7 @@ escribas operadores de código (&&, ||, !=, ternarios) como valor — el valor e
 string, número, booleano o null simple, nada más.
 
 SI action_type == "SURGEON" o "ARCHITECT":
-{"action_type": "SURGEON"|"ARCHITECT", "reasoning": "explicación técnica/fonética de 1 frase", "targetLineText": "línea física exacta copiada tal cual o null", "isRhymeRequest": true|false, "rhymeTargetWord": "palabra objetivo o null", "suggestions": [{"text": "verso propuesto", "type": "CONTINUITY"|"CONTRAST"|"RESOLUTION"}, "... (5-6 en total)"], "themes": ["..."]}
+{"action_type": "SURGEON"|"ARCHITECT", "reasoning": "para SURGEON: el diagnóstico técnico concreto (qué estaba roto); para ARCHITECT: explicación técnica/fonética de 1 frase", "targetLineText": "línea física exacta copiada tal cual o null", "isRhymeRequest": true|false, "rhymeTargetWord": "palabra objetivo o null", "suggestions": [{"text": "verso propuesto", "type": "CONTINUITY"|"CONTRAST"|"RESOLUTION"|null}, "... (2-3 para SURGEON, 5-6 para ARCHITECT)"], "themes": ["..."]}
 
 SI action_type == "SOCRATIC":
 {"action_type": "SOCRATIC", "reasoning": "justificación del bloqueo, fricción fonética o reflexión", "question": {"text": "pregunta concisa o apunte de estudio", "options": ["opción A", "opción B", "opción C"]}, "themes": ["..."]}
@@ -334,11 +348,12 @@ ${afterText}`;
 }
 
 // Cultural Resonance Engine's Step 4 (LLM Assembly) — renders whatever
-// buildCulturalResonance (below) produced into the prompt. Explicitly
-// scoped to ARCHITECT/WORD_BANK: since the model — not this code — makes
-// the final mode call on an unforced turn, the instruction itself tells it
-// to disregard this block entirely if SURGEON is the right answer, rather
-// than relying only on the forceMode==='SURGEON' skip upstream.
+// buildCulturalResonance (below) produced into the prompt. Scoped to
+// ARCHITECT and SURGEON (when SURGEON's diagnosed problem is the rhyme —
+// see the SURGEON prompt section, which now requires using this word
+// instead of inventing an alternative). WORD_BANK never reaches this block
+// at all (buildCulturalResonance returns null before this is ever called
+// for it) — it has its own separate, non-single-word lexicon query.
 export function describeCulturalResonance(resonance) {
     if (!resonance) return '';
     if (!resonance.enabled) {
@@ -347,7 +362,7 @@ export function describeCulturalResonance(resonance) {
     const frameLine = resonance.culturalFrame
         ? `- Marco cultural sugerido: "${resonance.culturalFrame}"${resonance.tropo ? ` (${resonance.tropo})` : ''}\n`
         : '';
-    return `\nMOTOR DE RESONANCIA CULTURAL — aplica ÚNICAMENTE si tu respuesta es ARCHITECT; si el modo correcto para este turno es SURGEON o WORD_BANK, ignora este bloque por completo:
+    return `\nMOTOR DE RESONANCIA CULTURAL — aplica si tu respuesta es ARCHITECT, o SURGEON cuando el defecto diagnosticado sea de rima; si es SURGEON por un motivo distinto (métrica, palabra prohibida, repetición) o si es WORD_BANK, ignora este bloque por completo:
 - Palabra sugerida para esta línea: "${resonance.mandatoryWord}" (ya verificada como rima real de "${resonance.concept}" y preseleccionada por encajar con la voz del artista — no la cuestiones fonéticamente)
 ${frameLine}Construye la línea con naturalidad alrededor de esa palabra y ese marco. La REGLA DE ADUANA LÉXICA (sección 2) sigue teniendo prioridad sobre esta sugerencia: si pese a la preselección la palabra sigue sin encajar con la voz del artista, descártala y sigue tu criterio habitual — la voz siempre gana.\n`;
 }
@@ -597,17 +612,22 @@ export function applyMuseVerification(parsed, {
         const targetLine = targetVerse ? `${targetVerse.before}${targetVerse.text}${targetVerse.after}` : parsed.targetLineText;
 
         const beforeMetric = parsed.suggestions.map((s) => s.text);
+        // SURGEON is now a precision-fix mode, not a creative rewrite (see
+        // its prompt section) — "keeps the exact meter" should mean exactly
+        // that, so it gets a tighter tolerance than ARCHITECT's continuation
+        // (which is genuinely allowed more rhythmic latitude).
+        const metricTolerance = parsed.action_type === 'SURGEON' ? 1 : 2;
         if (targetLine) {
             const targetSyllables = lineMeter(targetLine, lang, dialect);
             if (targetSyllables > 0) {
                 const verifiedByMetric = parsed.suggestions.filter((s) => {
                     const optSyllables = lineMeter(s.text, lang, dialect);
-                    return Math.abs(optSyllables - targetSyllables) <= 2;
+                    return Math.abs(optSyllables - targetSyllables) <= metricTolerance;
                 });
                 if (verifiedByMetric.length > 0) parsed.suggestions = verifiedByMetric;
             }
         }
-        pushTraceStep(trace, 'after metric filter (±2 syllables)', beforeMetric, parsed.suggestions.map((s) => s.text));
+        pushTraceStep(trace, `after metric filter (±${metricTolerance} syllables)`, beforeMetric, parsed.suggestions.map((s) => s.text));
 
         const beforeRepeat = parsed.suggestions.map((s) => s.text);
         const wordCounts = new Map();
@@ -971,7 +991,20 @@ export async function buildCulturalResonance({verseText, targetVerse, lang, dial
     // deck: every filtering stage can only shrink the surviving set, and
     // reducing a whole dictionary down to "one word or nothing" made an
     // artificial dead end far more likely than it needed to be.
-    if (forceMode === 'SURGEON' || forceMode === 'WORD_BANK') return null;
+    //
+    // SURGEON used to skip this too — the whole engine was ARCHITECT-only,
+    // which meant SURGEON (the "fix this line" mode) was the one generative
+    // mode with zero grounding: pure freestyle under a meter constraint,
+    // no retrieval backstop at all. Now that SURGEON is reframed as a
+    // targeted technical fix rather than a creative rewrite (see its prompt
+    // section), it gets the same treatment ARCHITECT already had — when the
+    // line's problem turns out to be the rhyme, the fix should use a real,
+    // voice-fit, lexicon-verified word, not an invented one. Running this
+    // pre-pass even when the ultimate diagnosis turns out to be metric/
+    // lexical/repetition (not rhyme) is accepted waste, same tradeoff an
+    // unforced ARCHITECT-or-SURGEON turn already had — the model is told to
+    // ignore this block when it doesn't apply (describeCulturalResonance).
+    if (forceMode === 'WORD_BANK') return null;
 
     const targetLine = targetVerse
         ? `${targetVerse.before}${targetVerse.text}${targetVerse.after}`

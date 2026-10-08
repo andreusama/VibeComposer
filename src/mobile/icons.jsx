@@ -41,6 +41,7 @@ export const IcMore = (p) => (
 export const IcClose = (p) => <Svg {...p}><path d="M6 6l12 12M18 6 6 18" /></Svg>;
 export const IcPlus = (p) => <Svg {...p}><path d="M12 5v14M5 12h14" /></Svg>;
 export const IcCheck = (p) => <Svg {...p}><path d="M20 6 9 17l-5-5" /></Svg>;
+export const IcInfo = (p) => <Svg {...p}><circle cx="12" cy="12" r="8.5" /><path d="M12 11v5.5" /><circle cx="12" cy="8" r="0.6" fill="currentColor" stroke="none" /></Svg>;
 
 /* ── the muse ────────────────────────────────────────────────────────────── */
 export const IcMuse = (p) => (
@@ -110,6 +111,11 @@ export const IcComment = (p) => <Svg {...p}><path d="M20 4H4a1 1 0 0 0-1 1v11a1 
 export const IcImage = (p) => <Svg {...p}><rect x="3" y="4.5" width="18" height="15" rx="2" /><circle cx="8.5" cy="10" r="1.6" /><path d="m21 15-4.5-4.5L7 20" /></Svg>;
 export const IcNote = (p) => <Svg {...p}><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M13.5 3v5H19M9 13h6M9 17h4" /></Svg>;
 export const IcPaperclip = (p) => <Svg {...p}><path d="M20 11.5 12 19.5a4.5 4.5 0 0 1-6.4-6.4l8.5-8.5a3 3 0 0 1 4.3 4.3l-8.5 8.5a1.5 1.5 0 0 1-2.2-2.1l7.8-7.8" /></Svg>;
+export const IcAlbum = (p) => <Svg {...p}><rect x="3.5" y="3.5" width="17" height="17" rx="2.5" /><circle cx="12" cy="12" r="4.2" /><circle cx="12" cy="12" r="0.6" /></Svg>;
 export const IcMusicNote = (p) => <Svg {...p}><path d="M9 17V5l11-2v12" /><circle cx="6" cy="17" r="3" /><circle cx="17" cy="15" r="3" /></Svg>;
 export const IcRadioOn = (p) => <Svg {...p}><circle cx="12" cy="12" r="8.5" /><circle cx="12" cy="12" r="3.6" fill="currentColor" stroke="none" /></Svg>;
 export const IcRadioOff = (p) => <Svg {...p}><circle cx="12" cy="12" r="8.5" /></Svg>;
+export const IcFolder = (p) => <Svg {...p}><path d="M3.5 6.5A1.5 1.5 0 0 1 5 5h4l2 2.5h8A1.5 1.5 0 0 1 20.5 9v9a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 18Z" /></Svg>;
+export const IcQuote = (p) => <Svg {...p}><path d="M7.5 9.5c-2 0-3.5 1.6-3.5 3.7 0 1.9 1.4 3.3 3.2 3.3.4 2-1 3.7-2.7 4.3" /><path d="M16.5 9.5c-2 0-3.5 1.6-3.5 3.7 0 1.9 1.4 3.3 3.2 3.3.4 2-1 3.7-2.7 4.3" /></Svg>;
+export const IcUsers = (p) => <Svg {...p}><circle cx="9" cy="8" r="3.2" /><path d="M3 19c0-3.2 2.7-5.2 6-5.2s6 2 6 5.2" /><path d="M16 5.3a3.2 3.2 0 0 1 0 6.1" /><path d="M15.5 13.9c2.8.4 4.5 2.2 4.5 5.1" /></Svg>;
+export const IcLink = (p) => <Svg {...p}><path d="M9.5 14.5 14.5 9.5" /><path d="M11 7l1.5-1.5a3.8 3.8 0 0 1 5.4 5.4L16.4 12.4" /><path d="M13 17l-1.5 1.5a3.8 3.8 0 0 1-5.4-5.4L7.6 11.6" /></Svg>;

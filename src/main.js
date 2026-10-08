@@ -3,9 +3,11 @@ import { createRoot } from 'react-dom/client';
 import { subscribe, getState, setState } from './state/store.js';
 import CanvasScreen from './canvas/CanvasScreen.jsx';
 import SongThreadScreen from './canvas/SongThreadScreen.jsx';
-import MobileProjectsScreen from './screens/MobileProjectsScreen.jsx';
+import MobileHomePager from './screens/MobileHomePager.jsx';
+import MobileAlbumScreen from './screens/MobileAlbumScreen.jsx';
 import MuseEyeScreen from './canvas/MuseEyeScreen.jsx';
 import * as LoadingScreen     from './screens/loading.js';
+import * as JoiningScreen     from './screens/joining.js';
 import * as StudioScreen      from './screens/studio.js';
 import * as AuthScreen        from './screens/auth.js';
 import * as HomeScreen        from './screens/home.js';
@@ -56,6 +58,18 @@ function render(state) {
     return;
   }
 
+  // A pending invite redeems itself right after sign-in (inviteFlow.js),
+  // before anything else about where to land is decided — this screen owns
+  // the whole page until that resolves, same as the sessionChecked gate
+  // above.
+  if (state.inviteStatus) {
+    if (reactRoot) { reactRoot.unmount(); reactRoot = null; }
+    app.innerHTML = JoiningScreen.render(state);
+    JoiningScreen.attach(state);
+    lastEffectiveScreen = null;
+    return;
+  }
+
   const screenKey = (state.session || PUBLIC_SCREENS.has(state.screen)) ? state.screen : 'auth';
 
   const justEntered = screenKey !== lastEffectiveScreen;
@@ -67,7 +81,9 @@ function render(state) {
     reactRoot.render(createElement(ScreenComponent, {
       state,
       justEntered,
-      onExit: () => setState({ screen: 'home' }),
+      // A track opened from inside an album returns to that album, not to
+      // the projects list (activeAlbumId is cleared whenever a single opens).
+      onExit: () => setState({ screen: getState().activeAlbumId ? 'album' : 'home' }),
     }));
     return;
   }
@@ -84,9 +100,18 @@ function render(state) {
     return;
   }
 
+  // Albums only have a mobile screen so far — on a desktop-width viewport
+  // there's nothing to show, so fall back to the (flat) projects grid.
+  if (screenKey === 'album') {
+    if (!isMobileViewport()) { setState({ screen: 'home', activeAlbumId: null }); return; }
+    if (!reactRoot) reactRoot = createRoot(app);
+    reactRoot.render(createElement(MobileAlbumScreen, { state, justEntered }));
+    return;
+  }
+
   if (screenKey === 'home' && isMobileViewport()) {
     if (!reactRoot) reactRoot = createRoot(app);
-    reactRoot.render(createElement(MobileProjectsScreen, { state, justEntered }));
+    reactRoot.render(createElement(MobileHomePager, { state, justEntered }));
     return;
   }
 

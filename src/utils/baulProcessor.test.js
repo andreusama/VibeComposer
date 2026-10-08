@@ -3,11 +3,22 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // api.js's checkAndIncrementLimit reads/writes localStorage, which doesn't
 // exist under Vitest's default node environment — and these tests aren't
 // about rate limiting anyway, so the whole module is swapped for a stub
-// that keeps API_URL (used to assert the fetch call) and no-ops the limit
-// check.
+// that keeps API_URL (used to assert the fetch call), no-ops the limit
+// check, and mirrors callClaudeOnce's real request shape (method/URL/body)
+// so the fetch-call assertions below still exercise it faithfully.
 vi.mock('./api.js', () => ({
   API_URL: '/api/claude',
   checkAndIncrementLimit: vi.fn(),
+  callClaudeOnce: async ({ model, system, userContent, maxTokens }) => {
+    const response = await fetch('/api/claude', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, max_tokens: maxTokens, thinking: { type: 'disabled' }, system, messages: [{ role: 'user', content: userContent }] }),
+    });
+    if (!response.ok) throw new Error(`API error ${response.status}`);
+    const data = await response.json();
+    return data.content.filter((b) => b.type === 'text').map((b) => b.text).join('');
+  },
 }));
 
 import { processBaulInput, parseBaulResponse, buildUserContent, emptyAdnLirico, BAUL_INPUT_TYPES } from './baulProcessor.js';

@@ -8459,32 +8459,102 @@ body::before {
 .strum-arrows-compact { gap: 1px; flex-wrap: nowrap; }
 
 /* The saved pattern surfaced in the note editor, under the header and above
-   the lyric sheet — it belongs to the whole section, not to any one line. */
-.ne-strum-strip {
+   the lyric sheet — it belongs to the whole section, not to any one line.
+   Redesigned 2026-10-08: was one plain-text row ("75 BPM ↑ ↓ ↑ ↑", a single
+   weight, no structure) — now two blocks split by a hairline, each with its
+   own eyebrow, so Tempo and Rasgueo read as distinct pieces of information
+   instead of one run-on line. */
+.ne-tempo-strum-card {
     display: flex;
     align-items: center;
-    gap: var(--space-3);
     width: 100%;
     margin-bottom: var(--space-2);
-    padding: var(--space-2) var(--space-3);
-    border: var(--card-border);
-    border-radius: var(--r-md);
+    padding: 16px 18px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-lg);
     background: #FFFFFF;
-    box-shadow: var(--sh-2);
-    overflow-x: auto;
+    box-shadow: 0 4px 16px rgba(29, 28, 26, 0.07), 0 1px 2px rgba(29, 28, 26, 0.05);
+    text-align: left;
     cursor: pointer;
 }
-.ne-strum-bpm {
-    flex-shrink: 0;
-    display: inline-flex;
-    align-items: baseline;
-    gap: 3px;
-    font-family: var(--font-sans);
-    font-size: var(--fs-utility);
+/* No strum recorded (bpm-only — see TempoStrumCard.jsx, kept for when this
+   card is reused somewhere that only ever has a tempo): no divider, no
+   empty Rasgueo block taking up width it has nothing to show in. */
+.ne-tempo-strum-card-solo { width: auto; }
+
+.ne-ts-eyebrow {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--graphite);
+    margin-bottom: 6px;
+}
+.ne-ts-block { flex-shrink: 0; }
+.ne-ts-tempo { padding-right: 18px; }
+
+.ne-ts-tempo-row { display: flex; align-items: baseline; gap: 7px; }
+/* Pulses at the actual tempo, not a fixed rate — same trick as
+   .tempo-pulse-dot (TempoPulse.jsx), same keyframe, reused rather than
+   redefined; just a touch bigger here since it's the anchor of its own
+   block instead of a small inline accent next to text. */
+.ne-ts-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--amber);
+    animation: tempo-pulse-beat 500ms ease-in-out infinite;
+    align-self: center;
+}
+.ne-ts-bpm-num {
+    font-family: var(--font-display);
+    font-size: 30px;
     font-weight: 700;
+    line-height: 1;
     color: var(--ink);
 }
-.ne-strum-bpm small { font-size: 0.625rem; font-weight: 600; color: var(--muted); }
+.ne-ts-bpm-unit {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    text-transform: lowercase;
+    color: var(--graphite);
+}
+
+.ne-ts-divider {
+    align-self: stretch;
+    width: 1px;
+    background: var(--hairline);
+    margin: 0 18px;
+}
+
+.ne-ts-strum { flex: 1; min-width: 0; }
+/* Wraps, not scrolls — a crowded 8-stroke pattern at 320px simply runs onto
+   a second row instead of clipping mid-cell behind a scrollbar (tried
+   overflow-x:auto first; a cell cut in half read as broken, not scrollable,
+   see the harness screenshots). Each cell carries its own number (see
+   .ne-beat-col) so wrapping never splits a cell from its label. */
+.ne-ts-cells { display: flex; flex-wrap: wrap; gap: 6px 6px; row-gap: 10px; }
+.ne-beat-col { display: flex; flex-direction: column; align-items: center; gap: 4px; flex-shrink: 0; }
+.ne-beat-cell {
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9px;
+}
+/* Solid vs. outline, not a hue — the weight contrast (filled/heavy vs.
+   outlined/light) IS the down/up distinction, deliberately not a semaphore
+   color pair, to stay inside the Manuscript palette. */
+.ne-beat-cell-down { background: var(--ink); color: var(--paper); }
+.ne-beat-cell-up { background: var(--paper-deep); border: 1.5px solid var(--hairline); color: var(--graphite); }
+.ne-beat-label {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    color: #B7B1A1;
+}
 
 /* ─── Acordes y rasgueo sheet ──────────────────────────────────────────────
    Same .baul-sheet shell + separate sticky head / scrolling body split as

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import StrumArrows from './StrumArrows.jsx';
-import { IcChord, IcStrumDown, IcStrumUp, IcPlay, IcPause, IcTrash, IcPlus } from './icons.jsx';
+import { IcChord, IcStrumDown, IcStrumUp, IcTrash, IcPlus } from './icons.jsx';
 import {
-  classifyStroke, deriveBpm, msPerStroke, arrowSizeFor,
+  classifyStroke, deriveBpm, arrowSizeFor,
   BPM_MIN, BPM_MAX, ARROW_MIN, ARROW_MAX,
 } from '../utils/strum.js';
 
@@ -47,31 +47,27 @@ const PALETTE = [
 
 // One draggable chord chip. Tap → attach where the caret/selection was;
 // long-press → lift it and drag it onto a word.
-function ChordChip({ name, onPick, onDragStart, onDragMove, onDragEnd }) {
+//
+// The chip's job ends at "a long-press happened, here's the chord and
+// where it started" — it does NOT track the rest of the drag. It used to
+// (a native touchmove listener on the chip itself, finishing the drag from
+// the chip's own onTouchEnd), which worked in every test here because
+// testing never kept one real finger down across the state change that
+// follows onDragStart: the moment a drag begins, the PARENT sheet swaps
+// its whole rendered content (shrinks to a strip, the chip grid —
+// including this chip — unmounts). A touch sequence whose origin element
+// just left the DOM stops being delivered to it; on a real device this
+// read as "drag picks up, then the sheet just freezes" (reported
+// 2026-10-08, same bug, same fix, as ResourcePickerSheet.jsx's identical
+// history — see its own comment). ChordStrumSheet now owns the live drag
+// via document-level listeners from the moment onDragStart fires.
+function ChordChip({ name, onPick, onDragStart }) {
   const [pressed, setPressed] = useState(false);
   const startRef = useRef({ x: 0, y: 0, moved: false });
   const pressTimerRef = useRef(null);
-  const draggingRef = useRef(false);
-  const elRef = useRef(null);
 
   const clearPressTimer = () => { clearTimeout(pressTimerRef.current); pressTimerRef.current = null; };
   useEffect(() => () => clearPressTimer(), []);
-
-  // React's onTouchMove is passive, so it cannot stop the sheet from
-  // scrolling once a drag is live — same fix, same reasoning, as
-  // ResourcePickerSheet's and ProjectRow's identical listeners.
-  useEffect(() => {
-    const el = elRef.current;
-    if (!el) return undefined;
-    const handler = (e) => {
-      if (!draggingRef.current) return;
-      e.preventDefault();
-      const t = e.touches[0];
-      onDragMove(t.clientX, t.clientY);
-    };
-    el.addEventListener('touchmove', handler, { passive: false });
-    return () => el.removeEventListener('touchmove', handler);
-  }, [onDragMove]);
 
   const onTouchStart = useCallback((e) => {
     const t = e.touches[0];
@@ -80,7 +76,6 @@ function ChordChip({ name, onPick, onDragStart, onDragMove, onDragEnd }) {
     clearPressTimer();
     pressTimerRef.current = setTimeout(() => {
       pressTimerRef.current = null;
-      draggingRef.current = true;
       startRef.current.moved = true; // whatever follows is never a tap
       setPressed(false);
       navigator.vibrate?.(12);
@@ -89,7 +84,6 @@ function ChordChip({ name, onPick, onDragStart, onDragMove, onDragEnd }) {
   }, [name, onDragStart]);
 
   const onTouchMove = useCallback((e) => {
-    if (draggingRef.current) return; // the native listener above owns a live drag
     const t = e.touches[0];
     if (Math.hypot(t.clientX - startRef.current.x, t.clientY - startRef.current.y) > LONG_PRESS_SLOP) {
       clearPressTimer();
@@ -97,29 +91,18 @@ function ChordChip({ name, onPick, onDragStart, onDragMove, onDragEnd }) {
     }
   }, []);
 
-  const finishDrag = useCallback((x, y) => {
-    draggingRef.current = false;
-    onDragEnd(x, y, name);
-  }, [onDragEnd, name]);
-
-  const onTouchEnd = useCallback((e) => {
+  const onTouchEnd = useCallback(() => {
     clearPressTimer();
     setPressed(false);
-    if (draggingRef.current) {
-      const t = e.changedTouches[0];
-      finishDrag(t.clientX, t.clientY);
-    }
-  }, [finishDrag]);
+  }, []);
 
   const onTouchCancel = useCallback(() => {
     clearPressTimer();
     setPressed(false);
-    if (draggingRef.current) finishDrag(null, null);
-  }, [finishDrag]);
+  }, []);
 
   return (
     <button
-      ref={elRef}
       className={`cs-chip${pressed ? ' pressed' : ''}`}
       onTouchStart={onTouchStart}
       onTouchMove={onTouchMove}
@@ -225,17 +208,7 @@ export default function ChordStrumSheet({
   // true once a take has been stopped, so the UI can say "this tempo came
   // from your hand" instead of silently showing the old/default one.
   const [bpmDerived, setBpmDerived] = useState(false);
-  const [playIndex, setPlayIndex] = useState(-1);
   const [dirty, setDirty] = useState(false);
-  const playTimerRef = useRef(null);
-
-  useEffect(() => () => clearInterval(playTimerRef.current), []);
-
-  const stopPlayback = useCallback(() => {
-    clearInterval(playTimerRef.current);
-    playTimerRef.current = null;
-    setPlayIndex(-1);
-  }, []);
 
   const handleStroke = useCallback((stroke, at) => {
     if (!recording) return;
@@ -245,13 +218,12 @@ export default function ChordStrumSheet({
   }, [recording]);
 
   const startRecording = useCallback(() => {
-    stopPlayback();
     timesRef.current = [];
     setStrokes([]);
     setBpmDerived(false);
     setRecording(true);
     setDirty(true);
-  }, [stopPlayback]);
+  }, []);
 
   const stopRecording = useCallback(() => {
     setRecording(false);
@@ -259,53 +231,73 @@ export default function ChordStrumSheet({
     if (derived != null) { setBpm(derived); setBpmDerived(true); }
   }, []);
 
-  // A simple visual metronome: the highlight steps through the arrows one
-  // stroke per beat at the derived tempo. Deliberately no audio — synthesis
-  // is out of scope, and seeing the pattern walk at its own speed is what
-  // tells you whether the tempo reading is right.
-  const togglePlayback = useCallback(() => {
-    if (playTimerRef.current) { stopPlayback(); return; }
-    if (!strokes.length) return;
-    setPlayIndex(0);
-    let i = 0;
-    playTimerRef.current = setInterval(() => {
-      i += 1;
-      if (i >= strokes.length) { stopPlayback(); return; }
-      setPlayIndex(i);
-    }, msPerStroke(bpm));
-  }, [strokes.length, bpm, stopPlayback]);
-
   const handleSave = useCallback(() => {
-    stopPlayback();
     setRecording(false);
     onSavePattern?.(bpm, strokes);
     setDirty(false);
-  }, [bpm, strokes, onSavePattern, stopPlayback]);
+  }, [bpm, strokes, onSavePattern]);
 
   const handleDeleteSaved = useCallback(() => {
-    stopPlayback();
     setRecording(false);
     setStrokes([]);
     timesRef.current = [];
     setBpmDerived(false);
     setDirty(false);
     onDeletePattern?.();
-  }, [onDeletePattern, stopPlayback]);
+  }, [onDeletePattern]);
 
   // ─── chord drag ───────────────────────────────────────────────────────
-  const handleDragStart = useCallback((name, x, y) => setDrag({ name, x, y }), []);
+  // dragRef mirrors `drag`, read synchronously inside the document-level
+  // listener below — attached once (empty deps), so it must never act on a
+  // stale closure over `drag` from whatever render set it up.
+  const dragRef = useRef(null);
 
-  const handleDragMove = useCallback((x, y) => {
-    setDrag((d) => (d ? { ...d, x, y } : d));
-    const lineEl = document.elementFromPoint(x, y)?.closest('[data-line-index]');
-    onDragHoverLine?.(lineEl ? Number(lineEl.dataset.lineIndex) : null);
-  }, [onDragHoverLine]);
+  const handleDragStart = useCallback((name, x, y) => {
+    const next = { name, x, y };
+    dragRef.current = next;
+    setDrag(next);
+  }, []);
 
-  const handleDragEnd = useCallback((x, y, name) => {
-    if (x != null && y != null) onDropChord?.(x, y, name);
+  const endDrag = useCallback((x, y) => {
+    const name = dragRef.current?.name;
+    if (x != null && y != null && name) onDropChord?.(x, y, name);
     onDragHoverLine?.(null);
+    dragRef.current = null;
     setDrag(null);
   }, [onDragHoverLine, onDropChord]);
+
+  // Owns the live drag from the sheet's own root, which is the one thing
+  // in this tree guaranteed to stay mounted for the drag's whole duration
+  // (unlike the chip that started it — see ChordChip's own comment).
+  useEffect(() => {
+    const handleMove = (e) => {
+      if (!dragRef.current) return;
+      e.preventDefault();
+      const t = e.touches[0];
+      if (!t) return;
+      const next = { ...dragRef.current, x: t.clientX, y: t.clientY };
+      dragRef.current = next;
+      setDrag(next);
+      const lineEl = document.elementFromPoint(t.clientX, t.clientY)?.closest('[data-line-index]');
+      onDragHoverLine?.(lineEl ? Number(lineEl.dataset.lineIndex) : null);
+    };
+    const handleEnd = (e) => {
+      if (!dragRef.current) return;
+      const t = e.changedTouches[0];
+      endDrag(t?.clientX ?? null, t?.clientY ?? null);
+    };
+    const handleCancel = () => {
+      if (dragRef.current) endDrag(null, null);
+    };
+    document.addEventListener('touchmove', handleMove, { passive: false });
+    document.addEventListener('touchend', handleEnd);
+    document.addEventListener('touchcancel', handleCancel);
+    return () => {
+      document.removeEventListener('touchmove', handleMove);
+      document.removeEventListener('touchend', handleEnd);
+      document.removeEventListener('touchcancel', handleCancel);
+    };
+  }, [endDrag, onDragHoverLine]);
 
   const handleAddCustom = useCallback(() => {
     const name = custom.trim();
@@ -371,8 +363,6 @@ export default function ChordStrumSheet({
                           name={name}
                           onPick={onPickChord}
                           onDragStart={handleDragStart}
-                          onDragMove={handleDragMove}
-                          onDragEnd={handleDragEnd}
                         />
                       ))}
                     </div>
@@ -391,8 +381,14 @@ export default function ChordStrumSheet({
                 </StrumPad>
 
                 <div className="cs-pattern">
+                  {/* No activeIndex on StrumArrows below — kept in its neutral,
+                      non-highlighted state for now. The pattern-stepping
+                      "visual metronome" playback was cut (not just hidden)
+                      until tracking "which stroke we're in" is actually
+                      wanted again; see git history for the removed
+                      togglePlayback/playIndex machinery if it comes back. */}
                   {strokes.length ? (
-                    <StrumArrows pattern={strokes} min={ARROW_MIN} max={ARROW_MAX} activeIndex={playIndex} />
+                    <StrumArrows pattern={strokes} min={ARROW_MIN} max={ARROW_MAX} />
                   ) : (
                     <span className="cs-pattern-empty">aún no hay golpes grabados</span>
                   )}
@@ -432,9 +428,6 @@ export default function ChordStrumSheet({
                       {strokes.length ? 'Rehacer' : 'Grabar'}
                     </button>
                   )}
-                  <button className="cs-btn" onClick={togglePlayback} disabled={!strokes.length || recording}>
-                    {playIndex >= 0 ? <><IcPause size={16} /> Parar</> : <><IcPlay size={16} /> Ver</>}
-                  </button>
                   <button className="cs-btn cs-btn-primary" onClick={handleSave} disabled={!strokes.length || !dirty}>
                     Guardar
                   </button>

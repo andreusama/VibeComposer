@@ -13,7 +13,22 @@ const SWIPE_SLOP = 6; // px of horizontal travel before a touch commits to being
 const LONG_PRESS_MS = 380;
 const LONG_PRESS_SLOP = 8;
 
-function ResourcePickerRow({ resource, onInsert, onDragStart, onDragMove, onDragEnd }) {
+// A row's job ends at "a long-press happened, here's the resource and
+// where it started" — it does NOT track the rest of the drag itself.
+// Earlier it did (a native touchmove listener on the row, finishing the
+// drag from the row's own onTouchEnd), which worked in every test here
+// because testing never kept one real finger down across the state change
+// that follows onDragStart: the moment a drag begins, the PARENT swaps its
+// whole rendered content (sheet shrinks to a strip, the row list —
+// including this row — unmounts). A touch sequence whose origin element
+// just left the DOM stops being delivered to it; on a real device this
+// read as "drag picks up, then the sheet just freezes" (reported
+// 2026-10-08), not an error, because nothing threw — the events simply had
+// nowhere left to go. The fix is below, in ResourcePickerSheet itself: it
+// owns the live drag via document-level listeners from the moment
+// onDragStart fires, so it doesn't matter that the row that started it is
+// gone a frame later.
+function ResourcePickerRow({ resource, onInsert, onDragStart }) {
   const [offset, setOffset] = useState(0);
   // Immediate visual feedback on touch — same pressed-state convention as
   // ProjectRow.jsx's own .mp-card.pressed, not a bare CSS :active (which
@@ -22,27 +37,9 @@ function ResourcePickerRow({ resource, onInsert, onDragStart, onDragMove, onDrag
   const [pressed, setPressed] = useState(false);
   const startRef = useRef({ x: 0, y: 0, base: 0, moved: false });
   const pressTimerRef = useRef(null);
-  const draggingRef = useRef(false);
-  const rowRef = useRef(null);
 
   const clearPressTimer = () => { clearTimeout(pressTimerRef.current); pressTimerRef.current = null; };
   useEffect(() => () => clearPressTimer(), []);
-
-  // React's onTouchMove is passive, so it can't stop the list from
-  // scrolling (or the swipe from fighting the drag) once a drag is live —
-  // same fix, same reasoning, as ProjectRow.jsx's own identical listener.
-  useEffect(() => {
-    const el = rowRef.current;
-    if (!el) return undefined;
-    const handler = (e) => {
-      if (!draggingRef.current) return;
-      e.preventDefault();
-      const t = e.touches[0];
-      onDragMove(t.clientX, t.clientY);
-    };
-    el.addEventListener('touchmove', handler, { passive: false });
-    return () => el.removeEventListener('touchmove', handler);
-  }, [onDragMove]);
 
   const onTouchStart = useCallback((e) => {
     const t = e.touches[0];
@@ -51,7 +48,6 @@ function ResourcePickerRow({ resource, onInsert, onDragStart, onDragMove, onDrag
     clearPressTimer();
     pressTimerRef.current = setTimeout(() => {
       pressTimerRef.current = null;
-      draggingRef.current = true;
       startRef.current.moved = true; // whatever follows is never a tap or a swipe
       setOffset(0);
       setPressed(false);
@@ -61,7 +57,6 @@ function ResourcePickerRow({ resource, onInsert, onDragStart, onDragMove, onDrag
   }, [offset, onDragStart, resource]);
 
   const onTouchMove = useCallback((e) => {
-    if (draggingRef.current) return; // the native listener above owns a live drag
     const t = e.touches[0];
     const dx = t.clientX - startRef.current.x;
     const dy = t.clientY - startRef.current.y;
@@ -70,27 +65,16 @@ function ResourcePickerRow({ resource, onInsert, onDragStart, onDragMove, onDrag
     if (startRef.current.moved) setOffset(Math.max(-REVEAL, Math.min(0, startRef.current.base + dx)));
   }, []);
 
-  const finishDrag = useCallback((x, y) => {
-    draggingRef.current = false;
-    onDragEnd(x, y, resource);
-  }, [onDragEnd, resource]);
-
-  const onTouchEnd = useCallback((e) => {
+  const onTouchEnd = useCallback(() => {
     clearPressTimer();
     setPressed(false);
-    if (draggingRef.current) {
-      const t = e.changedTouches[0];
-      finishDrag(t.clientX, t.clientY);
-      return;
-    }
     setOffset((o) => (o < -REVEAL / 2 ? -REVEAL : 0));
-  }, [finishDrag]);
+  }, []);
 
   const onTouchCancel = useCallback(() => {
     clearPressTimer();
     setPressed(false);
-    if (draggingRef.current) finishDrag(null, null);
-  }, [finishDrag]);
+  }, []);
 
   const handleTextClick = useCallback(() => {
     if (startRef.current.moved) return; // that was a swipe or a drag, not a tap
@@ -100,7 +84,6 @@ function ResourcePickerRow({ resource, onInsert, onDragStart, onDragMove, onDrag
 
   return (
     <div
-      ref={rowRef}
       className={`res-picker-row${pressed ? ' pressed' : ''}`}
       onTouchStart={onTouchStart}
       onTouchMove={onTouchMove}
@@ -130,7 +113,9 @@ function ResourcePickerRow({ resource, onInsert, onDragStart, onDragMove, onDrag
 // Recursos library screen now (MobileResourcesScreen.jsx). Swipe-to-insert
 // and drag-to-a-specific-line added same day; the "hand to the Musa as a
 // reference" action removed the same day too (per-row real estate was
-// better spent once there were three ways in instead of two).
+// better spent once there were three ways in instead of two). Drag
+// ownership moved from the row to this component later the same day — see
+// ResourcePickerRow's own comment for why.
 export default function ResourcePickerSheet({ userId, onInsert, onClose, onDragHoverLine, onDropOnLine }) {
   const [resources, setResources] = useState([]);
   const [folders, setFolders] = useState([]);
@@ -146,6 +131,10 @@ export default function ResourcePickerSheet({ userId, onInsert, onClose, onDragH
   // query is what bridges them, same cross-tree hit-testing ProjectRow.jsx
   // already relies on for its own reorder drag.
   const [drag, setDrag] = useState(null);
+  // Mirrors `drag`, read synchronously inside the document-level listener
+  // below — that listener is attached once (empty deps) and must never act
+  // on a stale closure over `drag` from whatever render set it up.
+  const dragRef = useRef(null);
 
   useEffect(() => {
     if (!userId) return;
@@ -173,20 +162,53 @@ export default function ResourcePickerSheet({ userId, onInsert, onClose, onDragH
   };
 
   const handleDragStart = useCallback((resource, x, y) => {
-    setDrag({ resource, x, y });
+    const next = { resource, x, y };
+    dragRef.current = next;
+    setDrag(next);
   }, []);
 
-  const handleDragMove = useCallback((x, y) => {
-    setDrag((d) => (d ? { ...d, x, y } : d));
-    onDragHoverLine?.(hitTestLine(x, y));
-  }, [onDragHoverLine]);
-
-  const handleDragEnd = useCallback((x, y, resource) => {
+  const endDrag = useCallback((x, y) => {
+    const resource = dragRef.current?.resource;
     const lineIndex = x != null && y != null ? hitTestLine(x, y) : null;
-    if (lineIndex != null) onDropOnLine?.(lineIndex, resource);
+    if (lineIndex != null && resource) onDropOnLine?.(lineIndex, resource);
     onDragHoverLine?.(null);
+    dragRef.current = null;
     setDrag(null);
   }, [onDragHoverLine, onDropOnLine]);
+
+  // Owns the live drag from the sheet's own root, which is the one thing
+  // in this tree guaranteed to stay mounted for the drag's whole duration
+  // (unlike the row that started it — see ResourcePickerRow's comment).
+  // Attached once; gated on dragRef so it's a no-op whenever nothing is
+  // actually being dragged, rather than attached/detached per drag.
+  useEffect(() => {
+    const handleMove = (e) => {
+      if (!dragRef.current) return;
+      e.preventDefault();
+      const t = e.touches[0];
+      if (!t) return;
+      const next = { ...dragRef.current, x: t.clientX, y: t.clientY };
+      dragRef.current = next;
+      setDrag(next);
+      onDragHoverLine?.(hitTestLine(t.clientX, t.clientY));
+    };
+    const handleEnd = (e) => {
+      if (!dragRef.current) return;
+      const t = e.changedTouches[0];
+      endDrag(t?.clientX ?? null, t?.clientY ?? null);
+    };
+    const handleCancel = () => {
+      if (dragRef.current) endDrag(null, null);
+    };
+    document.addEventListener('touchmove', handleMove, { passive: false });
+    document.addEventListener('touchend', handleEnd);
+    document.addEventListener('touchcancel', handleCancel);
+    return () => {
+      document.removeEventListener('touchmove', handleMove);
+      document.removeEventListener('touchend', handleEnd);
+      document.removeEventListener('touchcancel', handleCancel);
+    };
+  }, [endDrag, onDragHoverLine]);
 
   return (
     <div className={`baul-sheet-scrim${drag ? ' res-picker-scrim-dragging' : ''}`} onClick={drag ? undefined : onClose}>
@@ -233,8 +255,6 @@ export default function ResourcePickerSheet({ userId, onInsert, onClose, onDragH
                   resource={r}
                   onInsert={onInsert}
                   onDragStart={handleDragStart}
-                  onDragMove={handleDragMove}
-                  onDragEnd={handleDragEnd}
                 />
               ))}
             </div>

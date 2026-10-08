@@ -20,7 +20,7 @@ import LineHistorySheet from './LineHistorySheet.jsx';
 import ResourcePickerSheet from '../resources/ResourcePickerSheet.jsx';
 import LineChordStrip from '../components/LineChordStrip.jsx';
 import ChordStrumSheet from './ChordStrumSheet.jsx';
-import StrumArrows from './StrumArrows.jsx';
+import TempoStrumCard from './TempoStrumCard.jsx';
 import { loadLineChords, addLineChord, updateLineChord, deleteLineChord } from '../canvas/lineChordData.js';
 import { loadStrumPattern, saveStrumPattern, deleteStrumPattern } from '../canvas/strumPatternData.js';
 import { resolveChordRange, snapRangeToWords, wordRangeAt, sameRange } from '../utils/chordAnchor.js';
@@ -1166,10 +1166,7 @@ export default function NoteEditorScreen({
             nothing has been recorded: an empty "no strum yet" row would be
             permanent chrome earning nothing. */}
         {strum?.pattern?.length > 0 && (
-          <button className="ne-strum-strip" onClick={() => setChordSheet({ tab: 'strum' })} title="editar el rasgueo de esta parte">
-            <span className="ne-strum-bpm">{strum.bpm}<small>BPM</small></span>
-            <StrumArrows pattern={strum.pattern} min={11} max={22} className="strum-arrows-compact" />
-          </button>
+          <TempoStrumCard bpm={strum.bpm} strumPattern={strum.pattern} onClick={() => setChordSheet({ tab: 'strum' })} />
         )}
 
         <div className="ne-sheet">

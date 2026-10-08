@@ -1,5 +1,5 @@
 import { useKeyboardInset } from './useKeyboardInset.js';
-import { IcMuse, IcRhyme, IcPencil, IcUndo, IcRedo, IcBook, IcMic, IcQuote } from './icons.jsx';
+import { IcMuse, IcRhyme, IcPencil, IcUndo, IcRedo, IcBook, IcMic, IcQuote, IcChord } from './icons.jsx';
 
 // The one accessory bar, docked to the top edge of the on-screen keyboard
 // the whole time a lyric line is being edited — the iOS-Notes pattern. Web
@@ -11,7 +11,7 @@ const keep = (e) => e.preventDefault(); // fires before click (incl. touch) → 
 
 export default function KeyboardAccessoryBar({
   hasSelection, canUndo, canRedo,
-  onMuse, onRhyme, onAlternative, onCulture, onResource, onUndo, onRedo, onAudio,
+  onMuse, onRhyme, onAlternative, onCulture, onResource, onUndo, onRedo, onAudio, onChord,
 }) {
   const kb = useKeyboardInset();
   return (
@@ -36,6 +36,13 @@ export default function KeyboardAccessoryBar({
             the common case is finishing a verse and wanting to hum/record
             it right away. */}
         <button className="kab-btn" onMouseDown={keep} onClick={onAudio} aria-label="Grabar audio"><IcMic /></button>
+        {/* Next to the mic on purpose: both are "stop writing words for a
+            moment and put the music on this verse". Like Recursos, it needs
+            no selection — with one it attaches the chord to exactly that
+            phrase, with just a caret to the word under it (see
+            handleOpenChordSheet), and the same sheet also holds the strum
+            recorder for this whole section. */}
+        <button className="kab-btn" onMouseDown={keep} onClick={onChord} aria-label="Acordes y rasgueo"><IcChord /></button>
       </div>
     </div>
   );

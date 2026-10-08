@@ -8347,3 +8347,364 @@ body::before {
     cursor: pointer;
 }
 .collab-invite-revoke { color: var(--rose); }
+
+/* ─── Chords on a word range + recorded strum patterns ───────────────────────
+   "Mainstream tablature" on mobile: a chord symbol sitting above the exact
+   word it's strummed on (src/components/LineChordStrip.jsx), dragged in from
+   a palette, plus a per-section right-hand strum pattern performed as real
+   up/down finger swipes (src/mobile/ChordStrumSheet.jsx). No new visual
+   language: the pills are the same raised-white-card material as every other
+   card on the --paper-deeper ground, the amber is the same amber the rest of
+   the drag-and-drop vocabulary already uses for "this is where it'll land",
+   and the sheet reuses .baul-sheet's shell and ResourcePickerSheet's own
+   drag classes rather than cloning them. */
+
+/* A chorded line needs vertical room its neighbours don't: extra leading so
+   a pill over a WRAPPED row lands in the gap between visual rows instead of
+   on top of the row above, and a top padding so the pill over the FIRST row
+   has somewhere to be at all. Applied to the textarea and to BOTH mirrors
+   (the variant-underline one and the chord-measuring one) in one rule, which
+   is not cosmetic symmetry — LineChordStrip measures chord positions out of
+   its mirror and applies them over the textarea, so the instant their
+   metrics diverge every chord is aligned to the wrong word. */
+.ne-row-has-chords .ne-line-input,
+.ne-row-has-chords .ne-input-wrap .line-highlight {
+    line-height: 2.3;
+    padding-top: 12px;
+}
+
+/* The transparent text mirror LineChordStrip measures (and the chord
+   drag-and-drop hit-tests) against. Inherits all its metrics from
+   .line-highlight / .ne-input-wrap .line-highlight above — it exists as its
+   own element, rather than reusing LineHighlight's, only because a DOM Range
+   needs one unbroken text node and LineHighlight splits its text into
+   <mark>/<span> runs the moment a word variant is attached. */
+.lc-mirror { z-index: 0; }
+
+/* The pills' own layer: above the textarea (z-index 1) so a pill is
+   tappable, overflow visible so one sitting above the first line isn't
+   clipped, and pointer-events only on the pills themselves so every tap
+   on the lyric still reaches the textarea underneath. */
+.lc-layer {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    overflow: visible;
+    pointer-events: none;
+}
+
+.lc-pill {
+    position: absolute;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    pointer-events: auto;
+    padding: 1px var(--space-1-5);
+    border-radius: var(--r-sm);
+    background: var(--amber-soft);
+    box-shadow: inset 0 0 0 1px var(--amber);
+    /* Sans, not the lyric serif: a chord symbol is notation ABOUT the line,
+       not part of it, and the same family at a smaller size would read as
+       an editorial aside in the text rather than as a chord. */
+    font-family: var(--font-sans);
+    font-size: var(--fs-label);
+    font-weight: 700;
+    line-height: 1.15;
+    color: var(--amber);
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background 0.12s, box-shadow 0.12s;
+}
+/* Tapped once — the delete affordance is now showing (and times out on its
+   own, see ARM_TIMEOUT_MS). Darkening rather than reddening: the pill is
+   still a chord, it just has an × next to it now. */
+.lc-pill-armed {
+    background: var(--amber);
+    box-shadow: inset 0 0 0 1px var(--amber);
+    color: #FFFFFF;
+}
+.lc-pill-remove {
+    border: none;
+    background: none;
+    padding: 0 0 0 1px;
+    margin: 0;
+    font-family: var(--font-sans);
+    font-size: var(--fs-label);
+    font-weight: 700;
+    line-height: 1;
+    color: #FFFFFF;
+    cursor: pointer;
+}
+
+/* ─── The strum pattern, as literal big and little arrows ──────────────────
+   Baseline-aligned (flex-end), never centred: a 44px hard stroke and an
+   18px soft one have to hang from the same line the way they do on paper,
+   or the pattern stops reading as one gesture. */
+.strum-arrows {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--space-1);
+    flex-wrap: wrap;
+}
+.strum-arrow {
+    display: inline-flex;
+    align-items: flex-end;
+    color: var(--graphite);
+    transition: color 0.1s, transform 0.1s;
+}
+/* The visual metronome's current stroke — amber + a nudge up, so the
+   stepping is visible at a glance without animating size (which would make
+   the intensity the arrows exist to convey unreadable mid-playback). */
+.strum-arrow-active { color: var(--amber); transform: translateY(-3px); }
+.strum-arrows-compact { gap: 1px; flex-wrap: nowrap; }
+
+/* The saved pattern surfaced in the note editor, under the header and above
+   the lyric sheet — it belongs to the whole section, not to any one line. */
+.ne-strum-strip {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    width: 100%;
+    margin-bottom: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    border: var(--card-border);
+    border-radius: var(--r-md);
+    background: #FFFFFF;
+    box-shadow: var(--sh-2);
+    overflow-x: auto;
+    cursor: pointer;
+}
+.ne-strum-bpm {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 3px;
+    font-family: var(--font-sans);
+    font-size: var(--fs-utility);
+    font-weight: 700;
+    color: var(--ink);
+}
+.ne-strum-bpm small { font-size: 0.625rem; font-weight: 600; color: var(--muted); }
+
+/* ─── Acordes y rasgueo sheet ──────────────────────────────────────────────
+   Same .baul-sheet shell + separate sticky head / scrolling body split as
+   .res-picker-sheet, and it borrows that sheet's drag classes wholesale
+   (.res-picker-scrim-dragging / -sheet-shrunk / -drag-hint / -drag-pill) —
+   one drag vocabulary for the app, not a second one under chord-specific
+   names. */
+.cs-sheet { max-height: 86vh; display: flex; flex-direction: column; }
+
+.cs-head {
+    flex-shrink: 0;
+    padding: var(--space-2) var(--space-4) var(--space-3);
+    border-bottom: 1px solid var(--hairline);
+}
+.cs-head .attach-title { margin-bottom: var(--space-2); }
+
+/* Two segmented tabs rather than two sheets: picking a chord and recording
+   how it's struck are the same sitting, and a second button in an already
+   crowded accessory bar would buy nothing. */
+.cs-tabs {
+    display: flex;
+    gap: var(--space-1);
+    padding: 3px;
+    border-radius: 999px;
+    background: var(--paper-deeper);
+}
+.cs-tab {
+    flex: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-1-5);
+    padding: var(--space-1-5) var(--space-3);
+    border: none;
+    border-radius: 999px;
+    background: none;
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    font-weight: 600;
+    color: var(--graphite);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+}
+.cs-tab-active { background: #FFFFFF; color: var(--ink); box-shadow: var(--sh-2); }
+
+.cs-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: var(--space-3) var(--space-4) calc(var(--space-6) + env(safe-area-inset-bottom));
+}
+.cs-hint {
+    margin: 0 0 var(--space-3);
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    line-height: 1.5;
+    color: var(--muted);
+}
+
+/* Free-text chord entry — the palette is a shortcut, never the vocabulary
+   limit (chord_name is free text in the DB for exactly this reason). */
+.cs-custom { display: flex; gap: var(--space-2); margin-bottom: var(--space-4); }
+.cs-custom-input {
+    flex: 1;
+    min-width: 0;
+    padding: var(--space-2) var(--space-3);
+    border: 1.5px solid var(--hairline);
+    border-radius: 999px;
+    background: #FFFFFF;
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    color: var(--ink);
+}
+.cs-custom-input:focus { outline: none; border-color: var(--amber); }
+.cs-custom-add {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: var(--space-2) var(--space-3);
+    border: none;
+    border-radius: 999px;
+    background: var(--amber);
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    font-weight: 600;
+    color: #FFFFFF;
+    cursor: pointer;
+}
+.cs-custom-add:disabled { opacity: 0.35; cursor: default; }
+
+.cs-group { margin-bottom: var(--space-4); }
+.cs-group-label {
+    margin-bottom: var(--space-2);
+    font-family: var(--font-sans);
+    font-size: var(--fs-label);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+.cs-chip-grid { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+/* A chord chip has exactly two gestures — tap to attach at the caret,
+   long-press to drag onto a word. Same raised-white-card material as every
+   other chip; the serif is deliberate here (unlike the in-line .lc-pill,
+   which has to read as notation against the lyric — in a palette the chord
+   name IS the content). touch-action:none so a long-press-then-drag isn't
+   stolen by the sheet's own scroll. */
+.cs-chip {
+    flex: 0 0 auto;
+    min-width: 54px;
+    padding: var(--space-2) var(--space-3);
+    border: var(--card-border);
+    border-radius: var(--r-md);
+    background: #FFFFFF;
+    box-shadow: var(--sh-2);
+    font-family: var(--font-sans);
+    font-size: var(--fs-body);
+    font-weight: 600;
+    color: var(--ink);
+    cursor: pointer;
+    touch-action: none;
+    transition: transform 0.1s, background 0.1s, box-shadow 0.1s;
+}
+.cs-chip.pressed { background: var(--amber-soft); transform: scale(0.96); box-shadow: none; }
+
+/* The chord following the finger mid-drag. Reuses .res-picker-drag-pill's
+   fixed positioning/elevation and only overrides what a two-character chord
+   name needs that a whole line of resource text didn't. */
+.cs-drag-pill {
+    max-width: none;
+    font-family: var(--font-sans);
+    font-size: var(--fs-body);
+    font-weight: 700;
+    color: var(--amber);
+}
+
+/* ─── The strum pad ────────────────────────────────────────────────────────
+   A tall surface the artist actually strums on. touch-action:none because a
+   vertical swipe inside a scrollable sheet is otherwise eaten as a scroll,
+   and a strum that scrolls the sheet is not a strum. */
+.cs-pad {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 168px;
+    margin-bottom: var(--space-3);
+    border: 1.5px dashed var(--card-border);
+    border-radius: var(--r-lg);
+    background: var(--paper-deeper);
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    transition: background 0.15s, border-color 0.15s;
+}
+/* Live take — solid amber edge, the same "recording" signal the voice-memo
+   bar already uses, so there is never a doubt about whether a swipe counted. */
+.cs-pad-live { border-style: solid; border-color: var(--amber); background: var(--amber-soft); }
+.cs-pad-hint {
+    padding: 0 var(--space-5);
+    text-align: center;
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    color: var(--muted);
+}
+/* Live under-the-finger preview: the stroke as it is being performed, at the
+   size its current velocity would store it at. */
+.cs-pad-preview { color: var(--amber); }
+
+.cs-pattern {
+    min-height: 56px;
+    display: flex;
+    align-items: flex-end;
+    padding: var(--space-2) var(--space-3);
+    margin-bottom: var(--space-3);
+    border-radius: var(--r-md);
+    background: #FFFFFF;
+    border: var(--card-border);
+    overflow-x: auto;
+}
+.cs-pattern-empty { font-family: var(--font-sans); font-size: var(--fs-secondary); color: var(--faint); }
+
+.cs-tempo { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-4); }
+.cs-tempo-label { font-family: var(--font-sans); font-size: var(--fs-secondary); font-weight: 600; color: var(--ink); }
+.cs-tempo-input {
+    width: 72px;
+    padding: var(--space-1-5) var(--space-2);
+    border: 1.5px solid var(--hairline);
+    border-radius: var(--r-sm);
+    background: #FFFFFF;
+    font-family: var(--font-sans);
+    font-size: var(--fs-utility);
+    font-weight: 700;
+    text-align: center;
+    color: var(--ink);
+}
+.cs-tempo-input:focus { outline: none; border-color: var(--amber); }
+.cs-tempo-unit { font-family: var(--font-sans); font-size: var(--fs-label); color: var(--muted); }
+/* "This number came from your hand, not from a default" — the whole reason
+   the tempo is editable right next to it. */
+.cs-tempo-auto { font-family: var(--font-sans); font-size: var(--fs-label); font-style: italic; color: var(--amber); }
+
+.cs-controls { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.cs-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    padding: var(--space-2) var(--space-3-5);
+    border: 1.5px solid var(--hairline);
+    border-radius: 999px;
+    background: #FFFFFF;
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    font-weight: 600;
+    color: var(--ink);
+    cursor: pointer;
+}
+.cs-btn:disabled { opacity: 0.35; cursor: default; }
+.cs-btn-rec { border-color: var(--amber); color: var(--amber); }
+.cs-btn-stop { border-color: var(--rose); background: var(--rose); color: #FFFFFF; }
+.cs-btn-primary { border-color: var(--thread); background: var(--thread); color: #FFFFFF; }
+.cs-btn-danger { border-color: var(--hairline); color: var(--rose); }

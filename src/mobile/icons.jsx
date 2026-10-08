@@ -95,6 +95,26 @@ export const IcTools = (p) => (
   </Svg>
 );
 
+/* ── chords / strumming ──────────────────────────────────────────────────── */
+/* A chord DIAGRAM (nut + three strings + two fingered dots), not a guitar
+   body: at 20px a guitar silhouette collapses into an unreadable blob,
+   while the grid-and-dots shape still reads as "a chord" — and it's what
+   the sheet it opens actually shows. */
+export const IcChord = (p) => (
+  <Svg {...p}>
+    <path d="M4.5 6h15" />
+    <path d="M8 6v13M12 6v13M16 6v13" />
+    <circle cx="8" cy="10.5" r="1.4" fill="currentColor" stroke="none" />
+    <circle cx="16" cy="14.5" r="1.4" fill="currentColor" stroke="none" />
+  </Svg>
+);
+/* The strum strokes themselves. Drawn to fill the 24-unit box top to bottom
+   so that scaling them by intensity (arrowSizeFor, src/utils/strum.js)
+   changes the glyph's real size rather than just its padding — a 44px hard
+   stroke next to an 18px soft one has to read as twice the gesture. */
+export const IcStrumDown = (p) => <Svg {...p}><path d="M12 3v18" /><path d="M5.5 14.5 12 21l6.5-6.5" /></Svg>;
+export const IcStrumUp = (p) => <Svg {...p}><path d="M12 21V3" /><path d="M5.5 9.5 12 3l6.5 6.5" /></Svg>;
+
 /* ── audio ───────────────────────────────────────────────────────────────── */
 export const IcMic = (p) => (
   <Svg {...p}>

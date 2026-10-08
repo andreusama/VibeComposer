@@ -1718,3 +1718,135 @@ end $$;
 insert into project_collaborators (song_id, user_id, role)
 select id, user_id, 'owner' from songs
 on conflict (song_id, user_id) do nothing;
+
+-- ─── chords on a word range + recorded strum patterns ───────────────────────
+-- Chords anchored above the exact word they're strummed on, and a
+-- per-section right-hand strum pattern performed as real up/down swipes.
+-- Same statements as migration_line_chords.sql.
+
+-- ─── line_chords ────────────────────────────────────────────────────────────────
+-- Chords attached to a WORD RANGE inside a lyric line — "mainstream
+-- tablature": the chord symbol sits above the exact word/syllable where the
+-- strum change happens, the way Ultimate-Guitar-style sheets print it.
+--
+-- Anchored by (line_id, line_index), NOT by a per-physical-line row: `lines`
+-- holds exactly ONE row per section (the whole block's text as one string
+-- with embedded \n); an individual physical line only exists as the
+-- client-side split (textLines.js / NoteEditorScreen). So line_id identifies
+-- the block's text row and line_index the physical line inside it — the same
+-- best-effort index tradeoff word_variants, line_history and line_audio
+-- already accept. line_id rather than section_id because a chord is attached
+-- to TEXT, and the text row is what a cascade should take it out with.
+--
+-- anchor_text is the source of truth for WHERE the chord sits — NOT
+-- start_offset/end_offset. Raw offsets go stale the moment anything is typed
+-- to the left of them, so they are only a best-effort tie-breaker: the client
+-- re-locates anchor_text in the live line text on every render
+-- (resolveChordRange, src/utils/chordAnchor.js), biased toward start_offset
+-- when the same substring occurs more than once, and simply stops drawing a
+-- chord whose anchor no longer appears at all. Exactly how word_variants
+-- re-locates its own span (resolveVariantRange) — one anchoring model for
+-- every sub-line attachment in the app, not a second, offset-trusting one.
+--
+-- chord_name is free text on purpose, never an enum/check: real chord names
+-- have far too many shapes to enumerate — slash chords (G/B), extensions
+-- (Cmaj7, Badd9), suspensions (Dsus4), alterations (F#m7b5).
+create table if not exists line_chords (
+  id           uuid primary key default gen_random_uuid(),
+  line_id      uuid not null references lines(id) on delete cascade,
+  line_index   integer not null default 0,
+  anchor_text  text    not null,
+  start_offset integer not null default 0,
+  end_offset   integer not null default 0,
+  chord_name   text    not null,
+  created_at   timestamptz not null default now()
+);
+
+create index if not exists idx_line_chords_line on line_chords(line_id, line_index);
+
+alter table line_chords enable row level security;
+
+-- Same lines → sections → songs → is_song_participant() chain every other
+-- line-scoped table already uses (see lines_owner).
+drop policy if exists line_chords_owner on line_chords;
+create policy line_chords_owner on line_chords
+  for all using (
+    exists (
+      select 1 from lines l
+      join sections sec on sec.id = l.section_id
+      join songs s on s.id = sec.song_id
+      where l.id = line_chords.line_id and is_song_participant(s.id)
+    )
+  ) with check (
+    exists (
+      select 1 from lines l
+      join sections sec on sec.id = l.section_id
+      join songs s on s.id = sec.song_id
+      where l.id = line_chords.line_id and is_song_participant(s.id)
+    )
+  );
+
+-- Same statements as migration_strum_patterns.sql.
+
+-- ─── strum_patterns ─────────────────────────────────────────────────────────────
+-- One recorded right-hand strum pattern per SECTION (verse/chorus/bridge),
+-- performed as real up/down finger swipes on a touch pad
+-- (src/mobile/ChordStrumSheet.jsx) rather than typed in.
+--
+-- Scoped to a section, not to a chord and not to the whole song: different
+-- sections of the same song very commonly strum differently (a verse picked
+-- softly, a chorus hammered), while one section almost never carries two
+-- competing patterns at once. Hence ONE active pattern per section —
+-- `section_id` is unique and the client upserts on it (on conflict
+-- (section_id) do update), the same one-row-per-section convention
+-- muse_profile already uses. A surrogate `id` is kept anyway so the row has
+-- a stable identity independent of what it is attached to, like every other
+-- table here.
+--
+-- pattern is a jsonb ARRAY of strokes in performance order:
+--   [{"direction": "down", "intensity": 0.82}, {"direction": "up", "intensity": 0.31}, …]
+-- direction = the sign of the swipe's vertical displacement; intensity =
+-- 0..1 derived from the swipe's velocity in px/ms (faster swipe = harder
+-- strum), see velocityToIntensity in src/utils/strum.js. Stored as jsonb and
+-- not normalised into a strokes table on purpose: a pattern is only ever
+-- read, written and discarded whole, never queried stroke-by-stroke.
+--
+-- bpm is auto-derived from the real time elapsed between consecutive strokes
+-- during the recording itself (average interval → BPM, folded into a musical
+-- range), then freely editable by hand — the same "the system suggests, the
+-- human can always correct it" rule the muse suggestions and word variants
+-- already follow. Which is why there is no is_auto/was_edited flag: once
+-- it's in this column it is simply the artist's tempo.
+create table if not exists strum_patterns (
+  id         uuid primary key default gen_random_uuid(),
+  section_id uuid not null unique references sections(id) on delete cascade,
+  bpm        integer not null default 90,
+  pattern    jsonb   not null default '[]'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_strum_patterns_section on strum_patterns(section_id);
+
+drop trigger if exists trg_strum_patterns_updated_at on strum_patterns;
+create trigger trg_strum_patterns_updated_at
+  before update on strum_patterns
+  for each row execute function set_updated_at();
+
+alter table strum_patterns enable row level security;
+
+-- Same sections → songs → is_song_participant() chain every other
+-- section-scoped table already uses (see word_variants_owner / line_history_owner).
+drop policy if exists strum_patterns_owner on strum_patterns;
+create policy strum_patterns_owner on strum_patterns
+  for all using (
+    exists (
+      select 1 from sections sec join songs s on s.id = sec.song_id
+      where sec.id = strum_patterns.section_id and is_song_participant(s.id)
+    )
+  ) with check (
+    exists (
+      select 1 from sections sec join songs s on s.id = sec.song_id
+      where sec.id = strum_patterns.section_id and is_song_participant(s.id)
+    )
+  );

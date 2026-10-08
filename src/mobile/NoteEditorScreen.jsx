@@ -18,6 +18,13 @@ import WordVariantSheet from './WordVariantSheet.jsx';
 import { loadLineHistory, addLineHistory, deleteLineHistory } from '../canvas/lineHistoryData.js';
 import LineHistorySheet from './LineHistorySheet.jsx';
 import ResourcePickerSheet from '../resources/ResourcePickerSheet.jsx';
+import LineChordStrip from '../components/LineChordStrip.jsx';
+import ChordStrumSheet from './ChordStrumSheet.jsx';
+import StrumArrows from './StrumArrows.jsx';
+import { loadLineChords, addLineChord, updateLineChord, deleteLineChord } from '../canvas/lineChordData.js';
+import { loadStrumPattern, saveStrumPattern, deleteStrumPattern } from '../canvas/strumPatternData.js';
+import { resolveChordRange, snapRangeToWords, wordRangeAt, sameRange } from '../utils/chordAnchor.js';
+import { offsetFromPoint } from '../utils/caretFromPoint.js';
 import { IcChevronLeft, IcMuse, IcHistory, IcTrash, IcPencil, IcTools } from './icons.jsx';
 
 // The "talk to the muse right inside the lyric" pattern from the design
@@ -44,8 +51,8 @@ const LONG_PRESS_COPY_SLOP = 10;
 // the lines array, one row in the margin, not one row of pixels).
 function LineRow({
   id, index, text, previewText, syllables, rhyme, friction, dimmed, showPlaceholder,
-  variantRanges, hasHistory, justCopied, dropTarget,
-  onChange, onEnter, onBackspaceAtStart, onFocus, onBlurLine, onSelectionChange, onFrictionTap, onVariantTap, onHistoryTap, onLongPressCopy, inputRef,
+  variantRanges, chords, hasHistory, justCopied, dropTarget,
+  onChange, onEnter, onBackspaceAtStart, onFocus, onBlurLine, onSelectionChange, onFrictionTap, onVariantTap, onHistoryTap, onLongPressCopy, onRemoveChord, inputRef,
 }) {
   // Live, not just on submit — the moment the line reads as addressing the
   // muse (the wake word + its disambiguating comma/colon typed), the row's
@@ -159,7 +166,7 @@ function LineRow({
 
   return (
     <div
-      className={`ne-row${dimmed ? ' ne-row-dimmed' : ''}${isMuseCommand ? ' ne-row-muse' : ''}${previewText != null ? ' ne-row-preview' : ''}${justCopied ? ' ne-row-copied' : ''}${dropTarget ? ' ne-row-drop-target' : ''}`}
+      className={`ne-row${dimmed ? ' ne-row-dimmed' : ''}${isMuseCommand ? ' ne-row-muse' : ''}${previewText != null ? ' ne-row-preview' : ''}${justCopied ? ' ne-row-copied' : ''}${dropTarget ? ' ne-row-drop-target' : ''}${chords?.length ? ' ne-row-has-chords' : ''}`}
       data-line-index={index}
     >
       <div className="ne-gutter">
@@ -188,6 +195,12 @@ function LineRow({
         onTouchCancel={clearPressTimer}
       >
         <LineHighlight text={displayedText} ranges={variantRanges} />
+        {/* Chord symbols aligned above the exact words they're strummed on,
+            plus the transparent text mirror the chord drag-and-drop
+            resolves a drop's character offset against — rendered for every
+            line, chorded or not, because an empty line is exactly the one
+            you're about to drop the first chord onto. */}
+        <LineChordStrip text={displayedText} chords={chords} onRemove={onRemoveChord} />
         <textarea
           ref={setRefs}
           className="ne-line-input"
@@ -286,10 +299,24 @@ export default function NoteEditorScreen({
   // approach as openPopover/handleCultureFromSelection, since `selection`
   // itself gets cleared the moment the sheet opens (see handleOpenResourcePicker).
   const [resourcePicker, setResourcePicker] = useState(null);
-  // Which line a dragged resource is currently hovering over (see
-  // ResourcePickerSheet's long-press-drag) — drives LineRow's own
-  // dropTarget highlight. null outside of an active drag.
+  // Which line a dragged resource OR chord is currently hovering over (see
+  // ResourcePickerSheet's / ChordStrumSheet's long-press-drag) — drives
+  // LineRow's own dropTarget highlight. null outside of an active drag.
   const [dropTargetIndex, setDropTargetIndex] = useState(null);
+  // Every chord attached to a word range anywhere in this block (one query,
+  // see loadLineChords). Keyed in the DB by (line_id, line_index); the span
+  // itself is re-resolved from anchor_text against the live text on every
+  // render (chordsByLine below), never trusted from the stored offsets.
+  const [lineChords, setLineChords] = useState([]);
+  // This section's recorded right-hand strum pattern (one row per section)
+  // — { bpm, pattern } or null.
+  const [strum, setStrum] = useState(null);
+  // A captured selection/caret snapshot ({lineIndex, start, end}) while the
+  // Acordes y rasgueo sheet is open, or an empty object when it was opened
+  // with nothing focused (the strum recorder needs no target). Same "static
+  // snapshot at open time" approach as openPopover / handleOpenResourcePicker,
+  // since `selection` is cleared the moment the sheet opens.
+  const [chordSheet, setChordSheet] = useState(null);
   // Text a line held when it last gained focus — compared on blur to decide
   // whether the previous wording is worth logging to line_history.
   const focusBaselineRef = useRef({});
@@ -332,10 +359,21 @@ export default function NoteEditorScreen({
     loadNoteAudioFor(note.id).then(({ data }) => { if (!cancelled) setAudioBySection(data || []); });
     loadWordVariants(note.id).then(({ data }) => { if (!cancelled) setWordVariants(data || []); });
     loadLineHistory(note.id).then(({ data }) => { if (!cancelled) setLineHistory(data || []); });
+    loadStrumPattern(note.id).then(({ data }) => { if (!cancelled) setStrum(data || null); });
     undoRef.current = { undo: [], redo: [] };
     focusBaselineRef.current = {};
     return () => { cancelled = true; };
   }, [note.id]);
+
+  // Chords hang off the block's `lines` row, not off the section, so they
+  // load on lineId rather than note.id — and a brand-new note has no lines
+  // row yet, in which case there is simply nothing to attach a chord to.
+  useEffect(() => {
+    if (!lineId) { setLineChords([]); return undefined; }
+    let cancelled = false;
+    loadLineChords(lineId).then(({ data }) => { if (!cancelled) setLineChords(data || []); });
+    return () => { cancelled = true; };
+  }, [lineId]);
 
   const handleAudioRecorded = useCallback((memo) => {
     if (memo) setAudioBySection((cur) => [...cur, memo]);
@@ -390,6 +428,28 @@ export default function NoteEditorScreen({
     });
     return map;
   }, [wordVariants, lineTexts]);
+
+  // Chord pills per physical line, with every span re-resolved against the
+  // live text on every edit — exactly the same treatment variantRangesByLine
+  // gives word variants, for the same reason: a chord stored at offset 14
+  // is at offset 19 the moment five characters are typed in front of it, so
+  // the stored offsets are only a tie-breaker and anchor_text is what
+  // actually locates it. A chord whose anchor has been typed over entirely
+  // is simply not drawn (detached, not deleted) — it comes back if the word
+  // does, and is removable from the line it was on in the meantime only
+  // once it reappears. Sorted by position so the de-collision pass in
+  // LineChordStrip reads left to right.
+  const chordsByLine = useMemo(() => {
+    const map = {};
+    lineChords.forEach((c) => {
+      const text = lineTexts[c.line_index];
+      if (text == null) return;
+      const range = resolveChordRange(c, text);
+      if (range) (map[c.line_index] ??= []).push({ id: c.id, chordName: c.chord_name, ...range });
+    });
+    Object.values(map).forEach((arr) => arr.sort((a, b) => a.start - b.start));
+    return map;
+  }, [lineChords, lineTexts]);
 
   const lineHistoryByIndex = useMemo(() => {
     const map = {};
@@ -774,6 +834,109 @@ export default function NoteEditorScreen({
     setDropTargetIndex(null);
   }, [lines, persist, pushUndo, logLineHistory]);
 
+  // ─── Chords on a word range ───────────────────────────────────────────────
+  // KeyboardAccessoryBar → Acordes y rasgueo. Like Recursos (and unlike
+  // Rima/Alternativa), it needs no selection to be useful: the strum
+  // recorder is section-level, and a chord with just a caret attaches to the
+  // word under it. Captures the target as a static snapshot at open time
+  // because `selection` is gone the moment the sheet takes focus.
+  const handleOpenChordSheet = useCallback(() => {
+    if (selection) {
+      const text = lines[selection.lineIndex]?.text ?? '';
+      setChordSheet({ lineIndex: selection.lineIndex, start: selection.before.length, end: text.length - selection.after.length });
+    } else if (focusedIndex != null) {
+      const line = lines[focusedIndex];
+      const el = rowRefs.current[line?.id];
+      const caret = el ? el.selectionStart : (line?.text.length ?? 0);
+      setChordSheet({ lineIndex: focusedIndex, start: caret, end: caret });
+    } else {
+      setChordSheet({}); // strum-only entry — nowhere to put a chord, and that's fine
+    }
+    setSelection(null);
+    setFocusedIndex(null);
+  }, [selection, focusedIndex, lines]);
+
+  // The one place a chord actually gets attached, shared by the sheet's tap
+  // (at the captured selection/caret) and its drag (at a dropped word).
+  // `lineIndex`/`offsets` come in already decided; the word-boundary snap and
+  // the "same range replaces, different range accumulates" rule live here so
+  // both entry points obey them identically.
+  const attachChord = useCallback(async (lineIndex, rawStart, rawEnd, chordName) => {
+    const name = (chordName || '').trim();
+    const text = lines[lineIndex]?.text ?? '';
+    if (!name || !lineId || !text.trim()) return;
+    const range = snapRangeToWords(text, rawStart, rawEnd);
+    if (!range) return;
+    const anchorText = text.slice(range.start, range.end);
+
+    // Part A's one replacement case: a chord landing on the EXACT same span
+    // as an existing one renames it rather than stacking a second,
+    // overlapping symbol on the identical word. Any other span accumulates.
+    const existing = lineChords.find((c) => (
+      c.line_index === lineIndex && sameRange(resolveChordRange(c, text), range)
+    ));
+    if (existing) {
+      if (existing.chord_name === name) return;
+      const { data } = await updateLineChord(existing.id, { chord_name: name, anchor_text: anchorText, start_offset: range.start, end_offset: range.end });
+      setLineChords((cur) => cur.map((c) => (c.id === existing.id ? (data || { ...c, chord_name: name }) : c)));
+      return;
+    }
+
+    const { data, error } = await addLineChord(lineId, lineIndex, {
+      anchorText, startOffset: range.start, endOffset: range.end, chordName: name,
+    });
+    if (!error && data) setLineChords((cur) => [...cur, data]);
+  }, [lines, lineId, lineChords]);
+
+  // Tap a chord in the palette (or type one into the free-text field) — the
+  // typed/desktop path, and the fallback whenever dragging isn't practical.
+  const handlePickChord = useCallback((chordName) => {
+    const target = chordSheet;
+    if (!target || target.lineIndex == null) return;
+    attachChord(target.lineIndex, target.start, target.end, chordName);
+  }, [chordSheet, attachChord]);
+
+  // ChordStrumSheet's long-press-and-drag → dropped somewhere over the
+  // editor. Unlike handleDropResourceOnLine (which only needs to know WHICH
+  // line, and appends to its end), a chord has to land on a specific word:
+  // the line comes from the same elementFromPoint hit-test, then the
+  // character offset under the finger comes from offsetFromPoint against
+  // that line's own text mirror, and wordRangeAt (inside attachChord's
+  // snapRangeToWords) turns it into a whole-word anchor.
+  const handleDropChord = useCallback((x, y, chordName) => {
+    setDropTargetIndex(null);
+    const rowEl = document.elementFromPoint(x, y)?.closest('[data-line-index]');
+    if (!rowEl) return;
+    const lineIndex = Number(rowEl.dataset.lineIndex);
+    const text = lines[lineIndex]?.text ?? '';
+    if (!text.trim()) return; // an empty line has no word to sit a chord over
+    const mirror = rowEl.querySelector('.lc-mirror');
+    const offset = offsetFromPoint(mirror, x, y);
+    const word = wordRangeAt(text, offset ?? 0);
+    if (!word) return;
+    attachChord(lineIndex, word.start, word.end, chordName);
+  }, [lines, attachChord]);
+
+  const handleRemoveChord = useCallback(async (id) => {
+    setLineChords((cur) => cur.filter((c) => c.id !== id));
+    await deleteLineChord(id);
+  }, []);
+
+  // ─── Strum pattern ────────────────────────────────────────────────────────
+  const handleSaveStrum = useCallback(async (bpmValue, pattern) => {
+    // Optimistic: the strip should show the pattern the moment Guardar is
+    // tapped, not a round trip later — a save that fails leaves the local
+    // copy, which is the same tradeoff every other write on this screen makes.
+    setStrum((cur) => ({ ...(cur || {}), section_id: note.id, bpm: bpmValue, pattern }));
+    const { data } = await saveStrumPattern(note.id, bpmValue, pattern);
+    if (data) setStrum(data);
+  }, [note.id]);
+
+  const handleDeleteStrum = useCallback(async () => {
+    setStrum(null);
+    await deleteStrumPattern(note.id);
+  }, [note.id]);
+
   const handleVariantTap = useCallback((variantId) => {
     setWordVariantSheet({ variantId });
   }, []);
@@ -962,7 +1125,7 @@ export default function NoteEditorScreen({
   // this so nothing ever stacks over an open sheet.
   const anyOverlayOpen = Boolean(
     activePopover || toolsOpen || baulOpen || variantSheetOpen
-    || wordVariantSheet || lineHistorySheet != null || resourcePicker,
+    || wordVariantSheet || lineHistorySheet != null || resourcePicker || chordSheet,
   );
 
   // Consumed exactly once, on the render where NoteAudioBar actually mounts
@@ -995,6 +1158,20 @@ export default function NoteEditorScreen({
           <button className="ne-done" onClick={onClose}>Hecho</button>
         </div>
 
+        {/* The recorded right-hand strum for this whole section, surfaced
+            right under the header — above the lyric sheet, not inside it,
+            because it belongs to the section rather than to any one line
+            (unlike the chord pills, which sit on their own words). Tapping
+            it reopens the recorder on the Rasgueo tab. Hidden entirely when
+            nothing has been recorded: an empty "no strum yet" row would be
+            permanent chrome earning nothing. */}
+        {strum?.pattern?.length > 0 && (
+          <button className="ne-strum-strip" onClick={() => setChordSheet({ tab: 'strum' })} title="editar el rasgueo de esta parte">
+            <span className="ne-strum-bpm">{strum.bpm}<small>BPM</small></span>
+            <StrumArrows pattern={strum.pattern} min={11} max={22} className="strum-arrows-compact" />
+          </button>
+        )}
+
         <div className="ne-sheet">
         {lines.map((line, i) => (
           <LineRow
@@ -1009,6 +1186,7 @@ export default function NoteEditorScreen({
             showPlaceholder={i === lines.length - 1}
             dimmed={focusModeOn && focusedIndex !== null && focusedIndex !== i}
             variantRanges={variantRangesByLine[i]}
+            chords={chordsByLine[i]}
             hasHistory={lineHistoryByIndex[i]?.length > 0}
             onChange={handleLineChange}
             onEnter={handleEnter}
@@ -1020,6 +1198,7 @@ export default function NoteEditorScreen({
             onVariantTap={handleVariantTap}
             onHistoryTap={handleHistoryTap}
             onLongPressCopy={handleLongPressCopy}
+            onRemoveChord={handleRemoveChord}
             justCopied={copiedIndex === i}
             dropTarget={dropTargetIndex === i}
             inputRef={(id, el) => {
@@ -1047,6 +1226,7 @@ export default function NoteEditorScreen({
           onUndo={() => runBarAction(handleUndo)}
           onRedo={() => runBarAction(handleRedo)}
           onAudio={handleOpenAudioBar}
+          onChord={() => runBarAction(handleOpenChordSheet)}
         />
       )}
 
@@ -1101,6 +1281,20 @@ export default function NoteEditorScreen({
           onClose={() => setResourcePicker(null)}
           onDragHoverLine={setDropTargetIndex}
           onDropOnLine={handleDropResourceOnLine}
+        />
+      )}
+
+      {chordSheet && (
+        <ChordStrumSheet
+          initialTab={chordSheet.tab || 'chords'}
+          savedPattern={strum?.pattern || []}
+          savedBpm={strum?.bpm}
+          onPickChord={handlePickChord}
+          onSavePattern={handleSaveStrum}
+          onDeletePattern={handleDeleteStrum}
+          onDragHoverLine={setDropTargetIndex}
+          onDropChord={handleDropChord}
+          onClose={() => { setChordSheet(null); setDropTargetIndex(null); }}
         />
       )}
 

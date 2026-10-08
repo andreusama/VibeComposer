@@ -275,9 +275,9 @@ describe('selectDiverseSuggestions', () => {
 describe('applyMuseVerification — SURGEON/ARCHITECT', () => {
   const baseCtx = { verseText: 'El cielo se cae al suelo\nY nadie sabe donde ir', lang: 'es', dialect: 'central' };
 
-  it('narrows to suggestions within ±2 syllables of the target line', () => {
+  it('narrows ARCHITECT to suggestions within ±2 syllables of the target line', () => {
     const parsed = {
-      action_type: 'SURGEON',
+      action_type: 'ARCHITECT',
       targetLineText: 'casa', // 2 syllables
       isRhymeRequest: false, rhymeTargetWord: null,
       suggestions: [
@@ -291,6 +291,27 @@ describe('applyMuseVerification — SURGEON/ARCHITECT', () => {
     expect(texts).toContain('mesa');
     expect(texts).toContain('television');
     expect(texts).not.toContain('universidad');
+  });
+
+  // SURGEON is a precision-fix mode now (see its prompt section in
+  // museApi.js) — "keeps the exact meter" should mean exactly that, so its
+  // tolerance is tighter than ARCHITECT's genuinely-more-latitude continuation.
+  it('narrows SURGEON to a tighter ±1 syllable tolerance', () => {
+    const parsed = {
+      action_type: 'SURGEON',
+      targetLineText: 'casa', // 2 syllables
+      isRhymeRequest: false, rhymeTargetWord: null,
+      suggestions: [
+        { text: 'mesa', type: null }, // 2 syllables — survives
+        { text: 'papel', type: null }, // 2 syllables — survives
+        { text: 'television', type: null }, // 4 syllables — outside ±1, filtered out
+      ],
+    };
+    applyMuseVerification(parsed, { ...baseCtx, verseText: 'casa' });
+    const texts = parsed.suggestions.map((s) => s.text);
+    expect(texts).toContain('mesa');
+    expect(texts).toContain('papel');
+    expect(texts).not.toContain('television');
   });
 
   it('falls back to the unfiltered pool if the metric filter would empty it', () => {
@@ -765,13 +786,19 @@ describe('buildCulturalResonance', () => {
     queryRhymeCandidates.mockResolvedValue({ data: [], error: null });
   });
 
-  it('is disabled entirely for SURGEON — never even queries the lexicon', async () => {
+  // SURGEON used to skip this engine entirely — the one generative mode
+  // with zero retrieval grounding, pure freestyle under a meter constraint.
+  // Now that it's reframed as a targeted technical fix (see its prompt
+  // section), a rhyme-related fix should use a real, verified word same as
+  // ARCHITECT already does — so it runs the same pipeline as an unforced
+  // turn, not the WORD_BANK-style short circuit.
+  it('runs the same as an unforced turn for SURGEON — no longer skipped', async () => {
     const result = await buildCulturalResonance({
       verseText: 'Cruzó la frontera a lomos de un caballo',
       targetVerse: null, lang: 'es', dialect: 'central', forceMode: 'SURGEON',
     });
-    expect(result).toBeNull();
-    expect(queryRhymeCandidates).not.toHaveBeenCalled();
+    expect(queryRhymeCandidates).toHaveBeenCalled();
+    expect(result).toEqual({ enabled: false, degraded: true, concept: 'caballo', reason: 'no_rhyme_match' });
   });
 
   it('is disabled entirely for WORD_BANK too — that mode is now a pure lexicon dictionary lookup, not a single-word selection', async () => {

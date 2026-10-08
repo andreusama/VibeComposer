@@ -592,7 +592,7 @@ export default function MusePopover({
               {hasSubstance ? (
                 <>
                   {targetVerse && (
-                    <button className="mp-chip" onClick={() => startFromCompose('reescribe este fragmento manteniendo la métrica', { forceMode: 'SURGEON' })}>reescríbelo</button>
+                    <button className="mp-chip" onClick={() => startFromCompose('diagnostica y corrige el problema técnico de esta línea (métrica, rima o repetición) con el mínimo cambio posible', { forceMode: 'SURGEON' })}>corrígelo</button>
                   )}
                   <button className="mp-chip" onClick={() => startFromCompose('termina o continúa este verso', { forceMode: 'ARCHITECT' })}>termina el verso</button>
                   <button className="mp-chip" onClick={() => startFromCompose('dame palabras y rimas para trabajar esta línea', { forceMode: 'WORD_BANK' })}>palabras / rimas</button>
@@ -818,6 +818,14 @@ export default function MusePopover({
 
         {!loading && !error && (response?.action_type === 'SURGEON' || response?.action_type === 'ARCHITECT') && (
           <div className="mp-deck">
+            {/* The model's own one-line reasoning — for SURGEON this is now
+                the diagnosis ("qué estaba roto"), see museApi.js's SURGEON
+                prompt section. Captured since this field has existed, but
+                never actually shown here before — SURGEON's whole redesign
+                is "say what's wrong, then fix only that," so hiding the
+                diagnosis would throw away the one thing that makes a
+                technical fix legible instead of another black-box rewrite. */}
+            {response.message && <p className="mp-answer mp-surgeon-diagnosis">{response.message}</p>}
             {queue.length === 0 && <p className="mp-deck-empty">No hay más opciones este turno — prueba a editar el verso directamente.</p>}
             {/* Exactly one card, always — see SuggestionCard's comment for
                 why. `key` on the suggestion's own text forces a clean

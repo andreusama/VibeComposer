@@ -38,9 +38,27 @@ describe('parseImportResponse', () => {
       ],
     });
     expect(parseImportResponse(raw)).toEqual([
-      { body: 'no hay mal que por bien no venga', type: 'proverb', tags: ['esperanza'], origin: null },
-      { body: 'la casa por la ventana', type: 'phrase', tags: [], origin: 'mensaje de Marta' },
+      { body: 'no hay mal que por bien no venga', type: 'proverb', tags: ['esperanza'], origin: null, source_page: null, source_line: null },
+      { body: 'la casa por la ventana', type: 'phrase', tags: [], origin: 'mensaje de Marta', source_page: null, source_line: null },
     ]);
+  });
+
+  it('stamps the given page onto every candidate, and parses a numeric or string line', () => {
+    const raw = JSON.stringify({
+      items: [
+        { body: 'uno', type: null, tags: [], origin: null, line: 6 },
+        { body: 'dos', type: null, tags: [], origin: null, line: '12' },
+        { body: 'tres', type: null, tags: [], origin: null, line: null },
+      ],
+    });
+    const result = parseImportResponse(raw, '42');
+    expect(result.map((c) => c.source_page)).toEqual(['42', '42', '42']);
+    expect(result.map((c) => c.source_line)).toEqual(['6', '12', null]);
+  });
+
+  it('ignores an unparseable line value rather than inventing one', () => {
+    const raw = JSON.stringify({ items: [{ body: 'x', type: null, tags: [], origin: null, line: { not: 'a line' } }] });
+    expect(parseImportResponse(raw)[0].source_line).toBeNull();
   });
 
   it('strips markdown fences', () => {
@@ -53,7 +71,7 @@ describe('parseImportResponse', () => {
       items: [{ body: 'la ESTRUCTURA es una selección de acontecimientos...', type: 'lesson', tags: ['estructura'], origin: 'pg 53' }],
     });
     expect(parseImportResponse(raw)).toEqual([
-      { body: 'la ESTRUCTURA es una selección de acontecimientos...', type: 'lesson', tags: ['estructura'], origin: 'pg 53' },
+      { body: 'la ESTRUCTURA es una selección de acontecimientos...', type: 'lesson', tags: ['estructura'], origin: 'pg 53', source_page: null, source_line: null },
     ]);
   });
 
@@ -65,7 +83,7 @@ describe('parseImportResponse', () => {
       ],
     });
     const result = parseImportResponse(raw);
-    expect(result).toEqual([{ body: 'real one', type: null, tags: ['a', 'b', 'c'], origin: null }]);
+    expect(result).toEqual([{ body: 'real one', type: null, tags: ['a', 'b', 'c'], origin: null, source_page: null, source_line: null }]);
   });
 
   it('returns an empty list for genuinely empty input (all noise, nothing worth keeping)', () => {
@@ -90,7 +108,13 @@ describe('segmentImportedText', () => {
     mockClaudeResponse(JSON.stringify({ items: [{ body: 'x', type: 'metaphor', tags: [], origin: null }] }));
     const result = await segmentImportedText('some pasted text');
     expect(result.truncated).toBe(false);
-    expect(result.candidates).toEqual([{ body: 'x', type: 'metaphor', tags: [], origin: null }]);
+    expect(result.candidates).toEqual([{ body: 'x', type: 'metaphor', tags: [], origin: null, source_page: null, source_line: null }]);
+  });
+
+  it('stamps the given page onto every candidate it returns', async () => {
+    mockClaudeResponse(JSON.stringify({ items: [{ body: 'x', type: null, tags: [], origin: null }] }));
+    const result = await segmentImportedText('some pasted text', '7');
+    expect(result.candidates[0].source_page).toBe('7');
   });
 
   it('truncates input over the cap and reports it', async () => {
@@ -114,11 +138,17 @@ describe('segmentImportedImage', () => {
   it('sends an image content block and returns parsed candidates', async () => {
     mockClaudeResponse(JSON.stringify({ items: [{ body: 'la vida es sueño', type: 'metaphor', tags: [], origin: null }] }));
     const result = await segmentImportedImage({ base64: 'ZmFrZQ==', mimeType: 'image/png' });
-    expect(result).toEqual({ truncated: false, candidates: [{ body: 'la vida es sueño', type: 'metaphor', tags: [], origin: null }] });
+    expect(result).toEqual({ truncated: false, candidates: [{ body: 'la vida es sueño', type: 'metaphor', tags: [], origin: null, source_page: null, source_line: null }] });
     const sentBody = JSON.parse(global.fetch.mock.calls[0][1].body);
     const blocks = sentBody.messages[0].content;
     expect(blocks[0]).toEqual({ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'ZmFrZQ==' } });
     expect(blocks[1].type).toBe('text');
+  });
+
+  it('stamps the given page onto candidates extracted from a photo', async () => {
+    mockClaudeResponse(JSON.stringify({ items: [{ body: 'x', type: null, tags: [], origin: null, line: 3 }] }));
+    const result = await segmentImportedImage({ base64: 'ZmFrZQ==', mimeType: 'image/png' }, '108');
+    expect(result.candidates[0]).toMatchObject({ source_page: '108', source_line: '3' });
   });
 
   it('defaults to image/jpeg when no mimeType is given', async () => {

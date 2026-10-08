@@ -47,13 +47,14 @@ Para cada candidato real que encuentres, decide:
 - "type": ${RESOURCE_TYPES.map((t) => `"${t}"`).join(' | ')} — solo si encaja con claridad, si no null. Distinción clave: "metaphor" es una comparación genuinamente literaria/poética (una imagen); "lesson" es un principio, una definición o una idea de oficio/análisis (ej. de un libro sobre escritura, música o cualquier arte) — la mayoría del contenido analítico o instructivo es "lesson", NO "metaphor".
 - "tags": 0 a 3 etiquetas cortas de tema (ej. "amor", "pérdida", "estructura") si es evidente, si no un array vacío
 - "origin": una nota breve de dónde parece venir DENTRO del propio texto pegado — una referencia de página tal cual aparece (ej. "pg 27"), un remitente nombrado ("mensaje de [nombre]") — si es evidente y verificable en el texto, si no null. Nunca inventes un origen.
+- "line": en QUÉ LÍNEA visible del texto/imagen que estás leyendo empieza este candidato (cuenta líneas desde 1, tal cual las ves — un renglón de una foto, una línea del texto pegado). Sirve para volver directo a ese punto exacto más tarde, así que tiene que ser una posición real que puedas contar, nunca una estimación inventada — si no puedes contarla con confianza (texto corrido sin saltos claros, candidato repartido en varias líneas sin un inicio obvio), deja null en vez de adivinar.
 
 Si el texto pegado no contiene ningún candidato real (todo es charla ordinaria sin nada rescatable, o está vacío de contenido), devuelve una lista vacía — no fuerces candidatos débiles solo por rellenar. Pero si el texto trae material ya curado (caso 1), el resultado por defecto debe ser una lista LARGA, no corta.
 
 Devuelve ÚNICAMENTE este JSON, sin explicación adicional:
 {
   "items": [
-    { "body": "...", "type": "phrase", "tags": ["..."], "origin": null }
+    { "body": "...", "type": "phrase", "tags": ["..."], "origin": null, "line": null }
   ]
 }`;
 
@@ -77,10 +78,24 @@ function toStringArray(value) {
 
 const VALID_TYPES = new Set(RESOURCE_TYPES);
 
+// A stray boolean/object/huge number in "line" shouldn't reach the DB as
+// anything but a short, real string — same defensive spirit as origin's own
+// check below, just also accepting a plain number (the model may return
+// either) since a line position is meaningful as text either way.
+function toLineString(value) {
+  if (typeof value === 'string' && value.trim()) return value.trim().slice(0, 20);
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return null;
+}
+
 // Defensive parsing, same philosophy as baulProcessor's parseBaulResponse:
 // sanitize what's salvageable, never throw. A malformed/empty response
 // becomes an empty candidate list rather than blocking the review screen.
-export function parseImportResponse(raw) {
+// `page` is stamped onto every candidate here, not asked of the model —
+// see segmentImportedText/segmentImportedImage below: the caller (which
+// page of the source this whole call was reading) always knows it more
+// reliably than a guess from inside one photo/paste ever could.
+export function parseImportResponse(raw, page = null) {
   try {
     const cleaned = (raw || '').replace(/```json|```/g, '').trim();
     const parsed = JSON.parse(cleaned);
@@ -91,6 +106,8 @@ export function parseImportResponse(raw) {
         type: VALID_TYPES.has(item.type) ? item.type : null,
         tags: toStringArray(item.tags).slice(0, 3),
         origin: typeof item.origin === 'string' && item.origin.trim() ? item.origin.trim() : null,
+        source_page: typeof page === 'string' && page.trim() ? page.trim() : null,
+        source_line: toLineString(item.line),
       }))
       .filter((item) => item.body);
   } catch {
@@ -104,15 +121,18 @@ export function parseImportResponse(raw) {
  * anything — the caller (ResourceImportSheet) owns turning accepted
  * candidates into real resources via resourcesData.js.
  * @param {string} rawText
- * @returns {Promise<{candidates: Array<{body:string,type:string|null,tags:string[],origin:string|null}>, truncated: boolean}>}
+ * @param {string|null} page - which page of the source this text is, if the
+ *   artist supplied one (see segmentImportedImage) — stamped onto every
+ *   candidate as source_page, not inferred by the model.
+ * @returns {Promise<{candidates: Array<{body:string,type:string|null,tags:string[],origin:string|null,source_page:string|null,source_line:string|null}>, truncated: boolean}>}
  */
-export async function segmentImportedText(rawText) {
+export async function segmentImportedText(rawText, page = null) {
   const text = String(rawText || '').trim();
   if (!text) return { candidates: [], truncated: false };
   const truncated = text.length > MAX_IMPORT_CHARS;
   const input = truncated ? text.slice(0, MAX_IMPORT_CHARS) : text;
   const raw = await callClaude(`Texto pegado:\n"""\n${input}\n"""`);
-  return { candidates: parseImportResponse(raw), truncated };
+  return { candidates: parseImportResponse(raw, page), truncated };
 }
 
 /**
@@ -120,16 +140,22 @@ export async function segmentImportedText(rawText) {
  * a printed poster) instead of pasted text — Claude reads the text in the
  * image directly, then applies the exact same curated-vs-noisy criteria.
  * @param {{base64: string, mimeType?: string}} image
- * @returns {Promise<{candidates: Array<{body:string,type:string|null,tags:string[],origin:string|null}>, truncated: boolean}>}
+ * @param {string|null} page - which page this photo is (the artist's own
+ *   count, typed once per photo — see ResourceImportSheet's single-photo
+ *   page field and its bulk mode's auto-incrementing one). Stamped onto
+ *   every candidate this call returns as source_page; never guessed from
+ *   the photo itself (a visible page number isn't always in frame or in a
+ *   consistent spot, and a wrong guess is worse than an honest blank).
+ * @returns {Promise<{candidates: Array<{body:string,type:string|null,tags:string[],origin:string|null,source_page:string|null,source_line:string|null}>, truncated: boolean}>}
  *   truncated is always false here — there's no length cap on an image the
  *   way there is on pasted text.
  */
-export async function segmentImportedImage({ base64, mimeType } = {}) {
+export async function segmentImportedImage({ base64, mimeType } = {}, page = null) {
   if (!base64) return { candidates: [], truncated: false };
   const content = [
     { type: 'image', source: { type: 'base64', media_type: mimeType || 'image/jpeg', data: base64 } },
     { type: 'text', text: 'Foto de una página, libreta o texto impreso. Lee el texto real que aparece en la imagen y aplica exactamente el mismo criterio de arriba sobre qué rescatar.' },
   ];
   const raw = await callClaude(content);
-  return { candidates: parseImportResponse(raw), truncated: false };
+  return { candidates: parseImportResponse(raw, page), truncated: false };
 }

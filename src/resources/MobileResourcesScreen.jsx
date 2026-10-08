@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   loadResourceLibrary, createResource, updateResource, deleteResource,
-  createFolder, deleteFolder, setResourceFolders, RESOURCE_TYPE_LABELS,
+  createFolder, deleteFolder, setResourceFolders, RESOURCE_TYPE_LABELS, formatSourceLoc,
 } from './resourcesData.js';
 import ResourceEditorSheet from './ResourceEditorSheet.jsx';
 import ResourceImportSheet from './ResourceImportSheet.jsx';
@@ -73,6 +73,7 @@ function NewResourceChooser({ onPick, onClose }) {
 }
 
 function ResourceCard({ resource, folderNames, onOpen }) {
+  const loc = formatSourceLoc(resource.source_page, resource.source_line);
   return (
     <button className="res-card" onClick={onOpen}>
       <p className="res-card-body">{resource.body}</p>
@@ -89,6 +90,9 @@ function ResourceCard({ resource, folderNames, onOpen }) {
       <div className="res-card-meta">
         {resource.type && <span className="res-card-type">{RESOURCE_TYPE_LABELS[resource.type]}</span>}
         {resource.origin && <span className="res-card-origin">{resource.origin}</span>}
+        {/* Independent of origin on purpose — a resource can have a page
+            without a named source, or vice versa. */}
+        {loc && <span className="res-card-loc">{loc}</span>}
       </div>
       {resource.tags?.length > 0 && (
         <div className="res-card-tags">

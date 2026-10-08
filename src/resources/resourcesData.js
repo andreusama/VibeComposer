@@ -47,8 +47,18 @@ export async function loadResourceLibrary(userId) {
   return { resources: resources || [], folders: folders || [], membership, error: null };
 }
 
-export async function createResource({ userId, body, type = null, tags = [], origin = null }) {
-  return supabase.from('resources').insert({ user_id: userId, body, type, tags, origin }).select().single();
+export async function createResource({ userId, body, type = null, tags = [], origin = null, source_page = null, source_line = null }) {
+  return supabase.from('resources').insert({ user_id: userId, body, type, tags, origin, source_page, source_line }).select().single();
+}
+
+// "p. 214, l. 6" — the shared display format for a resource's physical
+// location, used by both the resource card (MobileResourcesScreen.jsx) and
+// the import review list (ResourceImportSheet.jsx) so the two views never
+// drift apart. Returns null when neither is set, so callers can skip
+// rendering the badge entirely rather than showing an empty one.
+export function formatSourceLoc(sourcePage, sourceLine) {
+  if (!sourcePage && !sourceLine) return null;
+  return [sourcePage && `p. ${sourcePage}`, sourceLine && `l. ${sourceLine}`].filter(Boolean).join(', ');
 }
 
 export async function updateResource(id, patch) {

@@ -13,6 +13,8 @@ export default function ResourceEditorSheet({ resource, folders, memberFolderIds
   const [type, setType] = useState(resource?.type || null);
   const [tagsText, setTagsText] = useState((resource?.tags || []).join(', '));
   const [origin, setOrigin] = useState(resource?.origin || '');
+  const [sourcePage, setSourcePage] = useState(resource?.source_page || '');
+  const [sourceLine, setSourceLine] = useState(resource?.source_line || '');
   const [selectedFolders, setSelectedFolders] = useState(new Set(memberFolderIds));
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -31,11 +33,14 @@ export default function ResourceEditorSheet({ resource, folders, memberFolderIds
     setSaving(true);
     const tags = tagsText.split(',').map((t) => t.trim()).filter(Boolean);
     try {
-      await onSave({ body: trimmed, type, tags, origin: origin.trim() || null }, [...selectedFolders]);
+      await onSave({
+        body: trimmed, type, tags, origin: origin.trim() || null,
+        source_page: sourcePage.trim() || null, source_line: sourceLine.trim() || null,
+      }, [...selectedFolders]);
     } finally {
       setSaving(false);
     }
-  }, [body, type, tagsText, origin, selectedFolders, saving, onSave]);
+  }, [body, type, tagsText, origin, sourcePage, sourceLine, selectedFolders, saving, onSave]);
 
   return (
     <div className="baul-sheet-scrim" onClick={onClose}>
@@ -82,9 +87,29 @@ export default function ResourceEditorSheet({ resource, folders, memberFolderIds
           <input
             className="res-text-input"
             value={origin}
-            placeholder="Rayuela, p. 214 — un tío en el bar de la esquina…"
+            placeholder="Rayuela, un tío en el bar de la esquina…"
             onChange={(e) => setOrigin(e.target.value)}
           />
+
+          {/* Physical location, separate from origin ("which book") — a
+              small pair of fields so a resource card can show "p. 214, l. 6"
+              on its own and jump straight back to that exact spot, instead
+              of parsing a page number back out of a free-text sentence. */}
+          <div className="res-field-label">Página y línea</div>
+          <div className="res-source-loc-row">
+            <input
+              className="res-text-input res-source-loc-input"
+              value={sourcePage}
+              placeholder="p. ej. 214"
+              onChange={(e) => setSourcePage(e.target.value)}
+            />
+            <input
+              className="res-text-input res-source-loc-input"
+              value={sourceLine}
+              placeholder="línea, p. ej. 6"
+              onChange={(e) => setSourceLine(e.target.value)}
+            />
+          </div>
 
           <div className="res-field-label">Carpetas</div>
           <FolderChipPicker folders={folders} selectedIds={selectedFolders} onToggle={toggleFolder} onCreateFolder={onCreateFolder} />

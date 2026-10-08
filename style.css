@@ -6198,6 +6198,17 @@ body::before {
    against or bleed through. Discarding just swaps the next queued
    candidate into this same slot (MusePopover.jsx's handleDiscard). */
 .mp-deck { position: relative; }
+/* The one-line diagnosis above the deck (SURGEON's "qué estaba roto",
+   ARCHITECT's own reasoning) — a caption for the cards below, not prose on
+   its own, so it's deliberately lighter than .mp-answer's full-weight
+   OPEN_REFERENCE treatment (same muted/italic/secondary pattern as
+   .mp-deck-empty and .mp-wb-note, this sheet's existing "small aside" style). */
+.mp-surgeon-diagnosis {
+    font-style: italic;
+    font-size: var(--fs-secondary);
+    color: var(--muted);
+    margin-bottom: var(--space-2);
+}
 .mp-deck-empty {
     font-family: var(--font-body);
     font-style: italic;
@@ -6907,7 +6918,15 @@ body::before {
    next to the pick action, not inside it, same "div role=button, not a
    real <button>, so it can host an independently-tappable child" fix
    ProjectRow's own row needed. */
-.attach-option-wrap { margin-bottom: var(--space-2-5); }
+/* Explicit width, not auto — a flex item with no width shrink-wraps to its
+   own content under .baul-sheet-body's align-items:center, so without this
+   each option row sized itself off its own label length instead of the
+   sheet's real width (visible as mismatched margins/row sizes between
+   "Escribir un recurso" and "Importar texto", reported 2026-10-01). The
+   nested .attach-option's own width:100% needs a definite-width parent to
+   resolve against, same as it already gets everywhere .attach-option is
+   used WITHOUT this wrapper (BaulSheet.jsx, MobileProjectsScreen.jsx). */
+.attach-option-wrap { width: 100%; margin-bottom: var(--space-2-5); }
 .attach-option-wrap .attach-option-row { margin-bottom: 0; gap: 0; padding-right: var(--space-2); }
 .attach-option-main {
     flex: 1;
@@ -7742,6 +7761,10 @@ body::before {
     font-weight: 600;
 }
 .res-card-origin { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* "p. 214, l. 6" — physical location, separate from .res-card-origin
+   ("which book"). Its own small badge so it reads as a jump-back-here
+   coordinate, not just more free-text metadata. */
+.res-card-loc { flex-shrink: 0; padding: 1px 7px; border-radius: 999px; background: var(--bg-deep); font-weight: 600; }
 .res-card-tags { display: flex; flex-wrap: wrap; gap: var(--space-1-5); margin-top: var(--space-2); }
 .res-tag {
     display: inline-flex;
@@ -7793,6 +7816,10 @@ body::before {
     color: var(--ink);
     background: var(--surface);
 }
+/* Page + line side by side — two short, independent values, not one field
+   worth a full-width row each. */
+.res-source-loc-row { display: flex; gap: var(--space-2); }
+.res-source-loc-input { width: 0; flex: 1; }
 .res-save-btn { margin-top: var(--space-5); }
 .res-delete-btn { margin-top: var(--space-4); }
 
@@ -7869,6 +7896,39 @@ body::before {
    canvas's fluid-zoom variable) — override it here rather than let this
    mobile chip inherit that. */
 .res-import-file-chip { margin-bottom: var(--space-3); font-size: var(--fs-secondary); padding: var(--space-2-5) var(--space-3); }
+/* Sits right under the file chip — its own field, not folded into the
+   review-step page/line pair, since it's set once up front per photo. */
+.res-import-page-input { margin-bottom: var(--space-3); }
+/* Plain-text entry into bulk mode, not another dashed attach-style button —
+   it's a secondary path off the main one-photo flow, not a peer action. */
+.res-bulk-link {
+    display: block;
+    width: 100%;
+    text-align: center;
+    padding: var(--space-2) 0 var(--space-3);
+    border: none;
+    background: none;
+    color: var(--muted);
+    font-family: var(--font-sans);
+    font-size: var(--fs-utility);
+    text-decoration: underline;
+    cursor: pointer;
+}
+.res-bulk-link:disabled { opacity: 0.5; cursor: default; }
+.res-bulk-back-link { display: block; width: 100%; text-align: center; margin-top: var(--space-2); border: none; background: none; color: var(--muted); font-family: var(--font-sans); font-size: var(--fs-utility); cursor: pointer; }
+.res-bulk-back-link:disabled { opacity: 0.5; cursor: default; }
+.res-bulk-list { display: flex; flex-direction: column; gap: var(--space-2); margin: 0 0 var(--space-3); max-height: 40vh; overflow-y: auto; }
+.res-bulk-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-2-5);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    background: var(--surface);
+}
+.res-bulk-row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-sans); font-size: var(--fs-utility); color: var(--ink); }
+.res-bulk-row-page { flex-shrink: 0; width: 64px; padding: var(--space-1-5) var(--space-2); font-size: var(--fs-utility); }
 .res-import-list { display: flex; flex-direction: column; gap: var(--space-2); margin: var(--space-3) 0; max-height: 50vh; overflow-y: auto; }
 .res-import-row {
     display: flex;
@@ -8014,3 +8074,139 @@ body::before {
 .res-manage-folder-cancel { background: var(--bg-deep); color: var(--graphite); }
 .res-manage-folder-confirm-btn { background: var(--rose); color: #FFFFFF; }
 .res-manage-folder-confirm-btn:disabled, .res-manage-folder-cancel:disabled { opacity: 0.5; cursor: default; }
+
+/* ── Collaboration: presence stack (thread header) + collaborators sheet ── */
+.thread-presence-stack {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    margin-right: var(--space-1);
+    border: none;
+    background: none;
+    cursor: pointer;
+    padding: 0;
+}
+.thread-presence-avatar {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-sans);
+    font-size: 11px;
+    font-weight: 700;
+    color: #FFFFFF;
+    background: var(--accent);
+    border: 2px solid var(--paper-deeper);
+    margin-left: -8px;
+}
+.thread-presence-avatar:first-child { margin-left: 0; }
+.thread-presence-more { background: var(--muted); }
+
+.collab-sheet-body { align-items: stretch; text-align: left; }
+.collab-sheet-body .attach-title {
+    align-self: center;
+    display: flex;
+    align-items: center;
+    gap: var(--space-1-5);
+}
+.collab-sheet-body .attach-sub { align-self: center; text-align: center; }
+.collab-list { display: flex; flex-direction: column; gap: var(--space-2); margin-bottom: var(--space-3); }
+.collab-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2-5);
+    min-height: 52px;
+    padding: var(--space-1-5) var(--space-1) var(--space-1-5) var(--space-3);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    background: var(--surface);
+}
+.collab-avatar {
+    flex-shrink: 0;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-sans);
+    font-weight: 700;
+    font-size: var(--fs-utility);
+    color: #FFFFFF;
+    background: var(--accent);
+}
+.collab-row-info { flex: 1; display: flex; flex-direction: column; gap: 1px; }
+.collab-row-name { font-family: var(--font-sans); font-size: var(--fs-body); color: var(--ink); }
+.collab-row-role { font-family: var(--font-sans); font-size: var(--fs-utility); color: var(--muted); text-transform: capitalize; }
+.collab-row-remove {
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: none;
+    color: var(--rose);
+    cursor: pointer;
+}
+.collab-row-remove:disabled { opacity: 0.5; cursor: default; }
+
+.collab-divider { height: 1px; background: var(--hairline); margin: var(--space-3) 0; }
+.collab-invites-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    margin-bottom: var(--space-2);
+}
+.collab-invites-label { margin-bottom: 0 !important; max-width: none; }
+.collab-new-invite-btn {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: var(--space-1-5) var(--space-3);
+    border: none;
+    border-radius: 999px;
+    background: var(--accent);
+    color: #FFFFFF;
+    font-family: var(--font-sans);
+    font-size: var(--fs-utility);
+    font-weight: 600;
+    cursor: pointer;
+}
+.collab-new-invite-btn:disabled { opacity: 0.5; cursor: default; }
+.collab-invite-list { display: flex; flex-direction: column; gap: var(--space-1-5); }
+.collab-invite-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    min-height: 44px;
+    padding: 0 var(--space-1) 0 var(--space-3);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    background: var(--surface);
+}
+.collab-invite-code {
+    flex: 1;
+    font-family: var(--font-sans);
+    font-size: var(--fs-utility);
+    color: var(--muted);
+    letter-spacing: 0.02em;
+}
+.collab-invite-copy, .collab-invite-revoke {
+    flex-shrink: 0;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: none;
+    color: var(--muted);
+    cursor: pointer;
+}
+.collab-invite-revoke { color: var(--rose); }

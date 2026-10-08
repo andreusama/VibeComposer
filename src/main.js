@@ -7,6 +7,7 @@ import MobileHomePager from './screens/MobileHomePager.jsx';
 import MobileAlbumScreen from './screens/MobileAlbumScreen.jsx';
 import MuseEyeScreen from './canvas/MuseEyeScreen.jsx';
 import * as LoadingScreen     from './screens/loading.js';
+import * as JoiningScreen     from './screens/joining.js';
 import * as StudioScreen      from './screens/studio.js';
 import * as AuthScreen        from './screens/auth.js';
 import * as HomeScreen        from './screens/home.js';
@@ -53,6 +54,18 @@ function render(state) {
   if (!state.sessionChecked) {
     if (reactRoot) { reactRoot.unmount(); reactRoot = null; }
     app.innerHTML = LoadingScreen.render();
+    lastEffectiveScreen = null;
+    return;
+  }
+
+  // A pending invite redeems itself right after sign-in (inviteFlow.js),
+  // before anything else about where to land is decided — this screen owns
+  // the whole page until that resolves, same as the sessionChecked gate
+  // above.
+  if (state.inviteStatus) {
+    if (reactRoot) { reactRoot.unmount(); reactRoot = null; }
+    app.innerHTML = JoiningScreen.render(state);
+    JoiningScreen.attach(state);
     lastEffectiveScreen = null;
     return;
   }

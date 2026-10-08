@@ -232,6 +232,12 @@ export default function NoteEditorScreen({
   note, userId, lyricLanguage, lyricDialect, chordSummary, bpm,
   songId, lyricDna, songStructure, onLyricDnaUpdated,
   onClose, onTextChange, onTypeChange, onDeleted, onCreateVariant,
+  // Latest text SongThreadScreen knows about for this note, kept fresh by
+  // its realtime subscription (see useLiveSongSync.js) — only ever adopted
+  // when it's a genuine remote change and it's safe to (see the effect
+  // below), never a prop this component treats as its real source of truth
+  // the way `note` itself is.
+  liveText,
 }) {
   const lineId = note.lines?.[0]?.id;
   const [type, setType] = useState(note.type);
@@ -314,6 +320,8 @@ export default function NoteEditorScreen({
     setLines(ensureTrailingEmpty(toLineObjects(splitIntoLines(note.lines?.[0]?.text || ''))));
     setType(note.type);
     setCustomLabel(note.custom_label || '');
+    lastSavedTextRef.current = note.lines?.[0]?.text || '';
+    pendingSaveRef.current = false;
   }, [note.id]);
 
   useEffect(() => {
@@ -400,15 +408,39 @@ export default function NoteEditorScreen({
   // affordance, not real content — stripped before it ever reaches the
   // parent's card-preview mirror or the DB, so saved text never picks up a
   // dangling newline from just having opened the editor.
+  // Tracks what WE last wrote (vs. what the server has) so a realtime echo
+  // of our own save never gets mistaken for a collaborator's edit, and
+  // whether a local edit is still debouncing — both read by the live-merge
+  // effect further down, which must never clobber text out from under an
+  // in-flight local save.
+  const lastSavedTextRef = useRef(note.lines?.[0]?.text || '');
+  const pendingSaveRef = useRef(false);
+
   const persist = useCallback((nextLines) => {
     const content = nextLines[nextLines.length - 1].text === '' ? nextLines.slice(0, -1) : nextLines;
     const joined = content.map((l) => l.text).join('\n');
     onTextChange?.(note.id, joined);
     if (saveTimer.current) clearTimeout(saveTimer.current);
+    pendingSaveRef.current = true;
     saveTimer.current = setTimeout(() => {
+      saveTimer.current = null;
       if (lineId) saveNoteText(lineId, joined);
+      lastSavedTextRef.current = joined;
+      pendingSaveRef.current = false;
     }, 500);
   }, [note.id, lineId, onTextChange]);
+
+  // A collaborator's edit to this exact note, picked up live. Only ever
+  // adopted when it's safe: not our own write echoing back, nobody's
+  // actively focused in a line here, and no local edit is still mid-save —
+  // otherwise this would yank text out from under an active keystroke,
+  // which no amount of "but it's more current" justifies.
+  useEffect(() => {
+    if (liveText == null || liveText === lastSavedTextRef.current) return;
+    if (focusedIndex !== null || pendingSaveRef.current) return;
+    lastSavedTextRef.current = liveText;
+    setLines(ensureTrailingEmpty(toLineObjects(splitIntoLines(liveText))));
+  }, [liveText, focusedIndex]);
 
   // `persist` calls the parent's onTextChange, which sets state on
   // SongThreadScreen — that can never happen from inside a setLines

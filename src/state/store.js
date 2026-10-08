@@ -1,4 +1,5 @@
 import { supabase, onAuthChange, getSession } from '../utils/supabaseClient.js';
+import { captureInviteFromUrl, consumeStoredInvite } from '../screens/inviteFlow.js';
 
 // ─── Initial state ─────────────────────────────────────────────────────────────
 
@@ -33,14 +34,30 @@ let state = {
   // let the projects screens flash an empty state during the real fetch.
   songsLoaded:    false,
   projectError:   null,
+  // Set while a ?invite=<code> link is being redeemed after sign-in (see
+  // src/screens/inviteFlow.js) — null the rest of the time. main.js shows a
+  // small transient screen for 'joining'/'error' instead of the normal one.
+  inviteStatus:   null,
+  inviteError:    null,
 };
 
 // ─── Auth session sync ──────────────────────────────────────────────────────────
 // Hydrates state.session on boot and keeps it in sync (magic-link redirects,
 // sign-out from another tab, token refresh).
 
-getSession().then((session) => setState({ session, sessionChecked: true }));
-onAuthChange((session) => setState({ session }));
+// Must run before the first setState so a pending invite is stashed even if
+// this tab has no session yet (captureInviteFromUrl is synchronous and
+// doesn't depend on auth state at all).
+captureInviteFromUrl();
+
+getSession().then((session) => {
+  setState({ session, sessionChecked: true });
+  if (session) consumeStoredInvite();
+});
+onAuthChange((session) => {
+  setState({ session });
+  if (session) consumeStoredInvite();
+});
 
 // ─── Pub/sub ───────────────────────────────────────────────────────────────────
 

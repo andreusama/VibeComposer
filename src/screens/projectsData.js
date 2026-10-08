@@ -16,7 +16,29 @@ export async function loadProjectSummaries() {
   }
 }
 
-const SONG_COLUMNS = 'id, title, updated_at, lyric_language, lyric_dialect';
+// One song by id, same column shape + preview defaults as a row out of
+// loadProjectSummaries — used when a song needs to become state.activeSong
+// without having gone through the normal projects-list flow first, e.g.
+// landing straight on a shared song after redeeming a collaboration invite
+// (see src/screens/inviteFlow.js). RLS (is_song_participant) is what
+// actually decides whether this resolves at all.
+export async function loadSongById(id) {
+  try {
+    const { data, error } = await withTimeout(
+      supabase.from('songs').select(`${SONG_COLUMNS}, album_id, track_position, sort_order`).eq('id', id).single()
+    );
+    if (error) return { song: null, error: error.message };
+    return { song: { ...data, lineCount: 0, progressionCount: 0, nodeCount: 0, previewNodes: [], previewLinks: [] }, error: null };
+  } catch (err) {
+    return { song: null, error: err.message };
+  }
+}
+
+// user_id is the actual DB owner (songs_delete/invite-management's RLS
+// check — see is_song_owner in migration_project_collaboration.sql), needed
+// client-side so the UI knows who gets owner-only controls without a
+// separate round trip for it.
+const SONG_COLUMNS = 'id, title, updated_at, lyric_language, lyric_dialect, user_id';
 
 async function fetchProjectSummaries() {
   // album_id/track_position come from migration_albums.sql, which creates

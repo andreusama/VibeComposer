@@ -117,3 +117,5 @@ export const IcRadioOn = (p) => <Svg {...p}><circle cx="12" cy="12" r="8.5" /><c
 export const IcRadioOff = (p) => <Svg {...p}><circle cx="12" cy="12" r="8.5" /></Svg>;
 export const IcFolder = (p) => <Svg {...p}><path d="M3.5 6.5A1.5 1.5 0 0 1 5 5h4l2 2.5h8A1.5 1.5 0 0 1 20.5 9v9a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 18Z" /></Svg>;
 export const IcQuote = (p) => <Svg {...p}><path d="M7.5 9.5c-2 0-3.5 1.6-3.5 3.7 0 1.9 1.4 3.3 3.2 3.3.4 2-1 3.7-2.7 4.3" /><path d="M16.5 9.5c-2 0-3.5 1.6-3.5 3.7 0 1.9 1.4 3.3 3.2 3.3.4 2-1 3.7-2.7 4.3" /></Svg>;
+export const IcUsers = (p) => <Svg {...p}><circle cx="9" cy="8" r="3.2" /><path d="M3 19c0-3.2 2.7-5.2 6-5.2s6 2 6 5.2" /><path d="M16 5.3a3.2 3.2 0 0 1 0 6.1" /><path d="M15.5 13.9c2.8.4 4.5 2.2 4.5 5.1" /></Svg>;
+export const IcLink = (p) => <Svg {...p}><path d="M9.5 14.5 14.5 9.5" /><path d="M11 7l1.5-1.5a3.8 3.8 0 0 1 5.4 5.4L16.4 12.4" /><path d="M13 17l-1.5 1.5a3.8 3.8 0 0 1-5.4-5.4L7.6 11.6" /></Svg>;

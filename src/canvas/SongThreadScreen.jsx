@@ -17,8 +17,12 @@ import useCabinetSwipe from '../mobile/useCabinetSwipe.js';
 import TempoPulse from '../mobile/TempoPulse.jsx';
 import {
   IcChevronLeft, IcChevronRight, IcMore, IcPlus, IcCheck, IcMuse,
-  IcGlobe, IcMetronome, IcRepeat, IcCopy, IcExport, IcTrash, IcBook,
+  IcGlobe, IcMetronome, IcRepeat, IcCopy, IcExport, IcTrash, IcBook, IcUsers,
 } from '../mobile/icons.jsx';
+import CollaboratorsSheet from '../mobile/CollaboratorsSheet.jsx';
+import useLiveSongSync from './useLiveSongSync.js';
+import useProjectPresence from './useProjectPresence.js';
+import { loadMyProfile } from './collaborationData.js';
 
 function describeAdjacentNote(note) {
   return { type: note.custom_label || note.type, text: note.lines?.[0]?.text || '' };
@@ -31,10 +35,17 @@ const capitalize = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 // Exportar / Eliminar proyecto. Renombrar salió de aquí: ahora se toca el
 // título directamente. Duplicar y Exportar no tienen backend todavía —
 // mostrados pero desactivados.
-function SongMenu({ langLabel, bpmLabel, onOpenLanguage, onOpenTempo, onRepeatedWords, onDelete, onClose }) {
+function SongMenu({ langLabel, bpmLabel, collabLabel, onOpenLanguage, onOpenTempo, onOpenCollaborators, onRepeatedWords, onDelete, onClose }) {
   return (
     <div className="thread-menu-backdrop" onClick={onClose}>
       <div className="thread-menu" onClick={(e) => e.stopPropagation()}>
+        <button className="thread-menu-item" onClick={onOpenCollaborators}>
+          <div className="thread-menu-main">
+            <div className="thread-menu-label">Colaboradores</div>
+            <div className="thread-menu-sublabel">{collabLabel}</div>
+          </div>
+          <span className="thread-menu-icon"><IcUsers size={19} /></span>
+        </button>
         <button className="thread-menu-item" onClick={onOpenLanguage}>
           <div className="thread-menu-main">
             <div className="thread-menu-label">Idioma y dialecto</div>
@@ -432,6 +443,21 @@ export default function SongThreadScreen({ state, onExit }) {
   // no song-wide state to hold here beyond lyricDna.
   const [lyricDna, setLyricDna] = useState(null);
   const [tempoNodes, setTempoNodes] = useState([]);
+  const [collabSheetOpen, setCollabSheetOpen] = useState(false);
+  const [myProfile, setMyProfile] = useState(null);
+  const userId = state.session?.user?.id;
+  const isOwner = song?.user_id != null && song.user_id === userId;
+
+  useEffect(() => {
+    let cancelled = false;
+    loadMyProfile().then(({ data }) => { if (!cancelled) setMyProfile(data); });
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  const { peers, setFocusedSection } = useProjectPresence(song?.id, userId, myProfile?.display_name);
+  // Lets collaborators see which block (if any) you're currently in — a
+  // lightweight "someone's here" signal, see useProjectPresence.js.
+  useEffect(() => { setFocusedSection(openNoteId); }, [openNoteId, setFocusedSection]);
 
   useEffect(() => {
     setTitleDraft(song?.title || '');
@@ -493,6 +519,17 @@ export default function SongThreadScreen({ state, onExit }) {
       setLoadError(error);
     });
   }, [song?.id]);
+
+  // A collaborator's edit lands as a burst of individual row events (a
+  // multi-line paste alone can touch several), not one — coalesce into a
+  // single reload instead of refetching once per event.
+  const liveReloadTimer = useRef(null);
+  const handleLiveChange = useCallback(() => {
+    clearTimeout(liveReloadTimer.current);
+    liveReloadTimer.current = setTimeout(reload, 400);
+  }, [reload]);
+  useEffect(() => () => clearTimeout(liveReloadTimer.current), []);
+  useLiveSongSync(song?.id, handleLiveChange);
 
   // Gapped by 10 on purpose (see migration_mobile_thread_index.sql) — an
   // append is always "highest existing + 10", never "+1", so a later
@@ -658,6 +695,7 @@ export default function SongThreadScreen({ state, onExit }) {
         onTypeChange={handleNoteTypeChange}
         onDeleted={handleNoteDeleted}
         onCreateVariant={(startWithCurrentText) => handleCreateVariant(openNote, startWithCurrentText)}
+        liveText={openNote.lines?.[0]?.text ?? null}
       />
     );
   }
@@ -668,11 +706,21 @@ export default function SongThreadScreen({ state, onExit }) {
         <SongMenu
           langLabel={langLabel}
           bpmLabel={songBpm ? `${songBpm} BPM` : 'sin definir'}
+          collabLabel={peers.length ? `${peers.length + 1} aquí ahora` : 'Solo tú'}
           onOpenLanguage={() => { setMenuOpen(false); setLangSheetOpen(true); }}
           onOpenTempo={() => { setMenuOpen(false); setTempoSheetOpen(true); }}
+          onOpenCollaborators={() => { setMenuOpen(false); setCollabSheetOpen(true); }}
           onRepeatedWords={() => { setMenuOpen(false); setRepeatedWordsOpen(true); }}
           onDelete={handleDeleteProject}
           onClose={() => setMenuOpen(false)}
+        />
+      )}
+      {collabSheetOpen && (
+        <CollaboratorsSheet
+          songId={song.id}
+          userId={userId}
+          isOwner={isOwner}
+          onClose={() => setCollabSheetOpen(false)}
         />
       )}
       {tempoSheetOpen && (
@@ -713,6 +761,14 @@ export default function SongThreadScreen({ state, onExit }) {
               <span className="thread-lang-chevron"><IcChevronRight size={13} /></span>
             </div>
           </div>
+          {peers.length > 0 && (
+            <button className="thread-presence-stack" onClick={() => setCollabSheetOpen(true)} title={`${peers.length} más aquí ahora`}>
+              {peers.slice(0, 3).map((p) => (
+                <span key={p.userId} className="thread-presence-avatar">{(p.displayName || '?')[0].toUpperCase()}</span>
+              ))}
+              {peers.length > 3 && <span className="thread-presence-avatar thread-presence-more">+{peers.length - 3}</span>}
+            </button>
+          )}
           <button className="thread-menu-btn" onClick={() => setMenuOpen(true)} title="más"><IcMore size={20} /></button>
         </div>
 

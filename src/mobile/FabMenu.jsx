@@ -25,7 +25,7 @@ export default function FabMenu({ pills }) {
           {pills.map((pill, i) => (
             <button
               key={pill.label}
-              className={`fab-menu-pill${pill.dark ? ' fab-menu-pill-dark' : ''}`}
+              className={`fab-menu-pill${pill.dark ? ' fab-menu-pill-dark' : ''}${pill.danger ? ' fab-menu-pill-danger' : ''}`}
               style={{ animationDelay: `${(pills.length - 1 - i) * 60}ms` }}
               disabled={pill.disabled}
               title={pill.disabled ? 'coming soon' : undefined}

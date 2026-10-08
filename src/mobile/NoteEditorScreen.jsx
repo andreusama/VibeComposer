@@ -18,7 +18,7 @@ import WordVariantSheet from './WordVariantSheet.jsx';
 import { loadLineHistory, addLineHistory, deleteLineHistory } from '../canvas/lineHistoryData.js';
 import LineHistorySheet from './LineHistorySheet.jsx';
 import ResourcePickerSheet from '../resources/ResourcePickerSheet.jsx';
-import { IcChevronLeft, IcMore, IcMuse, IcHistory, IcTrash, IcPencil, IcTools } from './icons.jsx';
+import { IcChevronLeft, IcMuse, IcHistory, IcTrash, IcPencil, IcTools } from './icons.jsx';
 
 // The "talk to the muse right inside the lyric" pattern from the design
 // ref — always the same wake word, like addressing Alexa, so it reads
@@ -249,7 +249,6 @@ export default function NoteEditorScreen({
   const [toolsOpen, setToolsOpen] = useState(false);
   const [variantSheetOpen, setVariantSheetOpen] = useState(false);
   const [baulOpen, setBaulOpen] = useState(false);
-  const [noteMenuOpen, setNoteMenuOpen] = useState(false);
   // The live native text selection inside whichever row currently has one —
   // drives the Rima/Alternativa buttons in KeyboardAccessoryBar (disabled without one).
   const [selection, setSelection] = useState(null);
@@ -941,7 +940,7 @@ export default function NoteEditorScreen({
   // line-history sheet. The keyboard bar, the FAB and the audio bar all check
   // this so nothing ever stacks over an open sheet.
   const anyOverlayOpen = Boolean(
-    activePopover || noteMenuOpen || toolsOpen || baulOpen || variantSheetOpen
+    activePopover || toolsOpen || baulOpen || variantSheetOpen
     || wordVariantSheet || lineHistorySheet != null || resourcePicker,
   );
 
@@ -972,7 +971,6 @@ export default function NoteEditorScreen({
             />
           )}
           <TempoPulse bpm={bpm} />
-          <button className="ne-menu-btn" onClick={() => setNoteMenuOpen(true)} title="más"><IcMore size={20} /></button>
           <button className="ne-done" onClick={onClose}>Hecho</button>
         </div>
 
@@ -1095,36 +1093,24 @@ export default function NoteEditorScreen({
         />
       )}
 
-      {noteMenuOpen && (
-        <div className="ts-backdrop" onClick={() => setNoteMenuOpen(false)}>
-          <div className="ts-sheet" onClick={(e) => e.stopPropagation()}>
-            <div className="ts-grabber" />
-            <button
-              className="ts-row ts-row-danger"
-              onClick={() => { setNoteMenuOpen(false); handleDelete(); }}
-            >
-              <span className="ts-row-icon"><IcTrash size={20} /></span>
-              <div className="ts-row-main">
-                <div className="ts-row-label">Eliminar esta parte</div>
-                <div className="ts-row-sublabel">no se puede deshacer</div>
-              </div>
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* FAB (Baúl / Variante / Herramientas). Hidden while a word is
-          selected (focused single-purpose moment), while recording, or
-          while any bottom sheet owns the space (anyOverlayOpen). The
-          syllable toggle moved to KeyboardAccessoryBar, but ToolsSheet
-          still owns whole-verse comments, Focus Mode and the per-note
-          repeated-words check, so it keeps its own entry point here. */}
+      {/* FAB (Baúl / Variante / Herramientas / Eliminar). Hidden while a
+          word is selected (focused single-purpose moment), while
+          recording, or while any bottom sheet owns the space
+          (anyOverlayOpen). The syllable toggle moved to
+          KeyboardAccessoryBar, but ToolsSheet still owns whole-verse
+          comments, Focus Mode and the per-note repeated-words check, so it
+          keeps its own entry point here. "Eliminar esta parte" used to be
+          its own "···" menu in the header (a whole button, backdrop and
+          sheet for exactly one action) — folded in here instead so there's
+          one less tappable thing in the header; handleDelete still runs
+          its own confirm() before anything happens. */}
       {!selection && !audioRecording && !anyOverlayOpen && (
         <FabMenu
           pills={[
             { label: 'Baúl de la inspiración', icon: <IcMuse size={18} />, dark: true, onClick: () => setBaulOpen(true) },
             { label: 'Variante', icon: <IcPencil size={18} />, iconVariant: 'thread', onClick: () => setVariantSheetOpen(true) },
             { label: 'Herramientas', icon: <IcTools size={18} />, onClick: () => setToolsOpen(true) },
+            { label: 'Eliminar esta parte', icon: <IcTrash size={18} />, danger: true, onClick: handleDelete },
           ]}
         />
       )}

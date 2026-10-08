@@ -5362,31 +5362,14 @@ body::before {
     flex: 1;
     min-width: 0;
 }
-/* Was "···" (ellipsis) wired straight to delete — the ellipsis glyph is
-   the system-wide signal for "show me a menu," and this had no menu
-   behind it, it deleted the note on tap (behind a confirm()). Tapping the
-   universal "more options" icon and getting an immediate destructive
-   action instead of a menu is a real convention break, not a styling
-   nit. Simplest correct fix: use the same 🗑 this app already uses for
-   delete everywhere else (MobileProjectsScreen, home.js) instead of
-   inventing a menu for a single action — consistent icon language instead
-   of a false "more options" promise. */
-/* "···" in the editor header — delete lives behind it now, not as a bare
-   trash icon next to "Hecho". */
-.ne-menu-btn {
-    margin-left: auto;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 40px;
-    min-height: 44px;
-    background: none;
-    border: none;
-    color: var(--muted);
-    font-size: var(--fs-h2);
-    line-height: 1;
-    cursor: pointer;
-}
+/* .ne-menu-btn ("···" in the editor header) is gone — it only ever held one
+   action (delete, behind a confirm()), which is exactly the "more options"
+   icon promising a menu it didn't have that an earlier pass here already
+   flagged as a convention break. Rather than keep fixing that same tension
+   (bare trash icon → "···" pretending to be a menu → now this), delete
+   moved into the FAB's own pill stack (see NoteEditorScreen.jsx), which
+   genuinely is a menu — one less tappable thing in the header, same action
+   reachable from a surface that already means "more actions here". */
 
 .ne-done {
     display: flex;
@@ -6638,6 +6621,13 @@ body::before {
     color: #fff;
 }
 .fab-menu-pill-dark .fab-menu-pill-icon { color: var(--amber); }
+
+/* Same "label stays dark, only the destructive bit reads red" treatment as
+   .ts-row-danger — a pill in the FAB's own stack, not a separate menu, but
+   still needs to read as the odd one out (delete) among Baúl/Variante/
+   Herramientas (open a tool). */
+.fab-menu-pill-danger .fab-menu-pill-label { color: var(--rose); }
+.fab-menu-pill-danger .fab-menu-pill-icon { color: var(--rose); }
 
 /* Small colored circle behind a light pill's icon — Tools (indigo/chord,
    matches the desktop chord-progression identity) and Variant (thread

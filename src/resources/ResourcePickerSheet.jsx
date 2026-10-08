@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { loadResourceLibrary } from './resourcesData.js';
 import { IcSearch, IcFolder, IcPlus } from '../mobile/icons.jsx';
+import useSheetDismissSwipe from '../mobile/useSheetDismissSwipe.js';
 
 // Swipe-left-to-reveal-insert, same two-step "swipe reveals, tap commits"
 // mechanic as ProjectRow.jsx's own delete action (REVEAL/slop/snap values
@@ -136,6 +137,13 @@ export default function ResourcePickerSheet({ userId, onInsert, onClose, onDragH
   // on a stale closure over `drag` from whatever render set it up.
   const dragRef = useRef(null);
 
+  // Drag the sheet itself down to dismiss it — same closing gesture every
+  // bottom sheet in the app should eventually get (this is the first),
+  // next to the existing tap-the-scrim close. Disabled while a resource is
+  // being dragged onto a line: that's a different gesture living on the
+  // same sheet, and the two must never both react to one finger.
+  const { translateY: dismissY, handlers: dismissHandlers } = useSheetDismissSwipe({ onClose, enabled: !drag });
+
   useEffect(() => {
     if (!userId) return;
     loadResourceLibrary(userId).then(({ resources, folders, membership }) => {
@@ -212,14 +220,18 @@ export default function ResourcePickerSheet({ userId, onInsert, onClose, onDragH
 
   return (
     <div className={`baul-sheet-scrim${drag ? ' res-picker-scrim-dragging' : ''}`} onClick={drag ? undefined : onClose}>
-      <div className={`baul-sheet res-picker-sheet${drag ? ' res-picker-sheet-shrunk' : ''}`} onClick={(e) => e.stopPropagation()}>
-        <div className="ts-grabber" />
+      <div
+        className={`baul-sheet res-picker-sheet${drag ? ' res-picker-sheet-shrunk' : ''}`}
+        style={dismissY ? { transform: `translateY(${dismissY}px)`, transition: 'none' } : undefined}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="ts-grabber" {...dismissHandlers} />
 
         {drag ? (
           <p className="res-picker-drag-hint">Suelta sobre un verso para añadirlo ahí</p>
         ) : (
           <>
-            <div className="res-picker-head">
+            <div className="res-picker-head" {...dismissHandlers}>
               <div className="attach-title">Recursos</div>
               <div className="mp-search res-picker-search">
                 <span className="mp-search-icon"><IcSearch size={16} /></span>

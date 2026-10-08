@@ -7826,7 +7826,17 @@ body::before {
    low-contrast list with no folder filter (reported); now mirrors that
    same library screen's actual card/chip look instead of a stripped-down
    version of it. 85vh (was 78) so it reads as a real view, not a sliver. */
-.res-picker-sheet { max-height: 85vh; display: flex; flex-direction: column; }
+.res-picker-sheet {
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    /* The drag-down-to-dismiss gesture (useSheetDismissSwipe.js) sets an
+       inline transform + transition:none while a finger is actually moving
+       the sheet; the moment it lets go without crossing the close
+       threshold, the inline style disappears and this is what springs the
+       sheet back to translateY(0) instead of snapping there instantly. */
+    transition: transform 0.2s cubic-bezier(0.32, 0.72, 0, 1);
+}
 
 .res-picker-head {
     /* Flex-shrink:0 for the same reason .res-picker-row below needs it: a

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { wordsIn, wordRangeAt, snapRangeToWords, resolveChordRange, sameRange, spreadRow } from './chordAnchor.js';
+import { wordsIn, wordRangeAt, snapRangeToWords, resolveChordRange, sameRange, spreadRow, computeChordSpans } from './chordAnchor.js';
 
 const LINE = 'la nit cau sobre el mar';
 
@@ -182,5 +182,53 @@ describe('spreadRow', () => {
 
   it('handles an empty row', () => {
     expect(spreadRow([])).toEqual({});
+  });
+});
+
+describe('computeChordSpans', () => {
+  // 'la nit cau sobre el mar' — la(0-2) nit(3-6) cau(7-10) sobre(11-16) el(17-19) mar(20-23)
+  // Takes chords already resolved to {start, end} — the shape
+  // NoteEditorScreen's chordsByLine actually hands LineChordStrip, which
+  // is what calls this (see that file's own comment on why it doesn't
+  // re-resolve anchors itself).
+  const c = (id, start, end) => ({ id, start, end });
+
+  it('a single chord gets the remaining space — spans to the end of the line', () => {
+    const [span] = computeChordSpans([c('C', 3, 6)], LINE.length);
+    expect(span.start).toBe(3);
+    expect(span.spanEnd).toBe(LINE.length);
+  });
+
+  it('a second chord shrinks the first one to end where the new one begins', () => {
+    const spans = computeChordSpans([c('C', 3, 6), c('G', 11, 16)], LINE.length);
+    expect(spans.map((s) => s.id)).toEqual(['C', 'G']);
+    expect(spans[0].spanEnd).toBe(11); // C now stops where G starts
+    expect(spans[1].spanEnd).toBe(LINE.length); // G, now last, gets the rest
+  });
+
+  it('is unaffected by the order chords are passed in', () => {
+    const forward = computeChordSpans([c('C', 3, 6), c('G', 11, 16)], LINE.length);
+    const backward = computeChordSpans([c('G', 11, 16), c('C', 3, 6)], LINE.length);
+    expect(backward.map((s) => [s.id, s.spanEnd])).toEqual(forward.map((s) => [s.id, s.spanEnd]));
+  });
+
+  it('a middle chord is bounded by both neighbours', () => {
+    const spans = computeChordSpans([c('C', 3, 6), c('G', 11, 16), c('Am', 20, 23)], LINE.length);
+    expect(spans.map((s) => s.spanEnd)).toEqual([11, 20, LINE.length]);
+  });
+
+  it('never shrinks narrower than the chord\'s own anchor word, even with no gap at all', () => {
+    // "la" (0-2) immediately followed by "nit" (3-6) — nothing between them.
+    const spans = computeChordSpans([c('C', 0, 2), c('G', 3, 6)], LINE.length);
+    expect(spans[0].spanEnd).toBe(3); // not negative, not before its own end (2)
+  });
+
+  it('preserves every field already on the chord, not just start/end', () => {
+    const [span] = computeChordSpans([{ id: 'C', start: 3, end: 6, chordName: 'C' }], LINE.length);
+    expect(span.chordName).toBe('C');
+  });
+
+  it('returns nothing for no chords', () => {
+    expect(computeChordSpans([], LINE.length)).toEqual([]);
   });
 });

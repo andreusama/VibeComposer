@@ -5415,6 +5415,18 @@ body::before {
     box-shadow: var(--card-elev);
     padding: var(--space-4) var(--space-3) calc(var(--space-8) + 52px);
 }
+/* While a chord or resource is being dragged in from its own sheet (see
+   externalDragActive in NoteEditorScreen.jsx): the <textarea>s stop being
+   a valid touch target entirely, so a real mobile browser's native text-
+   selection handling never gets the chance to claim the in-progress drag
+   touch the instant it crosses one — once that happens, no preventDefault()
+   from this app's own listeners can take the touch back. elementFromPoint
+   (what the drop's own hit-testing uses) skips a pointer-events:none
+   element and resolves to .ne-input-wrap / .lc-mirror underneath instead,
+   which is exactly what the drop logic actually reads anyway — turning
+   this off costs the hit-test nothing. Reported 2026-10-09 as the drag
+   freezing mid-gesture. */
+.ne-sheet-drag-active .ne-line-input { pointer-events: none; }
 
 .ne-row {
     display: flex;
@@ -8405,8 +8417,10 @@ body::before {
 
 .lc-pill {
     position: absolute;
+    box-sizing: border-box;
     display: inline-flex;
     align-items: center;
+    justify-content: flex-start;
     gap: 3px;
     pointer-events: auto;
     padding: 1px var(--space-1-5);
@@ -8423,7 +8437,16 @@ body::before {
     color: var(--amber);
     white-space: nowrap;
     cursor: pointer;
-    transition: background 0.12s, box-shadow 0.12s;
+    /* Explicit width (LineChordStrip.jsx) is how far this chord's coverage
+       reaches — toward the next chord, or the end of the line if it's the
+       last one on the row — stretching the pill into a bar instead of a
+       fixed-size point marker. min-width is the CSS-side floor for when
+       that computed width is narrower than the label itself: the chord
+       name is never clipped or squeezed, it just doesn't stretch any
+       further than its neighbour allows — the actual "shrinks to a
+       minimum" behaviour lives here, not in JS. */
+    min-width: fit-content;
+    transition: background 0.12s, box-shadow 0.12s, width 0.15s ease;
 }
 /* Tapped once — the delete affordance is now showing (and times out on its
    own, see ARM_TIMEOUT_MS). Darkening rather than reddening: the pill is

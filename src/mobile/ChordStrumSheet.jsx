@@ -186,7 +186,7 @@ function StrumPad({ recording, onStroke, children }) {
 export default function ChordStrumSheet({
   initialTab = 'chords', savedPattern, savedBpm,
   onPickChord, onSavePattern, onDeletePattern,
-  onDragHoverLine, onDropChord, onClose,
+  onDragHoverLine, onDropChord, onDragActiveChange, onClose,
 }) {
   const [tab, setTab] = useState(initialTab);
   const [custom, setCustom] = useState('');
@@ -256,15 +256,24 @@ export default function ChordStrumSheet({
     const next = { name, x, y };
     dragRef.current = next;
     setDrag(next);
-  }, []);
+    // Lets NoteEditorScreen disable pointer-events on its <textarea>s for
+    // the drag's whole duration, not just while a specific line is
+    // hovered (see its own comment on ne-sheet-drag-active) — a mobile
+    // browser's native text-selection handling can otherwise claim an
+    // in-progress touch the instant it crosses a textarea, which no
+    // preventDefault() from this component's own listeners can undo once
+    // it happens. Reported 2026-10-09 as "drag freezes mid-gesture".
+    onDragActiveChange?.(true);
+  }, [onDragActiveChange]);
 
   const endDrag = useCallback((x, y) => {
     const name = dragRef.current?.name;
     if (x != null && y != null && name) onDropChord?.(x, y, name);
     onDragHoverLine?.(null);
+    onDragActiveChange?.(false);
     dragRef.current = null;
     setDrag(null);
-  }, [onDragHoverLine, onDropChord]);
+  }, [onDragHoverLine, onDropChord, onDragActiveChange]);
 
   // Owns the live drag from the sheet's own root, which is the one thing
   // in this tree guaranteed to stay mounted for the drag's whole duration

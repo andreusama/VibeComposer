@@ -103,6 +103,37 @@ export function resolveChordRange(chord, lineText) {
   return best == null ? null : { start: best, end: best + needle.length };
 }
 
+// How much of the line a chord visually "holds" — not its own anchor word,
+// which only says WHERE it starts, but from there until the NEXT chord's
+// anchor (or the end of the line, for whichever chord is last). This is the
+// real-chord-chart convention: a symbol written over one word applies from
+// there until the next symbol, not just to the word it happens to sit on.
+// Purely a rendering concept — the anchor itself (resolveChordRange above)
+// never changes, only how wide a span LineChordStrip draws for it.
+//
+// Takes chords ALREADY resolved to live positions — numeric `start`/`end`
+// on each (LineChordStrip's own `list`, built upstream by NoteEditorScreen's
+// chordsByLine via resolveChordRange) — rather than re-resolving anchors
+// itself, since the caller already did that work and a second pass would
+// just re-scan the same text for nothing. `textLength` is the line's
+// current text length, the end-of-line boundary for whichever chord ends
+// up last.
+//
+// Returns the same chords, sorted left-to-right, each with a `spanEnd`
+// added.
+export function computeChordSpans(resolvedChords, textLength) {
+  const sorted = [...(resolvedChords || [])].sort((a, b) => a.start - b.start || a.end - b.end);
+  return sorted.map((c, i) => {
+    const next = sorted[i + 1];
+    const spanEnd = next ? next.start : (textLength ?? c.end);
+    // Never narrower than the chord's own anchor word — two chords landing
+    // on immediately adjacent words (no room between them) still each get
+    // at least their own word's width, the "shrinks to a minimum" floor,
+    // rather than a zero/negative span.
+    return { ...c, spanEnd: Math.max(spanEnd, c.end) };
+  });
+}
+
 // Two chords occupy "the exact same range" (Part A: dropping onto a span
 // that already has a chord REPLACES it rather than stacking a second
 // symbol on the identical word) when their re-resolved spans coincide.

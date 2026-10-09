@@ -117,7 +117,7 @@ function ResourcePickerRow({ resource, onInsert, onDragStart }) {
 // better spent once there were three ways in instead of two). Drag
 // ownership moved from the row to this component later the same day — see
 // ResourcePickerRow's own comment for why.
-export default function ResourcePickerSheet({ userId, onInsert, onClose, onDragHoverLine, onDropOnLine }) {
+export default function ResourcePickerSheet({ userId, onInsert, onClose, onDragHoverLine, onDropOnLine, onDragActiveChange }) {
   const [resources, setResources] = useState([]);
   const [folders, setFolders] = useState([]);
   const [membership, setMembership] = useState({});
@@ -173,16 +173,23 @@ export default function ResourcePickerSheet({ userId, onInsert, onClose, onDragH
     const next = { resource, x, y };
     dragRef.current = next;
     setDrag(next);
-  }, []);
+    // Lets NoteEditorScreen disable pointer-events on its <textarea>s for
+    // the drag's whole duration — see ChordStrumSheet.jsx's identical fix
+    // (same bug: a real device's native text-selection handling can claim
+    // an in-progress touch the moment it crosses a textarea, freezing the
+    // drag with no JS preventDefault able to undo it after the fact).
+    onDragActiveChange?.(true);
+  }, [onDragActiveChange]);
 
   const endDrag = useCallback((x, y) => {
     const resource = dragRef.current?.resource;
     const lineIndex = x != null && y != null ? hitTestLine(x, y) : null;
     if (lineIndex != null && resource) onDropOnLine?.(lineIndex, resource);
     onDragHoverLine?.(null);
+    onDragActiveChange?.(false);
     dragRef.current = null;
     setDrag(null);
-  }, [onDragHoverLine, onDropOnLine]);
+  }, [onDragHoverLine, onDropOnLine, onDragActiveChange]);
 
   // Owns the live drag from the sheet's own root, which is the one thing
   // in this tree guaranteed to stay mounted for the drag's whole duration

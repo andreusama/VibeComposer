@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { spreadRow } from '../utils/chordAnchor.js';
+import { spreadRow, computeChordSpans } from '../utils/chordAnchor.js';
 
 // ─── Chord symbols sitting above the exact words they're strummed on ───────
 // "Mainstream tablature": a chord pill horizontally aligned to the precise
@@ -48,7 +48,12 @@ const NO_CHORDS = [];
 const samePlacement = (a, b) => {
   const ka = Object.keys(a);
   if (ka.length !== Object.keys(b).length) return false;
-  return ka.every((k) => b[k] && Math.abs(a[k].left - b[k].left) < 0.5 && Math.abs(a[k].top - b[k].top) < 0.5);
+  return ka.every((k) => (
+    b[k]
+    && Math.abs(a[k].left - b[k].left) < 0.5
+    && Math.abs(a[k].top - b[k].top) < 0.5
+    && Math.abs(a[k].width - b[k].width) < 0.5
+  ));
 };
 
 export default function LineChordStrip({ text, chords, onRemove }) {
@@ -89,29 +94,45 @@ export default function LineChordStrip({ text, chords, onRemove }) {
     // wrapped row must not be de-collided against one on the first).
     const rows = new Map();
     const tops = {};
+    const spans = computeChordSpans(list, len);
 
-    list.forEach((c) => {
+    spans.forEach((c) => {
       const el = pillRefs.current[c.id];
       const start = Math.max(0, Math.min(c.start, len));
-      const end = Math.max(start, Math.min(c.end, len));
+      // Measured out to the computed SPAN end, not the chord's own anchor
+      // end — a chord's pill is drawn as wide as what it "holds" (from its
+      // own word until the next chord, or the end of the line), the real-
+      // chord-chart convention this whole file's header comment points
+      // at. computeChordSpans already floors spanEnd at the anchor's own
+      // end, so this is never narrower than the label itself needs —
+      // .lc-pill's own min-width:fit-content (style.css) is the second,
+      // CSS-side half of that floor, for whatever this measurement still
+      // under-shoots by a pixel or two.
+      const spanEnd = Math.max(start, Math.min(c.spanEnd, len));
       range.setStart(node, start);
-      range.setEnd(node, end);
-      // getClientRects()[0], not getBoundingClientRect(): an anchor that
+      range.setEnd(node, spanEnd);
+      // getClientRects()[0], not getBoundingClientRect(): a span that
       // wraps across two visual rows has two rects, and the chord belongs
       // over where the phrase STARTS — the union rect would put it
-      // somewhere between the two, aligned to neither.
+      // somewhere between the two, aligned to neither. (A span wrapping
+      // is rare — spans stop at the next chord — but a long gap to a
+      // distant next chord, or to the end of a long last line, can still
+      // do it.)
       const rect = range.getClientRects()[0] || range.getBoundingClientRect();
       const rowCenter = rect.top + rect.height / 2 - base.top;
       const key = Math.round(rowCenter);
       if (!rows.has(key)) rows.set(key, []);
-      rows.get(key).push({ id: c.id, left: rect.left - base.left, width: el ? el.offsetWidth : 0 });
+      // A small gap before the next chord's pill, so two adjacent spans
+      // never look like one fused bar.
+      const width = Math.max(0, rect.width - PILL_GAP);
+      rows.get(key).push({ id: c.id, left: rect.left - base.left, width });
       tops[c.id] = rowCenter - GLYPH_H / 2 - PILL_LIFT - (el ? el.offsetHeight : 0);
     });
 
     const next = {};
     rows.forEach((items) => {
       const lefts = spreadRow(items, PILL_GAP, base.width);
-      items.forEach((it) => { next[it.id] = { left: lefts[it.id], top: tops[it.id] }; });
+      items.forEach((it) => { next[it.id] = { left: lefts[it.id], top: tops[it.id], width: it.width }; });
     });
     setPlacement((cur) => (samePlacement(cur, next) ? cur : next));
   }, [text, list]);
@@ -136,7 +157,7 @@ export default function LineChordStrip({ text, chords, onRemove }) {
                 key={c.id}
                 ref={(el) => { if (el) pillRefs.current[c.id] = el; else delete pillRefs.current[c.id]; }}
                 className={`lc-pill${armedId === c.id ? ' lc-pill-armed' : ''}`}
-                style={p ? { left: p.left, top: p.top } : { left: 0, top: 0, visibility: 'hidden' }}
+                style={p ? { left: p.left, top: p.top, width: p.width } : { left: 0, top: 0, visibility: 'hidden' }}
                 onClick={() => arm(c.id)}
               >
                 {c.chordName}

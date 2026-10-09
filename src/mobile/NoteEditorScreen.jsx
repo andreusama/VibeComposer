@@ -303,6 +303,15 @@ export default function NoteEditorScreen({
   // ResourcePickerSheet's / ChordStrumSheet's long-press-drag) — drives
   // LineRow's own dropTarget highlight. null outside of an active drag.
   const [dropTargetIndex, setDropTargetIndex] = useState(null);
+  // True for a drag's WHOLE duration, unlike dropTargetIndex above (which
+  // is null both "no drag" and "mid-drag but between lines right now" —
+  // not distinguishable from it alone). Drives ne-sheet-drag-active, which
+  // turns off pointer-events on every <textarea> while true: a real
+  // mobile browser's native text-selection handling can otherwise claim
+  // an in-progress drag touch the instant it crosses one, and no amount
+  // of this app's own preventDefault() can undo that once it happens —
+  // reported 2026-10-09 as the drag visibly freezing mid-gesture.
+  const [externalDragActive, setExternalDragActive] = useState(false);
   // Every chord attached to a word range anywhere in this block (one query,
   // see loadLineChords). Keyed in the DB by (line_id, line_index); the span
   // itself is re-resolved from anchor_text against the live text on every
@@ -1169,7 +1178,7 @@ export default function NoteEditorScreen({
           <TempoStrumCard bpm={strum.bpm} strumPattern={strum.pattern} onClick={() => setChordSheet({ tab: 'strum' })} />
         )}
 
-        <div className="ne-sheet">
+        <div className={`ne-sheet${externalDragActive ? ' ne-sheet-drag-active' : ''}`}>
         {lines.map((line, i) => (
           <LineRow
             key={line.id}
@@ -1278,6 +1287,7 @@ export default function NoteEditorScreen({
           onClose={() => setResourcePicker(null)}
           onDragHoverLine={setDropTargetIndex}
           onDropOnLine={handleDropResourceOnLine}
+          onDragActiveChange={setExternalDragActive}
         />
       )}
 
@@ -1291,6 +1301,7 @@ export default function NoteEditorScreen({
           onDeletePattern={handleDeleteStrum}
           onDragHoverLine={setDropTargetIndex}
           onDropChord={handleDropChord}
+          onDragActiveChange={setExternalDragActive}
           onClose={() => { setChordSheet(null); setDropTargetIndex(null); }}
         />
       )}

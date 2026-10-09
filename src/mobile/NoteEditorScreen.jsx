@@ -25,6 +25,9 @@ import { loadLineChords, addLineChord, updateLineChord, deleteLineChord } from '
 import { loadStrumPattern, saveStrumPattern, deleteStrumPattern } from '../canvas/strumPatternData.js';
 import { resolveChordRange, snapRangeToWords, wordRangeAt, sameRange } from '../utils/chordAnchor.js';
 import { offsetFromPoint } from '../utils/caretFromPoint.js';
+import { lineIndexFromPoint } from '../utils/lineHitTest.js';
+import useLineDragDrop from './useLineDragDrop.js';
+import LineDragPill from './LineDragPill.jsx';
 import { IcChevronLeft, IcMuse, IcHistory, IcTrash, IcPencil, IcTools } from './icons.jsx';
 
 // The "talk to the muse right inside the lyric" pattern from the design
@@ -35,6 +38,13 @@ import { IcChevronLeft, IcMuse, IcHistory, IcTrash, IcPencil, IcTools } from './
 // what disambiguates "Musa, quiero..." the command from "Musa que me
 // inspira..." the lyric).
 const MUSE_COMMAND_RE = /^\s*musa\s*[,:]\s*/i;
+
+// A dropped resource's top/bottom sliver of a row reads as "between
+// verses" (a brand new line), the middle as "into this line" (appended to
+// its end) — see handleDropResourceOnLine and resourceDragPreview, which
+// both resolve through the same resolveResourceDropTarget so the live
+// preview can never show one outcome and commit a different one.
+const RESOURCE_EDGE_FRACTION = 0.3;
 
 // Long-press-to-copy timing — same hold-without-much-movement convention
 // ProjectRow.jsx uses for its own long-press, just a touch longer here
@@ -52,7 +62,7 @@ const LONG_PRESS_COPY_SLOP = 10;
 function LineRow({
   id, index, text, previewText, syllables, rhyme, friction, dimmed, showPlaceholder,
   variantRanges, chords, hasHistory, justCopied, dropTarget,
-  onChange, onEnter, onBackspaceAtStart, onFocus, onBlurLine, onSelectionChange, onFrictionTap, onVariantTap, onHistoryTap, onLongPressCopy, onRemoveChord, inputRef,
+  onChange, onEnter, onBackspaceAtStart, onFocus, onBlurLine, onSelectionChange, onFrictionTap, onVariantTap, onHistoryTap, onLongPressCopy, onRemoveChord, onMoveChordStart, inputRef,
 }) {
   // Live, not just on submit — the moment the line reads as addressing the
   // muse (the wake word + its disambiguating comma/colon typed), the row's
@@ -76,12 +86,24 @@ function LineRow({
   // overflow is clipped, reading as "the second line disappeared" even
   // though the text itself was always complete. useLayoutEffect (not
   // useEffect) so the resize happens before paint — no visible flash.
+  //
+  // Also re-runs on chords.length: a line gaining its first chord flips on
+  // .ne-row-has-chords (style.css), which bumps this same textarea's own
+  // line-height/padding-top to make room for the pill above the text —
+  // changing scrollHeight exactly like a text edit would, but without
+  // touching `displayedText`. Keyed on the count (not the array) since a
+  // chord's own span/position moving never changes how tall the row needs
+  // to be, only whether it has ≥1 at all; a new dependency array identity
+  // on every unrelated render would just re-measure for nothing. Without
+  // this, the textarea's inline style.height stays pinned at its pre-chord
+  // value — real CSS, stale inline height always wins — and the pill ends
+  // up fighting the glyphs for the same too-short row. Reported 2026-10-09.
   useLayoutEffect(() => {
     const el = localRef.current;
     if (!el) return;
     el.style.height = 'auto';
     el.style.height = `${el.scrollHeight}px`;
-  }, [displayedText]);
+  }, [displayedText, chords?.length]);
 
   const setRefs = useCallback((el) => {
     localRef.current = el;
@@ -200,7 +222,7 @@ function LineRow({
             resolves a drop's character offset against — rendered for every
             line, chorded or not, because an empty line is exactly the one
             you're about to drop the first chord onto. */}
-        <LineChordStrip text={displayedText} chords={chords} onRemove={onRemoveChord} />
+        <LineChordStrip text={displayedText} chords={chords} onRemove={onRemoveChord} onMoveStart={onMoveChordStart} />
         <textarea
           ref={setRefs}
           className="ne-line-input"
@@ -303,6 +325,16 @@ export default function NoteEditorScreen({
   // ResourcePickerSheet's / ChordStrumSheet's long-press-drag) — drives
   // LineRow's own dropTarget highlight. null outside of an active drag.
   const [dropTargetIndex, setDropTargetIndex] = useState(null);
+  // The live point of an in-flight resource drag — { x, y, resource } |
+  // null — ResourcePickerSheet owns the drag itself (useLineDragDrop.js
+  // lives inside it, not here), so this is what its onDragHoverLine prop
+  // (now handed the raw point too, not just a line index) feeds
+  // resourceDragPreview below. Same "the parent can't see a child's own
+  // hook state, so the hook hands it the raw point instead" reasoning
+  // chordMoveDrag's own comment gives for why THAT one lives in
+  // NoteEditorScreen directly — a resource drag can't, since it starts
+  // inside the sheet's own palette, not a pill already in this tree.
+  const [resourceDragHover, setResourceDragHover] = useState(null);
   // True for a drag's WHOLE duration, unlike dropTargetIndex above (which
   // is null both "no drag" and "mid-drag but between lines right now" —
   // not distinguishable from it alone). Drives ne-sheet-drag-active, which
@@ -823,25 +855,77 @@ export default function NoteEditorScreen({
     setResourcePicker(null);
   }, [resourcePicker, lines, persist, pushUndo, logLineHistory]);
 
-  // ResourcePickerSheet's long-press-and-drag → dropped on this line. Unlike
-  // handleInsertResource (replaces a captured selection/caret spot),
-  // dropping targets a whole LINE picked by hit-testing where the finger
-  // let go — there's no sub-line caret to resolve from a touch drop the way
-  // there is from a real text cursor, so this always appends to the line's
-  // end rather than guessing a position inside it.
-  const handleDropResourceOnLine = useCallback((lineIndex, resource) => {
-    const line = lines[lineIndex];
-    if (!line) return;
+  // Where exactly within a row's own bounds a point falls decides what a
+  // resource drop there means: the top/bottom sliver reads as "between
+  // verses" (a brand new line of its own, same splice handleInsertLineAfter
+  // already uses for the muse popover's "Insert below"), the middle as
+  // "into this line" (appended to its end — there's no sub-line caret to
+  // resolve from a touch drop the way there is from a real text cursor, so
+  // "into" always means the end, never a guessed mid-line position). Shared
+  // by handleDropResourceOnLine (the actual commit) and resourceDragPreview
+  // (the live preview below) so the two can never disagree about what a
+  // given point means — also returns `rect`, which the preview needs to
+  // know where on screen to draw the ghost line and handleDropResourceOnLine
+  // doesn't, but computing it twice would risk the two reading two
+  // different layouts if a frame lands between them.
+  const resolveResourceDropTarget = useCallback((x, y) => {
+    const lineIndex = lineIndexFromPoint(x, y);
+    if (lineIndex == null || !lines[lineIndex]) return null;
+    const rowEl = document.querySelector(`[data-line-index="${lineIndex}"]`);
+    const rect = rowEl?.getBoundingClientRect();
+    const frac = rect && rect.height ? (y - rect.top) / rect.height : 0.5;
+    if (frac < RESOURCE_EDGE_FRACTION) return { mode: 'before', lineIndex, rect };
+    if (frac > 1 - RESOURCE_EDGE_FRACTION) return { mode: 'after', lineIndex, rect };
+    return { mode: 'into', lineIndex, rect };
+  }, [lines]);
+
+  // ResourcePickerSheet's long-press-and-drag (via useLineDragDrop.js) →
+  // dropped somewhere over the editor.
+  const handleDropResourceOnLine = useCallback((x, y, resource) => {
+    setDropTargetIndex(null);
+    const target = resolveResourceDropTarget(x, y);
+    if (!target) return;
+
+    if (target.mode === 'before') { handleInsertLineAfter(target.lineIndex - 1, resource.body); return; }
+    if (target.mode === 'after') { handleInsertLineAfter(target.lineIndex, resource.body); return; }
+
+    const line = lines[target.lineIndex];
     const current = line.text;
     pushUndo(lines);
-    logLineHistory(lineIndex, current);
+    logLineHistory(target.lineIndex, current);
     const next = [...lines];
     const joined = current && !/\s$/.test(current) ? `${current} ${resource.body}` : `${current}${resource.body}`;
-    next[lineIndex] = { ...next[lineIndex], text: joined };
+    next[target.lineIndex] = { ...next[target.lineIndex], text: joined };
     setLines(ensureTrailingEmpty(next));
     persist(next);
-    setDropTargetIndex(null);
-  }, [lines, persist, pushUndo, logLineHistory]);
+  }, [lines, persist, pushUndo, logLineHistory, handleInsertLineAfter, resolveResourceDropTarget]);
+
+  // ResourcePickerSheet's onDragHoverLine (now carrying the live point and
+  // payload — see useLineDragDrop.js) — captures both the row highlight
+  // (unchanged) and the raw point resourceDragPreview below resolves into
+  // "before / after / into" every tick, not just on release.
+  const handleResourceDragHover = useCallback((lineIndex, x, y, resource) => {
+    setDropTargetIndex(lineIndex);
+    setResourceDragHover(lineIndex == null ? null : { x, y, resource });
+  }, []);
+
+  // What a resource drop would do if it ended right now — the exact same
+  // resolveResourceDropTarget the real drop commits through, so the ghost
+  // line / text preview below can never show an outcome the drop itself
+  // wouldn't also produce.
+  const resourceDragPreview = useMemo(() => {
+    if (!resourceDragHover) return null;
+    const { x, y, resource } = resourceDragHover;
+    const target = resolveResourceDropTarget(x, y);
+    if (!target) return null;
+    if (target.mode !== 'into') return { ...target, resource };
+    // Same join rule handleDropResourceOnLine's own 'into' branch commits —
+    // computed once here so LineRow's previewText (below) and the eventual
+    // commit can never read two different joins off the same current text.
+    const current = lines[target.lineIndex]?.text ?? '';
+    const previewText = current && !/\s$/.test(current) ? `${current} ${resource.body}` : `${current}${resource.body}`;
+    return { ...target, resource, previewText };
+  }, [resourceDragHover, resolveResourceDropTarget, lines]);
 
   // ─── Chords on a word range ───────────────────────────────────────────────
   // KeyboardAccessoryBar → Acordes y rasgueo. Like Recursos (and unlike
@@ -905,31 +989,141 @@ export default function NoteEditorScreen({
     attachChord(target.lineIndex, target.start, target.end, chordName);
   }, [chordSheet, attachChord]);
 
-  // ChordStrumSheet's long-press-and-drag → dropped somewhere over the
-  // editor. Unlike handleDropResourceOnLine (which only needs to know WHICH
-  // line, and appends to its end), a chord has to land on a specific word:
-  // the line comes from the same elementFromPoint hit-test, then the
-  // character offset under the finger comes from offsetFromPoint against
-  // that line's own text mirror, and wordRangeAt (inside attachChord's
-  // snapRangeToWords) turns it into a whole-word anchor.
-  const handleDropChord = useCallback((x, y, chordName) => {
-    setDropTargetIndex(null);
-    const rowEl = document.elementFromPoint(x, y)?.closest('[data-line-index]');
-    if (!rowEl) return;
-    const lineIndex = Number(rowEl.dataset.lineIndex);
+  // The one definition of "which word is this viewport point over" for
+  // chord dragging — a brand-new chord from the palette and an existing
+  // one being repositioned both need it, to commit a drop AND to drive the
+  // phantom-pill move preview (chordMovePreview), which was four copies of
+  // the same lineIndexFromPoint → mirror lookup → offsetFromPoint →
+  // wordRangeAt chain before this. Word-level, not line-level, because the
+  // anchor itself still needs a specific word to survive text edits
+  // (resolveChordRange/chordAnchor.js) even though what the chord visually
+  // COVERS is the whole verse (computeChordSpans' equal division) — the
+  // anchor is only ever used to decide ORDER, never shown to the person
+  // dragging (see NoteEditorScreen's own note on why there's no per-word
+  // highlight during the drag itself).
+  const resolveWordAtPoint = useCallback((x, y) => {
+    const lineIndex = lineIndexFromPoint(x, y);
+    if (lineIndex == null) return null;
     const text = lines[lineIndex]?.text ?? '';
-    if (!text.trim()) return; // an empty line has no word to sit a chord over
-    const mirror = rowEl.querySelector('.lc-mirror');
+    if (!text.trim()) return null; // an empty line has no word to sit a chord over
+    const rowEl = document.querySelector(`[data-line-index="${lineIndex}"]`);
+    const mirror = rowEl?.querySelector('.lc-mirror');
     const offset = offsetFromPoint(mirror, x, y);
     const word = wordRangeAt(text, offset ?? 0);
-    if (!word) return;
-    attachChord(lineIndex, word.start, word.end, chordName);
-  }, [lines, attachChord]);
+    if (!word) return null;
+    return { lineIndex, word };
+  }, [lines]);
+
+  // ChordStrumSheet's long-press-and-drag (via useLineDragDrop.js) →
+  // dropped somewhere over the editor. Unlike handleDropResourceOnLine
+  // (which only needs to know WHICH line, and appends to its end), a chord
+  // has to land on a specific word — resolveWordAtPoint above.
+  const handleDropChord = useCallback((x, y, chordName) => {
+    setDropTargetIndex(null);
+    const hit = resolveWordAtPoint(x, y);
+    if (!hit) return;
+    attachChord(hit.lineIndex, hit.word.start, hit.word.end, chordName);
+  }, [resolveWordAtPoint, attachChord]);
 
   const handleRemoveChord = useCallback(async (id) => {
     setLineChords((cur) => cur.filter((c) => c.id !== id));
     await deleteLineChord(id);
   }, []);
+
+  // Reorganizing an already-placed chord: long-press a pill (LineChordStrip's
+  // own ChordPillView, via useLongPressDrag) and drag it onto a different
+  // word — same place, a different line, doesn't matter. Unlike attachChord
+  // this never creates a new row or folds into an existing one at the
+  // target span: it just re-anchors THIS chord, which is also the entire
+  // mechanism behind "reorganizing" a line's chords at all — order (and so
+  // computeChordSpans' equal-slice layout) is read straight off each
+  // chord's own anchor, so moving one earlier/later in the line, or to
+  // another line entirely, is nothing more than giving it a new anchor.
+  const moveChord = useCallback(async (chordId, lineIndex, rawStart, rawEnd) => {
+    const text = lines[lineIndex]?.text ?? '';
+    if (!text.trim()) return;
+    const range = snapRangeToWords(text, rawStart, rawEnd);
+    if (!range) return;
+    const anchorText = text.slice(range.start, range.end);
+    const fields = { line_index: lineIndex, anchor_text: anchorText, start_offset: range.start, end_offset: range.end };
+    const { data } = await updateLineChord(chordId, fields);
+    setLineChords((cur) => cur.map((c) => (c.id === chordId ? (data || { ...c, ...fields }) : c)));
+  }, [lines]);
+
+  // The drop half of a pill drag — resolveWordAtPoint above, same as a
+  // brand-new chord from the palette. `payload` is { id, chordName } — the
+  // name is only for the floating pill's own label while it's in flight,
+  // the move itself only needs id.
+  const handleMoveChordDrop = useCallback((x, y, payload) => {
+    setDropTargetIndex(null);
+    const hit = resolveWordAtPoint(x, y);
+    if (!hit) return;
+    moveChord(payload.id, hit.lineIndex, hit.word.start, hit.word.end);
+  }, [resolveWordAtPoint, moveChord]);
+
+  // Owns the live drag itself (document-level listeners, hover, the
+  // floating pill) exactly like ChordStrumSheet/ResourcePickerSheet do via
+  // the same hook — except there's no sheet here to shrink: the drag starts
+  // straight from a pill already sitting in the lyric, so NoteEditorScreen
+  // is the drag's whole lifetime, not a sheet it opens.
+  const { drag: chordMoveDrag, beginDrag: handleChordMoveStart } = useLineDragDrop({
+    onDragHoverLine: setDropTargetIndex,
+    onDragActiveChange: setExternalDragActive,
+    onDrop: handleMoveChordDrop,
+  });
+
+  // While an existing pill is mid-drag, where would it land right now? Same
+  // resolveWordAtPoint handleMoveChordDrop uses to actually commit the
+  // move — this is the identical lookup, just run on every hover tick
+  // instead of once on release, purely to drive the phantom-pill preview
+  // below (previewChordsByLine).
+  const chordMovePreview = useMemo(() => {
+    if (!chordMoveDrag) return null;
+    const hit = resolveWordAtPoint(chordMoveDrag.x, chordMoveDrag.y);
+    return hit ? { lineIndex: hit.lineIndex, start: hit.word.start, end: hit.word.end } : null;
+  }, [chordMoveDrag, resolveWordAtPoint]);
+
+  // No per-word live highlight during a chord drag (an earlier version of
+  // this had one — a solid-border box measured over whichever word the
+  // finger was on). A chord is assigned to the VERSE, not to that one
+  // word: the equal-division layout (chordAnchor.js's computeChordSpans)
+  // already treats it that way, dividing the whole line by however many
+  // chords sit on it rather than sizing each one to its own anchor word, so
+  // highlighting a single word mid-drag was telling a different, narrower
+  // story than what actually happens on drop. The existing line-level
+  // highlight (dropTargetIndex → LineRow's own .ne-row-drop-target) already
+  // says "this verse", which is the right scope — chord drags just use it
+  // plainly now, same as a resource drag does.
+
+  // The equal-division layout every OTHER chord on the origin and
+  // destination lines would settle into if the drag ended right now —
+  // without touching real state until it actually does
+  // (handleMoveChordDrop). Pulls the dragged chord out of wherever
+  // chordsByLine currently has it and drops a phantom copy (`preview: true`)
+  // at chordMovePreview's word, same id, so LineChordStrip's own
+  // key={c.id}/placement machinery reads it as the SAME pill continuing to
+  // move rather than one disappearing and a different one appearing — same
+  // "preview, don't mutate real state" shape previewOverride above already
+  // uses for a dragged Muse suggestion. Hovering nowhere valid (between
+  // lines, off any row) just removes the pill from view entirely but for
+  // the floating LineDragPill following the finger — informative on its
+  // own: this chord has been picked up and its old neighbours have
+  // reflowed to fill the gap.
+  const previewChordsByLine = useMemo(() => {
+    if (!chordMoveDrag) return chordsByLine;
+    const draggedId = chordMoveDrag.payload.id;
+    const map = {};
+    Object.entries(chordsByLine).forEach(([lineIndex, arr]) => {
+      const kept = arr.filter((c) => c.id !== draggedId);
+      if (kept.length) map[lineIndex] = kept;
+    });
+    if (chordMovePreview) {
+      const { lineIndex, start, end } = chordMovePreview;
+      const phantom = { id: draggedId, chordName: chordMoveDrag.payload.chordName, start, end, preview: true };
+      map[lineIndex] = [...(map[lineIndex] || []), phantom].sort((a, b) => a.start - b.start);
+    }
+    return map;
+  }, [chordMoveDrag, chordMovePreview, chordsByLine]);
 
   // ─── Strum pattern ────────────────────────────────────────────────────────
   const handleSaveStrum = useCallback(async (bpmValue, pattern) => {
@@ -1149,7 +1343,11 @@ export default function NoteEditorScreen({
   return (
     <MobileScreen className="ne-screen">
       <div className="ne-body">
-        <div className="ne-header">
+        {/* Dims during any chord/resource drag (externalDragActive) — the
+            whole point of collapsing the sheet to a strip is that the
+            lyric becomes the thing being looked at, and a full-strength
+            header competing for attention above it undercuts that. */}
+        <div className={`ne-header${externalDragActive ? ' ne-header-drag-dim' : ''}`}>
           <button className="ne-back" onClick={onClose} title="volver"><IcChevronLeft size={24} /></button>
           <select value={type} onChange={handleTypeChange} className="ne-type-select">
             {SECTION_TYPES.map((t) => <option key={t} value={t}>{SECTION_TYPE_LABELS[t] || t}</option>)}
@@ -1185,14 +1383,17 @@ export default function NoteEditorScreen({
             id={line.id}
             index={i}
             text={line.text}
-            previewText={previewOverride?.lineIndex === i ? previewOverride.text : null}
+            previewText={
+              previewOverride?.lineIndex === i ? previewOverride.text
+                : (resourceDragPreview?.mode === 'into' && resourceDragPreview.lineIndex === i ? resourceDragPreview.previewText : null)
+            }
             syllables={syllableCounts[i]}
             rhyme={rhymeLines[i]}
             friction={frictionFlags[i]}
             showPlaceholder={i === lines.length - 1}
             dimmed={focusModeOn && focusedIndex !== null && focusedIndex !== i}
             variantRanges={variantRangesByLine[i]}
-            chords={chordsByLine[i]}
+            chords={previewChordsByLine[i]}
             hasHistory={lineHistoryByIndex[i]?.length > 0}
             onChange={handleLineChange}
             onEnter={handleEnter}
@@ -1205,6 +1406,7 @@ export default function NoteEditorScreen({
             onHistoryTap={handleHistoryTap}
             onLongPressCopy={handleLongPressCopy}
             onRemoveChord={handleRemoveChord}
+            onMoveChordStart={handleChordMoveStart}
             justCopied={copiedIndex === i}
             dropTarget={dropTargetIndex === i}
             inputRef={(id, el) => {
@@ -1285,10 +1487,31 @@ export default function NoteEditorScreen({
           userId={userId}
           onInsert={handleInsertResource}
           onClose={() => setResourcePicker(null)}
-          onDragHoverLine={setDropTargetIndex}
+          onDragHoverLine={handleResourceDragHover}
           onDropOnLine={handleDropResourceOnLine}
           onDragActiveChange={setExternalDragActive}
         />
+      )}
+
+      {/* "Between verses" half of the resource drag preview — no existing
+          line to borrow previewText from (there isn't one yet), so unlike
+          the "into this line" half this is its own floating ghost row,
+          positioned off resourceDragPreview's own captured rect rather than
+          spliced into the real lines array: inserting a phantom entry there
+          would shift every OTHER per-line array (syllableCounts, rhymeLines,
+          chordsByLine, …) out of alignment with it for the length of the
+          drag, for a view nothing is actually that array. */}
+      {resourceDragPreview && resourceDragPreview.mode !== 'into' && resourceDragPreview.rect && (
+        <div
+          className="resource-line-preview"
+          style={{
+            top: resourceDragPreview.mode === 'before' ? resourceDragPreview.rect.top : resourceDragPreview.rect.bottom,
+            left: resourceDragPreview.rect.left,
+            width: resourceDragPreview.rect.width,
+          }}
+        >
+          {resourceDragPreview.resource.body}
+        </div>
       )}
 
       {chordSheet && (
@@ -1304,6 +1527,24 @@ export default function NoteEditorScreen({
           onDragActiveChange={setExternalDragActive}
           onClose={() => { setChordSheet(null); setDropTargetIndex(null); }}
         />
+      )}
+
+      {/* An already-placed chord being dragged to a new word — no sheet to
+          shrink here (the drag starts straight from the pill, not from a
+          palette), just the same hint + floating pill vocabulary every
+          other line-drag uses (LineDragPill.jsx, .res-picker-drag-hint).
+          The target itself is just the line highlight every line-drag
+          already gets (dropTargetIndex → LineRow's .ne-row-drop-target) —
+          no separate per-word box; a chord is assigned to the verse, not a
+          word (see resolveWordAtPoint's own comment on why the anchor
+          still needs one without that being shown as the drag target). */}
+      {chordMoveDrag && (
+        <>
+          <p className="res-picker-drag-hint chord-move-hint">Suelta sobre la palabra donde cambia el acorde</p>
+          <LineDragPill x={chordMoveDrag.x} y={chordMoveDrag.y} className="cs-drag-pill">
+            {chordMoveDrag.payload.chordName}
+          </LineDragPill>
+        </>
       )}
 
       {lineHistorySheet != null && (

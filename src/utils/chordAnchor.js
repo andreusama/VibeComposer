@@ -103,35 +103,44 @@ export function resolveChordRange(chord, lineText) {
   return best == null ? null : { start: best, end: best + needle.length };
 }
 
-// How much of the line a chord visually "holds" — not its own anchor word,
-// which only says WHERE it starts, but from there until the NEXT chord's
-// anchor (or the end of the line, for whichever chord is last). This is the
-// real-chord-chart convention: a symbol written over one word applies from
-// there until the next symbol, not just to the word it happens to sit on.
-// Purely a rendering concept — the anchor itself (resolveChordRange above)
-// never changes, only how wide a span LineChordStrip draws for it.
+// How much of the line a chord visually "holds" — the whole line divided
+// equally among however many chords sit on it: one chord holds it all, two
+// split it half and half, three a third each, and so on. Deliberately NOT
+// "from this word until the next chord's word" (an earlier version of this
+// function worked that way, sized by actual word gaps) — a verse's chord
+// rhythm reads as regular changes across the line, not as whatever gap
+// happened to separate two dropped-on words, and equal division is also
+// what makes "drag a chord to reorder it" (NoteEditorScreen's handleMoveChord)
+// a coherent gesture: moving a chord earlier/later in the sequence visibly
+// resizes every segment around it, the same way dragging a fencepost would.
+//
+// ORDER is still decided by each chord's own anchor (`start`, from
+// resolveChordRange) — re-anchoring a chord via a drag is exactly what
+// changes its position in that order, so "reorganize" needs no separate
+// position field, just the existing anchor machinery. WIDTH is not: a
+// chord's own anchor word only ever decides which slot it's in, never how
+// big that slot is.
 //
 // Takes chords ALREADY resolved to live positions — numeric `start`/`end`
 // on each (LineChordStrip's own `list`, built upstream by NoteEditorScreen's
 // chordsByLine via resolveChordRange) — rather than re-resolving anchors
 // itself, since the caller already did that work and a second pass would
 // just re-scan the same text for nothing. `textLength` is the line's
-// current text length, the end-of-line boundary for whichever chord ends
-// up last.
+// current text length, divided evenly among however many chords there are.
 //
-// Returns the same chords, sorted left-to-right, each with a `spanEnd`
-// added.
+// Returns the same chords, sorted left-to-right, each with its own slot's
+// `start`/`spanEnd` — note this OVERWRITES `start` (the anchor's own
+// position is no longer where the slot begins): the return value is a
+// rendering-only view, never fed back into anything that resolves anchors.
 export function computeChordSpans(resolvedChords, textLength) {
   const sorted = [...(resolvedChords || [])].sort((a, b) => a.start - b.start || a.end - b.end);
-  return sorted.map((c, i) => {
-    const next = sorted[i + 1];
-    const spanEnd = next ? next.start : (textLength ?? c.end);
-    // Never narrower than the chord's own anchor word — two chords landing
-    // on immediately adjacent words (no room between them) still each get
-    // at least their own word's width, the "shrinks to a minimum" floor,
-    // rather than a zero/negative span.
-    return { ...c, spanEnd: Math.max(spanEnd, c.end) };
-  });
+  const n = sorted.length;
+  const len = textLength ?? 0;
+  return sorted.map((c, i) => ({
+    ...c,
+    start: Math.round((i * len) / n),
+    spanEnd: Math.round(((i + 1) * len) / n),
+  }));
 }
 
 // Two chords occupy "the exact same range" (Part A: dropping onto a span

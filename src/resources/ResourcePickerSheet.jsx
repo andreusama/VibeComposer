@@ -2,90 +2,81 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { loadResourceLibrary } from './resourcesData.js';
 import { IcSearch, IcFolder, IcPlus } from '../mobile/icons.jsx';
 import useSheetDismissSwipe from '../mobile/useSheetDismissSwipe.js';
+import useLongPressDrag from '../mobile/useLongPressDrag.js';
+import useLineDragDrop from '../mobile/useLineDragDrop.js';
+import LineDragPill from '../mobile/LineDragPill.jsx';
 
 // Swipe-left-to-reveal-insert, same two-step "swipe reveals, tap commits"
-// mechanic as ProjectRow.jsx's own delete action (REVEAL/slop/snap values
-// match it exactly, on purpose — one swipe vocabulary for the whole app,
-// not a second one invented here). Long-press-and-drag (same LONG_PRESS_MS/
-// SLOP as ProjectRow's own reorder drag) is the third way in, for dropping
-// a resource onto a specific line instead of wherever the cursor is.
+// mechanic as ProjectRow.jsx's own delete action (REVEAL/slop values match
+// it exactly, on purpose — one swipe vocabulary for the whole app, not a
+// second one invented here). Long-press-and-drag (useLongPressDrag.js) is
+// the third way in, for dropping a resource onto a specific line instead of
+// wherever the cursor is.
 const REVEAL = 84; // px of the "Añadir" action revealed on a full swipe-left
 const SWIPE_SLOP = 6; // px of horizontal travel before a touch commits to being a swipe, not a tap
-const LONG_PRESS_MS = 380;
-const LONG_PRESS_SLOP = 8;
 
 // A row's job ends at "a long-press happened, here's the resource and
-// where it started" — it does NOT track the rest of the drag itself.
-// Earlier it did (a native touchmove listener on the row, finishing the
-// drag from the row's own onTouchEnd), which worked in every test here
-// because testing never kept one real finger down across the state change
-// that follows onDragStart: the moment a drag begins, the PARENT swaps its
-// whole rendered content (sheet shrinks to a strip, the row list —
-// including this row — unmounts). A touch sequence whose origin element
-// just left the DOM stops being delivered to it; on a real device this
-// read as "drag picks up, then the sheet just freezes" (reported
+// where it started" — it does NOT track the rest of the drag itself (see
+// useLongPressDrag.js). Earlier it did (a native touchmove listener on the
+// row, finishing the drag from the row's own onTouchEnd), which worked in
+// every test here because testing never kept one real finger down across
+// the state change that follows onDragStart: the moment a drag begins, the
+// PARENT swaps its whole rendered content (sheet shrinks to a strip, the
+// row list — including this row — unmounts). A touch sequence whose origin
+// element just left the DOM stops being delivered to it; on a real device
+// this read as "drag picks up, then the sheet just freezes" (reported
 // 2026-10-08), not an error, because nothing threw — the events simply had
-// nowhere left to go. The fix is below, in ResourcePickerSheet itself: it
-// owns the live drag via document-level listeners from the moment
-// onDragStart fires, so it doesn't matter that the row that started it is
-// gone a frame later.
+// nowhere left to go. The fix is in ResourcePickerSheet itself (via
+// useLineDragDrop.js): it owns the live drag via document-level listeners
+// from the moment onDragStart fires, so it doesn't matter that the row that
+// started it is gone a frame later.
+//
+// This row still owns its OWN swipe-to-reveal gesture locally (useLongPressDrag
+// only replaces the long-press-timing half) — `lp.move` is composed into the
+// same onTouchMove that tracks the reveal offset, since both read the same
+// live touch point. `swipedRef` is this row's own "that wasn't a tap" flag
+// for the swipe case specifically — lp.moved() only answers for the DRAG
+// case (it's lp's own internal flag, set only when its long-press timer
+// actually fires), so a swipe that never reached the timer needs its own.
 function ResourcePickerRow({ resource, onInsert, onDragStart }) {
   const [offset, setOffset] = useState(0);
-  // Immediate visual feedback on touch — same pressed-state convention as
-  // ProjectRow.jsx's own .mp-card.pressed, not a bare CSS :active (which
-  // needs a touch handler on the element to even fire reliably on iOS;
-  // explicit state sidesteps that instead of depending on it incidentally).
-  const [pressed, setPressed] = useState(false);
-  const startRef = useRef({ x: 0, y: 0, base: 0, moved: false });
-  const pressTimerRef = useRef(null);
-
-  const clearPressTimer = () => { clearTimeout(pressTimerRef.current); pressTimerRef.current = null; };
-  useEffect(() => () => clearPressTimer(), []);
+  const baseRef = useRef(0);
+  const swipedRef = useRef(false);
+  const lp = useLongPressDrag({ onDragStart: (res, x, y) => { setOffset(0); onDragStart(res, x, y); } });
 
   const onTouchStart = useCallback((e) => {
     const t = e.touches[0];
-    startRef.current = { x: t.clientX, y: t.clientY, base: offset, moved: false };
-    setPressed(true);
-    clearPressTimer();
-    pressTimerRef.current = setTimeout(() => {
-      pressTimerRef.current = null;
-      startRef.current.moved = true; // whatever follows is never a tap or a swipe
-      setOffset(0);
-      setPressed(false);
-      navigator.vibrate?.(12);
-      onDragStart(resource, startRef.current.x, startRef.current.y);
-    }, LONG_PRESS_MS);
-  }, [offset, onDragStart, resource]);
+    baseRef.current = offset;
+    swipedRef.current = false;
+    lp.start(t.clientX, t.clientY, resource);
+  }, [offset, lp, resource]);
 
   const onTouchMove = useCallback((e) => {
     const t = e.touches[0];
-    const dx = t.clientX - startRef.current.x;
-    const dy = t.clientY - startRef.current.y;
-    if (Math.hypot(dx, dy) > LONG_PRESS_SLOP) clearPressTimer(); // moving, not holding — no drag
-    if (Math.abs(dx) > SWIPE_SLOP && Math.abs(dx) > Math.abs(dy)) { startRef.current.moved = true; setPressed(false); }
-    if (startRef.current.moved) setOffset(Math.max(-REVEAL, Math.min(0, startRef.current.base + dx)));
-  }, []);
+    const { x: startX, y: startY } = lp.startPoint();
+    lp.move(t.clientX, t.clientY); // cancels the long-press timer past LONG_PRESS_SLOP
+    const dx = t.clientX - startX;
+    const dy = t.clientY - startY;
+    if (Math.abs(dx) > SWIPE_SLOP && Math.abs(dx) > Math.abs(dy)) { swipedRef.current = true; lp.cancel(); }
+    if (swipedRef.current) setOffset(Math.max(-REVEAL, Math.min(0, baseRef.current + dx)));
+  }, [lp]);
 
   const onTouchEnd = useCallback(() => {
-    clearPressTimer();
-    setPressed(false);
+    lp.end();
     setOffset((o) => (o < -REVEAL / 2 ? -REVEAL : 0));
-  }, []);
+  }, [lp]);
 
-  const onTouchCancel = useCallback(() => {
-    clearPressTimer();
-    setPressed(false);
-  }, []);
+  const onTouchCancel = useCallback(() => { lp.end(); }, [lp]);
 
   const handleTextClick = useCallback(() => {
-    if (startRef.current.moved) return; // that was a swipe or a drag, not a tap
+    if (lp.moved() || swipedRef.current) return; // that was a swipe or a drag, not a tap
     if (offset !== 0) { setOffset(0); return; } // first tap just closes the revealed action
     onInsert(resource);
-  }, [offset, onInsert, resource]);
+  }, [lp, offset, onInsert, resource]);
 
   return (
     <div
-      className={`res-picker-row${pressed ? ' pressed' : ''}`}
+      className={`res-picker-row${lp.pressed ? ' pressed' : ''}`}
       onTouchStart={onTouchStart}
       onTouchMove={onTouchMove}
       onTouchEnd={onTouchEnd}
@@ -124,18 +115,17 @@ export default function ResourcePickerSheet({ userId, onInsert, onClose, onDragH
   const [loaded, setLoaded] = useState(false);
   const [query, setQuery] = useState('');
   const [activeFolderId, setActiveFolderId] = useState(null); // null = "Todos"
-  // { resource, x, y } while a long-press has lifted a resource to drag it
-  // onto a line; null the rest of the time. x/y are viewport coordinates,
-  // used both to position the floating pill and (via elementFromPoint) to
-  // hit-test which line is underneath — the drop target lives in a
-  // different component tree (NoteEditorScreen) than this sheet, so a DOM
-  // query is what bridges them, same cross-tree hit-testing ProjectRow.jsx
-  // already relies on for its own reorder drag.
-  const [drag, setDrag] = useState(null);
-  // Mirrors `drag`, read synchronously inside the document-level listener
-  // below — that listener is attached once (empty deps) and must never act
-  // on a stale closure over `drag` from whatever render set it up.
-  const dragRef = useRef(null);
+
+  // The live drag (document-level move/end listeners, hover, drop) is
+  // identical to ChordStrumSheet's own — see useLineDragDrop.js. A resource
+  // drop only needs the line it landed on (unlike a chord, which needs the
+  // word), so onDropOnLine is handed (x, y, resource) and resolves the line
+  // itself via the same lineIndexFromPoint the hook already uses for hover.
+  const { drag, beginDrag: handleDragStart } = useLineDragDrop({
+    onDragHoverLine,
+    onDragActiveChange,
+    onDrop: onDropOnLine,
+  });
 
   // Drag the sheet itself down to dismiss it — same closing gesture every
   // bottom sheet in the app should eventually get (this is the first),
@@ -162,68 +152,6 @@ export default function ResourcePickerSheet({ userId, onInsert, onClose, onDragH
       return [r.body, r.origin, ...(r.tags || [])].filter(Boolean).join(' ').toLowerCase().includes(q);
     });
   }, [resources, membership, activeFolderId, query]);
-
-  const hitTestLine = (x, y) => {
-    const el = document.elementFromPoint(x, y);
-    const lineEl = el?.closest('[data-line-index]');
-    return lineEl ? Number(lineEl.dataset.lineIndex) : null;
-  };
-
-  const handleDragStart = useCallback((resource, x, y) => {
-    const next = { resource, x, y };
-    dragRef.current = next;
-    setDrag(next);
-    // Lets NoteEditorScreen disable pointer-events on its <textarea>s for
-    // the drag's whole duration — see ChordStrumSheet.jsx's identical fix
-    // (same bug: a real device's native text-selection handling can claim
-    // an in-progress touch the moment it crosses a textarea, freezing the
-    // drag with no JS preventDefault able to undo it after the fact).
-    onDragActiveChange?.(true);
-  }, [onDragActiveChange]);
-
-  const endDrag = useCallback((x, y) => {
-    const resource = dragRef.current?.resource;
-    const lineIndex = x != null && y != null ? hitTestLine(x, y) : null;
-    if (lineIndex != null && resource) onDropOnLine?.(lineIndex, resource);
-    onDragHoverLine?.(null);
-    onDragActiveChange?.(false);
-    dragRef.current = null;
-    setDrag(null);
-  }, [onDragHoverLine, onDropOnLine, onDragActiveChange]);
-
-  // Owns the live drag from the sheet's own root, which is the one thing
-  // in this tree guaranteed to stay mounted for the drag's whole duration
-  // (unlike the row that started it — see ResourcePickerRow's comment).
-  // Attached once; gated on dragRef so it's a no-op whenever nothing is
-  // actually being dragged, rather than attached/detached per drag.
-  useEffect(() => {
-    const handleMove = (e) => {
-      if (!dragRef.current) return;
-      e.preventDefault();
-      const t = e.touches[0];
-      if (!t) return;
-      const next = { ...dragRef.current, x: t.clientX, y: t.clientY };
-      dragRef.current = next;
-      setDrag(next);
-      onDragHoverLine?.(hitTestLine(t.clientX, t.clientY));
-    };
-    const handleEnd = (e) => {
-      if (!dragRef.current) return;
-      const t = e.changedTouches[0];
-      endDrag(t?.clientX ?? null, t?.clientY ?? null);
-    };
-    const handleCancel = () => {
-      if (dragRef.current) endDrag(null, null);
-    };
-    document.addEventListener('touchmove', handleMove, { passive: false });
-    document.addEventListener('touchend', handleEnd);
-    document.addEventListener('touchcancel', handleCancel);
-    return () => {
-      document.removeEventListener('touchmove', handleMove);
-      document.removeEventListener('touchend', handleEnd);
-      document.removeEventListener('touchcancel', handleCancel);
-    };
-  }, [endDrag, onDragHoverLine]);
 
   return (
     <div className={`baul-sheet-scrim${drag ? ' res-picker-scrim-dragging' : ''}`} onClick={drag ? undefined : onClose}>
@@ -282,9 +210,9 @@ export default function ResourcePickerSheet({ userId, onInsert, onClose, onDragH
       </div>
 
       {drag && (
-        <div className="res-picker-drag-pill" style={{ left: drag.x, top: drag.y }}>
-          {drag.resource.body.length > 70 ? `${drag.resource.body.slice(0, 70)}…` : drag.resource.body}
-        </div>
+        <LineDragPill x={drag.x} y={drag.y}>
+          {drag.payload.body.length > 70 ? `${drag.payload.body.slice(0, 70)}…` : drag.payload.body}
+        </LineDragPill>
       )}
     </div>
   );

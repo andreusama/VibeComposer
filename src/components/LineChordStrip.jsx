@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { spreadRow, computeChordSpans } from '../utils/chordAnchor.js';
+import useLongPressDrag from '../mobile/useLongPressDrag.js';
 
 // ─── Chord symbols sitting above the exact words they're strummed on ───────
 // "Mainstream tablature": a chord pill horizontally aligned to the precise
@@ -56,7 +57,60 @@ const samePlacement = (a, b) => {
   ));
 };
 
-export default function LineChordStrip({ text, chords, onRemove }) {
+// One placed pill. Tap → arm its delete ×; long-press → lift it and drag it
+// onto a different word (same useLongPressDrag.js timing ChordStrumSheet's
+// palette chips use to start THEIR drag — this is the third picker that
+// gesture now serves, exactly what it was pulled out for). The live drag
+// itself is owned by NoteEditorScreen (useLineDragDrop.js), not here: a
+// dragged pill routinely crosses onto a DIFFERENT line's own
+// ChordPillView/LineChordStrip instance, so nothing below the editor
+// itself can be the one thing guaranteed to outlive the gesture — same
+// reasoning ChordChip and ResourcePickerRow's own comments give for why
+// they hand the drag off rather than track it locally.
+function ChordPillView({ chord: c, placement: p, armed, onArm, onDismissArm, onRemove, onMoveStart, pillRef }) {
+  const lp = useLongPressDrag({ onDragStart: (payload, x, y) => onMoveStart?.(payload, x, y) });
+
+  // A preview entry (NoteEditorScreen's previewChordsByLine): the phantom
+  // this SAME chord would occupy here if the in-flight drag ended right
+  // now. Not the real thing yet — no delete ×, no re-drag (the finger
+  // already holding the real one hasn't let go), just a dashed outline so
+  // the layout change reads as "about to happen", not "already happened".
+  if (c.preview) {
+    return (
+      <span
+        ref={pillRef}
+        className="lc-pill lc-pill-preview"
+        style={p ? { left: p.left, top: p.top, width: p.width } : { left: 0, top: 0, visibility: 'hidden' }}
+      >
+        {c.chordName}
+      </span>
+    );
+  }
+
+  return (
+    <span
+      ref={pillRef}
+      className={`lc-pill${armed ? ' lc-pill-armed' : ''}`}
+      style={p ? { left: p.left, top: p.top, width: p.width } : { left: 0, top: 0, visibility: 'hidden' }}
+      onTouchStart={(e) => { const t = e.touches[0]; lp.start(t.clientX, t.clientY, { id: c.id, chordName: c.chordName }); }}
+      onTouchMove={(e) => { const t = e.touches[0]; lp.move(t.clientX, t.clientY); }}
+      onTouchEnd={lp.end}
+      onTouchCancel={lp.end}
+      onClick={() => { if (!lp.moved()) onArm(); }}
+    >
+      {c.chordName}
+      {armed && (
+        <button
+          className="lc-pill-remove"
+          onClick={(e) => { e.stopPropagation(); onDismissArm(); onRemove?.(c.id); }}
+          title="quitar este acorde"
+        >×</button>
+      )}
+    </span>
+  );
+}
+
+export default function LineChordStrip({ text, chords, onRemove, onMoveStart }) {
   const mirrorRef = useRef(null);
   const pillRefs = useRef({});
   const [placement, setPlacement] = useState({}); // id → { left, top }
@@ -100,14 +154,13 @@ export default function LineChordStrip({ text, chords, onRemove }) {
       const el = pillRefs.current[c.id];
       const start = Math.max(0, Math.min(c.start, len));
       // Measured out to the computed SPAN end, not the chord's own anchor
-      // end — a chord's pill is drawn as wide as what it "holds" (from its
-      // own word until the next chord, or the end of the line), the real-
-      // chord-chart convention this whole file's header comment points
-      // at. computeChordSpans already floors spanEnd at the anchor's own
-      // end, so this is never narrower than the label itself needs —
-      // .lc-pill's own min-width:fit-content (style.css) is the second,
-      // CSS-side half of that floor, for whatever this measurement still
-      // under-shoots by a pixel or two.
+      // word — a chord's pill is drawn as wide as the EQUAL SLICE of the
+      // line it holds (chordAnchor.js's computeChordSpans: one chord holds
+      // the whole line, two split it in half, three a third each), not as
+      // wide as the gap to the next dropped-on word. That slice can be
+      // narrower than the label itself needs (a short slice, a long chord
+      // name) — .lc-pill's own min-width:fit-content (style.css) is what
+      // floors it there, not this measurement.
       const spanEnd = Math.max(start, Math.min(c.spanEnd, len));
       range.setStart(node, start);
       range.setEnd(node, spanEnd);
@@ -153,22 +206,17 @@ export default function LineChordStrip({ text, chords, onRemove }) {
           {list.map((c) => {
             const p = placement[c.id];
             return (
-              <span
+              <ChordPillView
                 key={c.id}
-                ref={(el) => { if (el) pillRefs.current[c.id] = el; else delete pillRefs.current[c.id]; }}
-                className={`lc-pill${armedId === c.id ? ' lc-pill-armed' : ''}`}
-                style={p ? { left: p.left, top: p.top, width: p.width } : { left: 0, top: 0, visibility: 'hidden' }}
-                onClick={() => arm(c.id)}
-              >
-                {c.chordName}
-                {armedId === c.id && (
-                  <button
-                    className="lc-pill-remove"
-                    onClick={(e) => { e.stopPropagation(); clearTimeout(armTimerRef.current); setArmedId(null); onRemove?.(c.id); }}
-                    title="quitar este acorde"
-                  >×</button>
-                )}
-              </span>
+                chord={c}
+                placement={p}
+                armed={armedId === c.id}
+                onArm={() => arm(c.id)}
+                onDismissArm={() => { clearTimeout(armTimerRef.current); setArmedId(null); }}
+                onRemove={onRemove}
+                onMoveStart={onMoveStart}
+                pillRef={(el) => { if (el) pillRefs.current[c.id] = el; else delete pillRefs.current[c.id]; }}
+              />
             );
           })}
         </div>

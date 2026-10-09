@@ -17,6 +17,10 @@
     --graphite: #6E6A62;
     --graphite-soft: #9A968C;
     --hairline: #E2DED3;
+    /* The chord-chip redesign's own border — a chip is a key you pick up,
+       not a flat pill, and --hairline alone reads too faint against a white
+       chip to carry that on its own (ChordStrumSheet.jsx's .cs-chip). */
+    --key-edge: #CFC8B5;
     --chord: #4552D6;
     --chord-soft: #EEF0FC;
     --chord-line: #C7CCF2;
@@ -5313,7 +5317,12 @@ body::before {
     flex-shrink: 0;
     background: #FFFFFF;
     box-shadow: var(--card-elev);
+    transition: opacity 0.2s ease-out;
 }
+/* "Resto de la UI atenuada" during a line-drag (chord or resource) — the
+   sheet collapses to a strip so the lyric becomes the thing being looked
+   at; a full-strength header above it would undercut that. */
+.ne-header-drag-dim { opacity: 0.35; pointer-events: none; }
 /* Was reusing desktop's .canvas-note-type verbatim — that class's font-size
    is deliberately multiplied by --canvas-scale, a React Flow zoom-level
    token that only makes sense on the infinite canvas. This screen has no
@@ -7987,8 +7996,17 @@ body::before {
    underneath becomes the thing you're actually looking at and touching —
    the sheet reopens full-size the moment the drag ends (drop or cancel).
    Transition timing matches .res-picker-row-slide's own snap-back so the
-   two motions (sheet collapsing, row un-revealing) read as one gesture. */
-.res-picker-scrim-dragging { background: rgba(29, 28, 26, 0.04); transition: background 0.2s ease; }
+   two motions (sheet collapsing, row un-revealing) read as one gesture.
+   pointer-events: none is load-bearing, not cosmetic: the scrim is still a
+   fixed, inset:0, z-index:58 element while this class is on, so without
+   this it wins every document.elementFromPoint(x, y) hit-test the drop
+   handlers (ResourcePickerSheet's, ChordStrumSheet's) do on release — the
+   drag itself looks fine (sheet shrinks, pill follows the finger, sheet
+   reopens on drop) but the drop silently never finds a line/word underneath
+   and no-ops. Costs nothing to turn off: the scrim's onClick-to-dismiss is
+   already disabled for the whole dragging state (see each sheet's own
+   `onClick={drag ? undefined : onClose}`). Reported 2026-10-09. */
+.res-picker-scrim-dragging { background: rgba(29, 28, 26, 0.04); transition: background 0.2s ease; pointer-events: none; }
 .res-picker-sheet-shrunk {
     max-height: 56px;
     transition: max-height 0.2s cubic-bezier(0.32, 0.72, 0, 1);
@@ -8429,10 +8447,20 @@ body::before {
     box-shadow: inset 0 0 0 1px var(--amber);
     /* Sans, not the lyric serif: a chord symbol is notation ABOUT the line,
        not part of it, and the same family at a smaller size would read as
-       an editorial aside in the text rather than as a chord. */
+       an editorial aside in the text rather than as a chord. --amber, not
+       --chord (2026-10-09 redesign briefly tried --chord here, reasoning
+       that this app already uses --chord for every OTHER chord-related
+       accent — reverted same day on explicit feedback: blue reads as
+       "interactable" in this app's own colour language, amber as
+       "settled" — and a pill just sitting above a lyric line, not
+       currently being dragged, is the settled case. The floating drag
+       chip (.cs-drag-pill) stays --chord: that one genuinely IS something
+       being actively carried around). Bigger and bolder than before
+       (16px/800, was 12px/700) — kept from the same redesign, not part of
+       the colour revert. */
     font-family: var(--font-sans);
-    font-size: var(--fs-label);
-    font-weight: 700;
+    font-size: 16px;
+    font-weight: 800;
     line-height: 1.15;
     color: var(--amber);
     white-space: nowrap;
@@ -8450,11 +8478,31 @@ body::before {
 }
 /* Tapped once — the delete affordance is now showing (and times out on its
    own, see ARM_TIMEOUT_MS). Darkening rather than reddening: the pill is
-   still a chord, it just has an × next to it now. */
+   still a chord, it just has an × next to it now. Amber, matching the
+   settled pill it's a state of (not blue — this isn't a drag). */
 .lc-pill-armed {
     background: var(--amber);
     box-shadow: inset 0 0 0 1px var(--amber);
     color: #FFFFFF;
+}
+/* The phantom slot a dragged pill would land in if released right now
+   (NoteEditorScreen's previewChordsByLine) — a dashed outline and no fill,
+   so "this is about to happen" never reads as "this already happened".
+   --chord, not --amber: unlike the settled pill above, this only ever
+   exists mid-drag, same moment .cs-drag-pill's own blue chip is in the
+   air — "blue = interactable/in-progress" covers this one too, it just
+   never gets tapped itself. pointer-events: none because it isn't a real
+   chord yet: no delete ×, no re-drag, the finger holding the real one
+   hasn't let go. Transition is intentionally snappier than the real
+   pill's own (0.15s width) — this needs to track a moving finger, not
+   ease into a settled layout. */
+.lc-pill-preview {
+    background: transparent;
+    box-shadow: none;
+    border: 1.5px dashed var(--chord);
+    opacity: 0.75;
+    pointer-events: none;
+    transition: left 0.08s linear, width 0.08s linear;
 }
 .lc-pill-remove {
     border: none;
@@ -8469,27 +8517,88 @@ body::before {
     cursor: pointer;
 }
 
-/* ─── The strum pattern, as literal big and little arrows ──────────────────
-   Baseline-aligned (flex-end), never centred: a 44px hard stroke and an
-   18px soft one have to hang from the same line the way they do on paper,
-   or the pattern stops reading as one gesture. */
-.strum-arrows {
+/* An already-placed pill being dragged to a new word (NoteEditorScreen's
+   chordMoveDrag) reuses .res-picker-drag-hint's text styling, but unlike
+   every other drag-hint it isn't rendered inside a sheet that's already
+   floating above the content — this drag starts straight from a pill
+   sitting in the lyric itself, so the hint needs its own fixed position
+   and a surface of its own to read against. */
+.chord-move-hint {
+    position: fixed;
+    left: 50%;
+    bottom: calc(var(--space-6) + env(safe-area-inset-bottom));
+    transform: translateX(-50%);
+    z-index: 59;
+    background: #FFFFFF;
+    border: var(--card-border);
+    border-radius: var(--r-md);
+    box-shadow: var(--sh-3);
+    padding: var(--space-2) var(--space-4);
+    pointer-events: none;
+    white-space: nowrap;
+}
+
+/* The "this resource becomes a brand-new line here" half of a resource
+   drag preview (NoteEditorScreen's resourceDragPreview, mode 'before'/
+   'after') — straddles the boundary between two verses via its own
+   translateY(-50%), positioned and sized off the hovered row's own
+   getBoundingClientRect (resolveResourceDropTarget) so it reads as "about
+   to slot in exactly here", not just a generic notice. Dashed, not solid,
+   for the same reason .lc-pill-preview is: this hasn't happened yet. */
+.resource-line-preview {
+    position: fixed;
+    transform: translateY(-50%);
+    z-index: 59;
+    box-sizing: border-box;
+    background: #FFFFFF;
+    border: 1.5px dashed var(--amber);
+    border-radius: var(--r-md);
+    padding: var(--space-2) var(--space-3);
+    font-family: var(--font-body);
+    font-size: 1.0625rem;
+    color: var(--amber);
+    opacity: 0.85;
+    pointer-events: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ─── The strum pattern, as size-coded beat cells (StrumPattern.jsx) ───────
+   Redesigned 2026-10-09: down/up used to be a colour pairing (solid --ink
+   fill vs. outlined --paper-deep), which meant reading the pattern meant
+   first mapping a colour to a meaning. Size reads directly — a down-stroke
+   IS a bigger cell — so every cell now shares the identical neutral tone
+   (fill, border, icon stroke) and the ONLY variable is .beat-cell.down vs.
+   .beat-cell.up's own dimensions. Approved mockups:
+   bpm_strum_redesign.html / acordes_rasgueo_redesign.html. */
+.strum-pattern { overflow-x: auto; }
+/* Baseline-aligned (flex-end), never centred: a down cell and an up cell
+   have to hang from the same bottom edge like bars of an equalizer, or the
+   size difference stops reading as "two kinds of stroke" and just reads as
+   misaligned. */
+.strum-row { display: flex; align-items: flex-end; gap: 7px; height: 34px; }
+.beat-col { width: 30px; display: flex; justify-content: center; flex-shrink: 0; }
+.beat-cell {
+    background: var(--paper-deep);
+    border: 1.5px solid var(--hairline);
     display: flex;
-    align-items: flex-end;
-    gap: var(--space-1);
-    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
 }
-.strum-arrow {
-    display: inline-flex;
-    align-items: flex-end;
-    color: var(--graphite);
-    transition: color 0.1s, transform 0.1s;
-}
-/* The visual metronome's current stroke — amber + a nudge up, so the
-   stepping is visible at a glance without animating size (which would make
-   the intensity the arrows exist to convey unreadable mid-playback). */
-.strum-arrow-active { color: var(--amber); transform: translateY(-3px); }
-.strum-arrows-compact { gap: 1px; flex-wrap: nowrap; }
+.beat-cell svg { stroke: var(--ink); }
+.beat-cell.down { width: 30px; height: 34px; border-radius: 10px; }
+.beat-cell.down svg { width: 15px; height: 15px; }
+.beat-cell.up { width: 22px; height: 22px; border-radius: 7px; }
+.beat-cell.up svg { width: 10px; height: 10px; stroke-width: 2; }
+/* Same 30px column width and 7px gap as .strum-row above — not incidental:
+   it's what keeps a label centred under its own cell, small or large, and
+   what keeps this row scrolling in lockstep with .strum-row (both are
+   children of the same overflow-x:auto .strum-pattern, not two
+   independently-scrolling rows that could drift apart). */
+.beat-labels { display: flex; gap: 7px; }
+.beat-label { width: 30px; text-align: center; font-family: var(--font-mono); font-size: 9.5px; color: #B7B1A1; }
 
 /* The saved pattern surfaced in the note editor, under the header and above
    the lyric sheet — it belongs to the whole section, not to any one line.
@@ -8563,31 +8672,9 @@ body::before {
 }
 
 .ne-ts-strum { flex: 1; min-width: 0; }
-/* Wraps, not scrolls — a crowded 8-stroke pattern at 320px simply runs onto
-   a second row instead of clipping mid-cell behind a scrollbar (tried
-   overflow-x:auto first; a cell cut in half read as broken, not scrollable,
-   see the harness screenshots). Each cell carries its own number (see
-   .ne-beat-col) so wrapping never splits a cell from its label. */
-.ne-ts-cells { display: flex; flex-wrap: wrap; gap: 6px 6px; row-gap: 10px; }
-.ne-beat-col { display: flex; flex-direction: column; align-items: center; gap: 4px; flex-shrink: 0; }
-.ne-beat-cell {
-    width: 30px;
-    height: 30px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 9px;
-}
-/* Solid vs. outline, not a hue — the weight contrast (filled/heavy vs.
-   outlined/light) IS the down/up distinction, deliberately not a semaphore
-   color pair, to stay inside the Manuscript palette. */
-.ne-beat-cell-down { background: var(--ink); color: var(--paper); }
-.ne-beat-cell-up { background: var(--paper-deep); border: 1.5px solid var(--hairline); color: var(--graphite); }
-.ne-beat-label {
-    font-family: var(--font-mono);
-    font-size: 9.5px;
-    color: #B7B1A1;
-}
+/* The beat cells themselves are StrumPattern.jsx's own .strum-pattern /
+   .strum-row / .beat-cell — see that rule block for the geometry. This
+   card contributes only its own eyebrow + divider + layout slot. */
 
 /* ─── Acordes y rasgueo sheet ──────────────────────────────────────────────
    Same .baul-sheet shell + separate sticky head / scrolling body split as
@@ -8602,17 +8689,23 @@ body::before {
     padding: var(--space-2) var(--space-4) var(--space-3);
     border-bottom: 1px solid var(--hairline);
 }
-.cs-head .attach-title { margin-bottom: var(--space-2); }
+/* 20px/700, not the attach-title default elsewhere (22px/600) — this sheet
+   sits directly above a segmented control and the tighter weight/size pair
+   reads as "sheet title" rather than "screen title". */
+.cs-head .attach-title { margin-bottom: var(--space-2); font-family: var(--font-display); font-size: 20px; font-weight: 700; }
 
 /* Two segmented tabs rather than two sheets: picking a chord and recording
    how it's struck are the same sitting, and a second button in an already
-   crowded accessory bar would buy nothing. */
+   crowded accessory bar would buy nothing. Redesigned 2026-10-09: a squared,
+   12px-radius track (not a full pill) with a smaller, lighter-weight active
+   state (white chip, own shadow) — the pill/999px version read as a single
+   rounded bar with two labels on it rather than two distinct choices. */
 .cs-tabs {
     display: flex;
     gap: var(--space-1);
     padding: 3px;
-    border-radius: 999px;
-    background: var(--paper-deeper);
+    border-radius: 12px;
+    background: var(--paper-deep);
 }
 .cs-tab {
     flex: 1;
@@ -8622,16 +8715,26 @@ body::before {
     gap: var(--space-1-5);
     padding: var(--space-1-5) var(--space-3);
     border: none;
-    border-radius: 999px;
+    border-radius: 9px;
     background: none;
     font-family: var(--font-sans);
-    font-size: var(--fs-secondary);
-    font-weight: 600;
+    font-size: 13px;
+    font-weight: 500;
     color: var(--graphite);
     cursor: pointer;
     transition: background 0.15s, color 0.15s, box-shadow 0.15s;
 }
-.cs-tab-active { background: #FFFFFF; color: var(--ink); box-shadow: var(--sh-2); }
+.cs-tab-active {
+    background: #FFFFFF;
+    color: var(--ink);
+    font-weight: 700;
+    box-shadow: 0 2px 6px rgba(29, 28, 26, .12), 0 1px 2px rgba(29, 28, 26, .06);
+}
+/* Icon tints independently of the label — amber only when this is the
+   active tab, set on the svg itself (currentColor resolves per-element,
+   not just inherited from .cs-tab-active's own `color`, which the label
+   text needs to stay --ink, not amber). */
+.cs-tab-active svg { color: var(--amber); }
 
 .cs-body {
     flex: 1;
@@ -8647,105 +8750,211 @@ body::before {
     color: var(--muted);
 }
 
-/* Free-text chord entry — the palette is a shortcut, never the vocabulary
-   limit (chord_name is free text in the DB for exactly this reason). */
-.cs-custom { display: flex; gap: var(--space-2); margin-bottom: var(--space-4); }
-.cs-custom-input {
-    flex: 1;
-    min-width: 0;
-    padding: var(--space-2) var(--space-3);
-    border: 1.5px solid var(--hairline);
-    border-radius: 999px;
-    background: #FFFFFF;
-    font-family: var(--font-sans);
-    font-size: var(--fs-secondary);
-    color: var(--ink);
+/* "Acordes" + the drag affordance hint — replaces the old instructional
+   paragraph for this tab (Rasgueo's own cs-hint stays; this tab's whole
+   point IS the drag, so the header says so directly instead of explaining
+   it in prose first). */
+.cs-chords-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: var(--space-3);
 }
-.cs-custom-input:focus { outline: none; border-color: var(--amber); }
-.cs-custom-add {
-    flex-shrink: 0;
+.cs-chords-title { font-family: var(--font-display); font-size: 18px; font-weight: 700; color: var(--ink); }
+.cs-chords-drag-hint {
     display: inline-flex;
     align-items: center;
-    gap: var(--space-1);
-    padding: var(--space-2) var(--space-3);
-    border: none;
-    border-radius: 999px;
-    background: var(--amber);
-    font-family: var(--font-sans);
-    font-size: var(--fs-secondary);
-    font-weight: 600;
-    color: #FFFFFF;
-    cursor: pointer;
+    gap: 3px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--graphite);
 }
-.cs-custom-add:disabled { opacity: 0.35; cursor: default; }
+.cs-chords-drag-arrow { color: var(--amber); font-weight: 700; }
 
 .cs-group { margin-bottom: var(--space-4); }
+/* Label + a hairline filling the rest of the row — reads as a section
+   divider with a name on it, not just a floating caption. */
+.cs-group-head { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); }
+.cs-group-rule { flex: 1; height: 1px; background: var(--hairline); }
+/* The one eyebrow style this whole sheet uses — "Mayores"/"Menores"/
+   "Séptimas y color" here, "Patrón grabado"/"Tempo" in the Rasgueo tab
+   below. Mono, not sans: eyebrows read as metadata about the section, the
+   same register --fs-label mono labels already use elsewhere (e.g.
+   beat-label's own 9.5px mono). */
 .cs-group-label {
-    margin-bottom: var(--space-2);
-    font-family: var(--font-sans);
-    font-size: var(--fs-label);
-    font-weight: 700;
-    letter-spacing: 0.04em;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
     text-transform: uppercase;
-    color: var(--muted);
+    color: var(--graphite);
 }
-.cs-chip-grid { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+/* An aligned grid, not a wrapped flow of pills (flex-wrap) — Mayores/
+   Menores are exactly 7 chords, one per natural note, so 7 equal columns
+   means every chip is exactly as wide as its neighbours and nothing
+   orphans onto its own row. Séptimas y color is 6 columns × 2 rows (11
+   chords + the "+" tile — see PALETTE's own comment on why it's 11, not
+   12). */
+.cs-chip-grid { display: grid; gap: 7px; }
+.cs-chip-grid-major,
+.cs-chip-grid-minor { grid-template-columns: repeat(7, 1fr); }
+.cs-chip-grid-seventh { grid-template-columns: repeat(6, 1fr); }
 
 /* A chord chip has exactly two gestures — tap to attach at the caret,
-   long-press to drag onto a word. Same raised-white-card material as every
-   other chip; the serif is deliberate here (unlike the in-line .lc-pill,
-   which has to read as notation against the lyric — in a palette the chord
-   name IS the content). touch-action:none so a long-press-then-drag isn't
-   stolen by the sheet's own scroll. */
+   long-press to drag onto a word. Redesigned 2026-10-09 to read as a key
+   you pick up, not a flat pill: a harder edge (1px --key-edge + a 3px
+   BOTTOM border, not an even 1px all round) plus real shadow give it the
+   relief a flat .sh-2 pill didn't have. The serif-free sans is deliberate
+   here (unlike the in-line .lc-pill, which has to read as notation against
+   the lyric — in a palette the chord name IS the content, and this app's
+   whole "serif is for what's sung" rule doesn't apply to UI chrome).
+   touch-action:none so a long-press-then-drag isn't stolen by the sheet's
+   own scroll. */
 .cs-chip {
-    flex: 0 0 auto;
-    min-width: 54px;
-    padding: var(--space-2) var(--space-3);
-    border: var(--card-border);
-    border-radius: var(--r-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 44px;
+    border: 1px solid var(--key-edge);
+    border-bottom-width: 3px;
+    border-radius: 11px;
     background: #FFFFFF;
-    box-shadow: var(--sh-2);
+    box-shadow: 0 3px 6px rgba(29, 28, 26, .10);
     font-family: var(--font-sans);
-    font-size: var(--fs-body);
-    font-weight: 600;
+    font-size: 14px;
+    font-weight: 800;
     color: var(--ink);
     cursor: pointer;
     touch-action: none;
     transition: transform 0.1s, background 0.1s, box-shadow 0.1s;
 }
 .cs-chip.pressed { background: var(--amber-soft); transform: scale(0.96); box-shadow: none; }
-
-/* The chord following the finger mid-drag. Reuses .res-picker-drag-pill's
-   fixed positioning/elevation and only overrides what a two-character chord
-   name needs that a whole line of resource text didn't. */
-.cs-drag-pill {
-    max-width: none;
+/* Minores share Mayores' exact relief, just a step down in ground tone —
+   the ONLY difference between the two groups is that tone, never shape or
+   weight (hierarchy is size/weight/relief everywhere in this sheet, not
+   colour — see this redesign's own governing principle). */
+.cs-chip-minor { background: var(--paper-deep); }
+/* Séptimas y color is visually quieter — smaller, lighter text, a softer
+   shadow — because it's the "more than you usually need" tier, reached
+   for less often than Mayores/Menores. */
+.cs-chip-seventh {
+    height: 38px;
+    border-radius: 11px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--graphite);
+    box-shadow: 0 2px 4px rgba(29, 28, 26, .07);
+}
+/* The "+" tile ending Séptimas — a hole waiting to be filled, not a chip:
+   dashed, transparent, no shadow, so it never competes with the real chips
+   around it for attention. */
+.cs-chip-custom {
+    background: transparent;
+    border: 1.5px dashed var(--key-edge);
+    box-shadow: none;
+    color: var(--graphite);
+}
+.cs-chip-custom:active { background: var(--paper-deep); }
+/* The free-text entry that replaces the "+" tile once tapped — spans the
+   grid's own full width rather than trying to fit one 1/6th-wide cell, so
+   there's room to actually type a slash chord or an alteration. */
+.cs-custom-input {
+    grid-column: 1 / -1;
+    height: 38px;
+    padding: 0 var(--space-3);
+    border: 1.5px solid var(--amber);
+    border-radius: 11px;
+    background: #FFFFFF;
     font-family: var(--font-sans);
-    font-size: var(--fs-body);
-    font-weight: 700;
-    color: var(--amber);
+    font-size: var(--fs-secondary);
+    color: var(--ink);
+}
+.cs-custom-input:focus { outline: none; }
+
+/* Estado 2 · arrastrando — the collapsed sheet's own strip (ChordStrumSheet.jsx).
+   Reuses .cs-chip + its variant classes for the relief/tone (same chips,
+   just smaller and in one scrolling row instead of a 7/7/6 grid), so a
+   future change to what a chip looks like never has to be made twice. */
+.cs-drag-strip {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: var(--space-2) var(--space-4) var(--space-3);
+    overflow-x: auto;
+}
+.cs-drag-strip .cs-chip { flex: 0 0 44px; width: 44px; height: 36px; font-size: 13px; cursor: default; }
+/* The dragged chip's own spot in the strip — an empty hole, not a gap,
+   so the strip's width/scroll position never jumps the instant a drag
+   starts. !important because the variant classes (.cs-chip-major/-minor/
+   -seventh) each set their own background/border/shadow, and this state
+   has to win over all three uniformly, not be re-declared per variant. */
+.cs-drag-strip-hole {
+    background: transparent !important;
+    border: 1.5px dashed var(--key-edge) !important;
+    box-shadow: none !important;
+}
+.cs-drag-strip-sep { flex: 0 0 auto; width: 1px; height: 28px; background: var(--hairline); }
+
+/* The chord following the finger mid-drag — redesigned 2026-10-09 into an
+   actual lifted object: fixed size (not padding-fit), tilted -5deg like a
+   real tile picked up off a table, a shadow dramatic enough to read as
+   "floating above everything else" rather than just "elevated a little".
+   Reuses .res-picker-drag-pill's fixed positioning/offset-from-the-finger
+   (translate(-50%,-115%)) and overrides everything else — a 2-character
+   chord name at 22px has nothing in common with a line of resource text at
+   13px. Shared by both chord-drag entry points (a new chip from
+   ChordStrumSheet's palette, an existing pill being repositioned via
+   NoteEditorScreen's chordMoveDrag) — both pass this same class to
+   LineDragPill, so one definition covers both automatically. */
+.cs-drag-pill {
+    width: 56px;
+    height: 50px;
+    max-width: none;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 13px;
+    box-shadow: 0 22px 34px rgba(29, 28, 26, .30), 0 4px 10px rgba(29, 28, 26, .14);
+    transform: translate(-50%, -115%) rotate(-5deg);
+    opacity: 1;
+    font-family: var(--font-sans);
+    font-size: 18px;
+    font-weight: 800;
+    color: var(--chord);
 }
 
 /* ─── The strum pad ────────────────────────────────────────────────────────
    A tall surface the artist actually strums on. touch-action:none because a
    vertical swipe inside a scrollable sheet is otherwise eaten as a scroll,
-   and a strum that scrolls the sheet is not a strum. */
+   and a strum that scrolls the sheet is not a strum. Redesigned 2026-10-09:
+   warm amber ground + a faint diagonal weave (the same "this surface has a
+   texture, not just a colour" move --paper-deeper's grain implies
+   elsewhere) instead of a flat dashed box, so the pad itself reads as an
+   instrument's own surface. This is the REPOSO styling only — the active-
+   recording look (today: solid amber border + --amber-soft, .cs-pad-live
+   below) is open territory, not covered by the approved mockup. */
 .cs-pad {
     display: flex;
     align-items: center;
     justify-content: center;
-    height: 168px;
+    height: 176px;
     margin-bottom: var(--space-3);
-    border: 1.5px dashed var(--card-border);
+    border: 1.5px dashed #DEC18C;
     border-radius: var(--r-lg);
-    background: var(--paper-deeper);
+    background:
+        repeating-linear-gradient(135deg, rgba(29, 28, 26, .035) 0 1px, transparent 1px 13px),
+        var(--amber-soft);
     touch-action: none;
     user-select: none;
     -webkit-user-select: none;
     transition: background 0.15s, border-color 0.15s;
 }
 /* Live take — solid amber edge, the same "recording" signal the voice-memo
-   bar already uses, so there is never a doubt about whether a swipe counted. */
+   bar already uses, so there is never a doubt about whether a swipe counted.
+   Kept as-is pending the open question on this state's own redesign. */
 .cs-pad-live { border-style: solid; border-color: var(--amber); background: var(--amber-soft); }
 .cs-pad-hint {
     padding: 0 var(--space-5);
@@ -8754,60 +8963,143 @@ body::before {
     font-size: var(--fs-secondary);
     color: var(--muted);
 }
+/* The idle (not recording) sub-state: a small raised circle framing the
+   hint's own icon, the hint text below it in the pad's own warm mono. */
+.cs-pad-idle { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); }
+.cs-pad-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: #FFFFFF;
+    border: 1.5px solid #DEC18C;
+    color: var(--amber);
+}
+.cs-pad-idle .cs-pad-hint {
+    padding: 0;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: #9C7A3E;
+}
 /* Live under-the-finger preview: the stroke as it is being performed, at the
    size its current velocity would store it at. */
 .cs-pad-preview { color: var(--amber); }
 
+/* Column now (eyebrow above the row), not the single flex-end row this was
+   when it held the old bare arrows directly — StrumPattern.jsx's own
+   .strum-row owns that baseline alignment now, scoped to just the cells.
+   No empty state: this block isn't rendered at all when there's nothing
+   recorded (see ChordStrumSheet's own comment on why). */
 .cs-pattern {
-    min-height: 56px;
-    display: flex;
-    align-items: flex-end;
-    padding: var(--space-2) var(--space-3);
+    padding: 12px 14px;
     margin-bottom: var(--space-3);
     border-radius: var(--r-md);
-    background: #FFFFFF;
-    border: var(--card-border);
-    overflow-x: auto;
+    background: var(--paper);
+    border: 1px solid var(--hairline);
 }
-.cs-pattern-empty { font-family: var(--font-sans); font-size: var(--fs-secondary); color: var(--faint); }
+.cs-pattern .cs-group-label { margin-bottom: var(--space-2); display: block; }
 
-.cs-tempo { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-4); }
-.cs-tempo-label { font-family: var(--font-sans); font-size: var(--fs-secondary); font-weight: 600; color: var(--ink); }
+/* Same card material as .cs-pattern above — Tempo and Patrón grabado read
+   as one family of "recorded facts about this take", not a card and a bare
+   form row next to it. */
+.cs-tempo {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 14px;
+    margin-bottom: var(--space-4);
+    border-radius: var(--r-md);
+    background: var(--paper);
+    border: 1px solid var(--hairline);
+}
+.cs-tempo-info { display: flex; flex-direction: column; gap: var(--space-1); }
+.cs-tempo-row { display: flex; align-items: baseline; gap: var(--space-1-5); }
+/* Reuses .ne-ts-dot's own tempo-pulse-beat keyframe (TempoStrumCard.jsx) —
+   one "pulses at the actual rhythm" animation, not a second copy of it. */
+.cs-tempo-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--amber);
+    animation: tempo-pulse-beat 500ms ease-in-out infinite;
+    align-self: center;
+}
 .cs-tempo-input {
-    width: 72px;
-    padding: var(--space-1-5) var(--space-2);
-    border: 1.5px solid var(--hairline);
-    border-radius: var(--r-sm);
-    background: #FFFFFF;
-    font-family: var(--font-sans);
-    font-size: var(--fs-utility);
+    width: 52px;
+    padding: 0;
+    border: none;
+    border-bottom: 1.5px solid var(--hairline);
+    border-radius: 0;
+    background: none;
+    font-family: var(--font-display);
+    font-size: 26px;
     font-weight: 700;
-    text-align: center;
     color: var(--ink);
 }
 .cs-tempo-input:focus { outline: none; border-color: var(--amber); }
-.cs-tempo-unit { font-family: var(--font-sans); font-size: var(--fs-label); color: var(--muted); }
+.cs-tempo-unit { font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; color: var(--graphite); }
 /* "This number came from your hand, not from a default" — the whole reason
    the tempo is editable right next to it. */
 .cs-tempo-auto { font-family: var(--font-sans); font-size: var(--fs-label); font-style: italic; color: var(--amber); }
-
-.cs-controls { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
-.cs-btn {
-    display: inline-flex;
+.cs-tempo-steppers { display: flex; flex-direction: column; gap: var(--space-1); }
+.cs-tempo-step {
+    width: 28px;
+    height: 28px;
+    display: flex;
     align-items: center;
-    gap: var(--space-1-5);
-    padding: var(--space-2) var(--space-3-5);
-    border: 1.5px solid var(--hairline);
-    border-radius: 999px;
+    justify-content: center;
+    padding: 0;
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
     background: #FFFFFF;
     font-family: var(--font-sans);
-    font-size: var(--fs-secondary);
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1;
+    color: var(--graphite);
+    cursor: pointer;
+}
+
+.cs-controls { display: flex; align-items: center; gap: 10px; }
+.cs-btn {
+    flex: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-1-5);
+    padding: 12px 0;
+    border: 1.5px solid var(--hairline);
+    border-radius: var(--r-md);
+    background: #FFFFFF;
+    font-family: var(--font-sans);
+    font-size: 14px;
     font-weight: 600;
     color: var(--ink);
     cursor: pointer;
 }
+/* Clearly, not subtly, disabled — opacity alone (not a second colour
+   system) so "nothing to save yet" never reads as just a quieter version
+   of the normal button. */
 .cs-btn:disabled { opacity: 0.35; cursor: default; }
-.cs-btn-rec { border-color: var(--amber); color: var(--amber); }
+/* Rehacer/Grabar — the refresh icon (IcRegenerate, via ChordStrumSheet.jsx)
+   tints amber; the label stays --ink like any other secondary button. */
+.cs-btn-secondary svg { color: var(--amber); }
 .cs-btn-stop { border-color: var(--rose); background: var(--rose); color: #FFFFFF; }
+/* Solid --thread, white text — real contrast on purpose: a washed-out
+   green here reads as "disabled" even when it isn't, which is the exact
+   bug this redesign exists to fix. */
 .cs-btn-primary { border-color: var(--thread); background: var(--thread); color: #FFFFFF; }
-.cs-btn-danger { border-color: var(--hairline); color: var(--rose); }
+/* Isolated circle, not a flex:1 pill like its siblings — destructive
+   actions get their own shape so a mis-tap is structurally less likely. */
+.cs-btn-danger {
+    flex: 0 0 auto;
+    width: 42px;
+    height: 42px;
+    padding: 0;
+    border-radius: 50%;
+    border-color: var(--rose-soft);
+    background: var(--rose-soft);
+    color: var(--rose);
+}

@@ -1,176 +1,71 @@
-// ─── Chord anchoring (pure) ────────────────────────────────────────────────
-// Where a chord sits inside a line of lyric text, and how that survives the
-// text being edited around it. See supabase/migration_line_chords.sql.
+// ─── Chord layout (pure) ────────────────────────────────────────────────────
+// Where chords sit across a verse, and how near-neighbours avoid colliding.
+// See supabase/migration_line_chords.sql.
 //
-// The governing idea, copied deliberately from word variants
-// (resolveVariantRange, src/canvas/wordVariantData.js) rather than invented
-// again here: a stored character offset is NOT trusted after the fact. Type
-// one word at the start of a line and every offset to its right is wrong.
-// So the attachment's real identity is its anchor_text — the actual
-// substring the chord was dropped on — and its position is re-derived from
-// the CURRENT text on every render. start_offset only survives as a
-// tie-breaker for "which 'y' did they mean" when the anchor appears more
-// than once, and the chord simply stops being drawn when its anchor is gone
-// from the line entirely (detached, not deleted — exactly how a word
-// variant whose active wording was typed over behaves).
-
-// A "word" for chord purposes: starts on a letter or digit and may carry
-// internal apostrophes/hyphens/interpuncts, so Catalan/Spanish forms like
-// "l'aigua", "paral·lel" and "bien-estar" count as one word and the chord
-// doesn't end up anchored to a bare fragment. Trailing punctuation
-// (commas, periods, ¿?¡!) is deliberately left OUT of the anchor: it is not
-// part of the sung syllable, and including it would make the anchor break
-// on an unrelated punctuation edit.
-const WORD_RE = /[\p{L}\p{N}][\p{L}\p{N}'’·\-]*/gu;
-
-// Every word in `text`, in order, as { start, end }.
-export function wordsIn(text) {
-  if (!text) return [];
-  const out = [];
-  WORD_RE.lastIndex = 0;
-  let m;
-  while ((m = WORD_RE.exec(text)) !== null) out.push({ start: m.index, end: m.index + m[0].length });
-  return out;
-}
-
-// The word a drop at character `offset` should attach to.
+// 2026-10-16 redesign: chords used to be anchored to a specific WORD
+// (anchor_text/start_offset, re-resolved against the live text on every
+// render so a chord would survive edits to the text around it — the same
+// idea word_variants still uses for its own underlines). That model made
+// drag-and-drop fundamentally a word-level hit-test, which turned out to be
+// exactly as fragile as hitting a specific word with a real finger always
+// is: a drop a hair into the gap before the intended word silently
+// resolved to the WRONG one and overwrote whatever chord was already
+// there (reported repeatedly, most recently as "I can only place a few
+// chords, every drop after that replaces the last one"). The deeper
+// complaint underneath all of those reports — chords should just be a
+// stackable, reorderable, overridable SEQUENCE across the verse, not
+// something pinned to one specific word — was the actual fix: a chord's
+// only position in the world is now its integer `position` among the
+// other chords on its line (NoteEditorScreen.jsx owns reading/writing
+// that), and this file no longer has any idea what the lyric text even
+// says. What's left here is pure layout math: given however many chords
+// are on a line, in order, how wide a slice of the line each one visually
+// holds, and how their rendered pills avoid overlapping.
 //
-// Inside a word → that word, always: a finger that genuinely landed in the
-// middle of "corazón" means that word, and splitting it at the exact
-// character under the fingertip would be precision theatre — real tablature
-// puts the symbol over a whole word/syllable, never over half a letter.
-//
-// In whitespace or punctuation → ALWAYS the word that FOLLOWS the drop
-// point, never whichever word happens to be fewer characters away, because
-// a chord change is heard as landing with the next thing sung, not as
-// trailing the previous one. This used to pick whichever side was merely
-// nearer by character count, "on a tie" going to the following word — but
-// for the (overwhelmingly common) single-space gap between two words,
-// there IS no in-between offset to be a true tie: offsetFromMirrorPoint
-// quantizes a pixel hit to either the index right after the preceding
-// word or the index right before the following one, so "nearer" reduced to
-// "which half of that one space glyph the finger happened to land in",
-// functionally unpredictable from the person's own perspective. A chord
-// drop aimed at a word that lands a hair into the gap BEFORE it used to
-// silently resolve to the PRECEDING word instead — which, since dropping
-// on a word that already carries a chord renames it in place rather than
-// adding a new one (attachChord's own "same range replaces" rule), read as
-// "I can only place N chords, every drop after that just overwrites the
-// last one" (reported 2026-10-16, root-caused via Playwright the same
-// day). Falls back to the nearest (preceding) word only when there is no
-// following one, i.e. the drop is past the end of the last word in the
-// line.
-//
-// Returns null only when there is no word at all to attach to.
-export function wordRangeAt(text, offset) {
-  const words = wordsIn(text);
-  if (!words.length) return null;
-  const pos = Math.max(0, Math.min(Number.isFinite(offset) ? offset : 0, text.length));
-
-  const inside = words.find((w) => pos >= w.start && pos < w.end);
-  if (inside) return { ...inside };
-
-  const following = words.find((w) => w.start >= pos);
-  return { ...(following || words[words.length - 1]) };
-}
-
-// Grow a raw [start, end) — typically a native text selection, which users
-// habitually leave half a letter short — out to whole word boundaries, so a
-// hand-added chord anchors to the same kind of span a dropped one does.
-// Collapses to a single word when the range carries no word at all (e.g.
-// the user selected only a space).
-export function snapRangeToWords(text, start, end) {
-  if (!text) return null;
-  const lo = Math.max(0, Math.min(start ?? 0, text.length));
-  const hi = Math.max(lo, Math.min(end ?? lo, text.length));
-  const words = wordsIn(text);
-  const touched = words.filter((w) => w.start < hi && w.end > lo);
-  // A collapsed caret, or a selection of nothing but spaces/punctuation.
-  if (!touched.length) return wordRangeAt(text, lo);
-  return { start: touched[0].start, end: touched[touched.length - 1].end };
-}
-
-// Re-locate a stored chord's span in the line's current text. Returns
-// { start, end } or null when the anchor no longer appears (detached).
-//
-// Accepts both the DB row shape (anchor_text / start_offset) and the
-// already-camelCased shape the sheet hands around before a row exists, so
-// an optimistic, not-yet-persisted chord renders through the same path as a
-// loaded one.
-export function resolveChordRange(chord, lineText) {
-  const needle = chord?.anchor_text ?? chord?.anchorText ?? '';
-  if (!needle || !lineText) return null;
-
-  const bias = chord?.start_offset ?? chord?.startOffset ?? 0;
-  let best = null;
-  let bestDelta = Infinity;
-  let from = 0;
-  for (;;) {
-    const idx = lineText.indexOf(needle, from);
-    if (idx === -1) break;
-    const delta = Math.abs(idx - bias);
-    if (delta < bestDelta) { bestDelta = delta; best = idx; }
-    from = idx + 1;
-  }
-  return best == null ? null : { start: best, end: best + needle.length };
-}
+// Why "equal slices of the whole line" rather than "sized to the gap
+// between one chord's word and the next" (what the old anchor-based
+// version did): a verse's chord rhythm reads as regular changes across the
+// line, not as whatever gap happened to separate two dropped-on words —
+// and now that there's no word to size a slice by in the first place,
+// equal division is simply what's left once the text content stops being
+// part of the question at all.
 
 // How much of the line a chord visually "holds" — the whole line divided
 // equally among however many chords sit on it: one chord holds it all, two
-// split it half and half, three a third each, and so on. Deliberately NOT
-// "from this word until the next chord's word" (an earlier version of this
-// function worked that way, sized by actual word gaps) — a verse's chord
-// rhythm reads as regular changes across the line, not as whatever gap
-// happened to separate two dropped-on words, and equal division is also
-// what makes "drag a chord to reorder it" (NoteEditorScreen's handleMoveChord)
-// a coherent gesture: moving a chord earlier/later in the sequence visibly
-// resizes every segment around it, the same way dragging a fencepost would.
+// split it half and half, three a third each, and so on.
 //
-// ORDER is still decided by each chord's own anchor (`start`, from
-// resolveChordRange) — re-anchoring a chord via a drag is exactly what
-// changes its position in that order, so "reorganize" needs no separate
-// position field, just the existing anchor machinery. WIDTH is not: a
-// chord's own anchor word only ever decides which slot it's in, never how
-// big that slot is.
+// `orderedChords` is trusted to already be in the order they should render
+// left to right (NoteEditorScreen's chordsByLine sorts by `position`
+// before handing chords down; a move-preview splices a phantom into that
+// same already-sorted array) — this does NOT re-sort, so a caller that
+// hands it chords in the wrong order gets them laid out in the wrong
+// order, on purpose: re-sorting here would need something to sort BY, and
+// the whole point of this redesign is that nothing in this file knows
+// what that would even be anymore.
 //
-// Takes chords ALREADY resolved to live positions — numeric `start`/`end`
-// on each (LineChordStrip's own `list`, built upstream by NoteEditorScreen's
-// chordsByLine via resolveChordRange) — rather than re-resolving anchors
-// itself, since the caller already did that work and a second pass would
-// just re-scan the same text for nothing. `textLength` is the line's
-// current text length, divided evenly among however many chords there are.
-//
-// Returns the same chords, sorted left-to-right, each with its own slot's
-// `start`/`spanEnd` — note this OVERWRITES `start` (the anchor's own
-// position is no longer where the slot begins): the return value is a
-// rendering-only view, never fed back into anything that resolves anchors.
-export function computeChordSpans(resolvedChords, textLength) {
-  const sorted = [...(resolvedChords || [])].sort((a, b) => a.start - b.start || a.end - b.end);
-  const n = sorted.length;
+// Returns the same chords, each with its own slot's `start`/`spanEnd` as
+// character offsets into the line's text — still measured in characters,
+// not pixels, because LineChordStrip reads the actual glyph box for that
+// span out of its text mirror via a DOM Range (the font is proportional,
+// so there is no fixed character width to multiply by). `textLength` is
+// the line's current text length.
+export function computeChordSpans(orderedChords, textLength) {
+  const list = orderedChords || [];
+  const n = list.length;
   const len = textLength ?? 0;
-  return sorted.map((c, i) => ({
+  return list.map((c, i) => ({
     ...c,
     start: Math.round((i * len) / n),
     spanEnd: Math.round(((i + 1) * len) / n),
   }));
 }
 
-// Two chords occupy "the exact same range" (Part A: dropping onto a span
-// that already has a chord REPLACES it rather than stacking a second
-// symbol on the identical word) when their re-resolved spans coincide.
-// Compared on the resolved range, not on the stored offsets — stored
-// offsets of two chords on the same word can legitimately differ if they
-// were attached at different points in the line's editing history.
-export function sameRange(a, b) {
-  return !!a && !!b && a.start === b.start && a.end === b.end;
-}
-
 // Lay out chord pills along one visual row so near-neighbours don't
 // collide. `items` are { id, left, width } in any order, `gap` the minimum
 // px between two pills. Each pill keeps its measured left where it can and
 // is otherwise pushed just far enough to the right to clear the previous
-// one — a chord is allowed to drift right of its word (that still reads as
-// "this word, roughly here"), but two overlapping, half-unreadable symbols
+// one — a chord is allowed to drift right of its own slot (that still
+// reads as "roughly here"), but two overlapping, half-unreadable symbols
 // read as nothing at all. Returns a map id → left.
 //
 // Pure and separately tested because it is the one bit of the overlay that

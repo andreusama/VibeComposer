@@ -1,159 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { wordsIn, wordRangeAt, snapRangeToWords, resolveChordRange, sameRange, spreadRow, computeChordSpans } from './chordAnchor.js';
-
-const LINE = 'la nit cau sobre el mar';
-
-describe('wordsIn', () => {
-  it('finds whole words, keeping internal apostrophes and interpuncts', () => {
-    expect(wordsIn("l'aigua paral·lel bien-estar").map((w) => "l'aigua paral·lel bien-estar".slice(w.start, w.end)))
-      .toEqual(["l'aigua", 'paral·lel', 'bien-estar']);
-  });
-
-  it('leaves trailing punctuation out of the word', () => {
-    expect(wordsIn('hola, món!').map((w) => 'hola, món!'.slice(w.start, w.end))).toEqual(['hola', 'món']);
-  });
-
-  it('returns nothing for empty or wordless text', () => {
-    expect(wordsIn('')).toEqual([]);
-    expect(wordsIn('   ')).toEqual([]);
-    expect(wordsIn(null)).toEqual([]);
-  });
-
-  it('is not confused by a previous call leaving lastIndex behind', () => {
-    expect(wordsIn(LINE).length).toBe(6);
-    expect(wordsIn(LINE).length).toBe(6); // the regex is module-level and global
-  });
-});
-
-describe('wordRangeAt', () => {
-  const at = (offset) => {
-    const r = wordRangeAt(LINE, offset);
-    return r ? LINE.slice(r.start, r.end) : null;
-  };
-
-  it('snaps to the whole word when the drop lands inside one', () => {
-    expect(at(0)).toBe('la');
-    expect(at(1)).toBe('la');
-    expect(at(4)).toBe('nit');  // 'i' of nit
-    expect(at(12)).toBe('sobre');
-  });
-
-  it('always snaps forward to the following word from whitespace, never back to the preceding one', () => {
-    //                                la_nit  -> offset 2 is the space right after 'la' ends
-    expect(at(2)).toBe('nit');   // one char into the gap is still "the next word", not "la" again
-    expect(at(10)).toBe('sobre'); // the space right after 'cau' ends
-  });
-
-  it('prefers the following word when both are equally far', () => {
-    // "ab  cd": offset 3 is one char from 'ab' (ends at 2) and one from 'cd' (starts at 4)
-    const t = 'ab  cd';
-    const r = wordRangeAt(t, 3);
-    expect(t.slice(r.start, r.end)).toBe('cd');
-  });
-
-  it('clamps an out-of-range or missing offset instead of failing', () => {
-    expect(at(999)).toBe('mar');
-    expect(at(-50)).toBe('la');
-    expect(at(undefined)).toBe('la');
-  });
-
-  it('returns null when there is no word to attach to', () => {
-    expect(wordRangeAt('', 0)).toBeNull();
-    expect(wordRangeAt('   ', 1)).toBeNull();
-    expect(wordRangeAt('...', 1)).toBeNull();
-  });
-
-  // Regression for 2026-10-16: a chord drop that lands a hair into the gap
-  // BEFORE its intended word used to resolve back to the PRECEDING word
-  // instead — which, through attachChord's own "same range renames it"
-  // rule, silently overwrote whatever chord was already on that word
-  // rather than placing a new one on the word actually being aimed at.
-  // Every offset across the whole gap between two words must resolve to
-  // the one that follows it, with no exceptions.
-  it('never resolves a gap offset back to the word before it, at any point across the gap', () => {
-    // 'dos' ends at 7, 'tres' starts at 8 — the single-space gap is just
-    // offset 7 here, but walk every integer in [prevEnd, nextStart] anyway
-    // so this still catches a regression if the gap ever widens.
-    const t = 'Una dos tres';
-    const prevEnd = 7; // 'dos'.length offset within this string
-    const nextStart = 8; // 'tres' start
-    for (let pos = prevEnd; pos <= nextStart; pos += 1) {
-      const r = wordRangeAt(t, pos);
-      expect(t.slice(r.start, r.end)).toBe('tres');
-    }
-  });
-});
-
-describe('snapRangeToWords', () => {
-  const snap = (a, b, t = LINE) => {
-    const r = snapRangeToWords(t, a, b);
-    return r ? t.slice(r.start, r.end) : null;
-  };
-
-  it('grows a half-word selection out to whole words', () => {
-    expect(snap(4, 6)).toBe('nit');       // 'it'
-    expect(snap(1, 8)).toBe('la nit cau'); // 'a nit c'
-  });
-
-  it('keeps an already word-aligned selection intact', () => {
-    expect(snap(3, 6)).toBe('nit');
-    expect(snap(0, 22)).toBe(LINE);
-  });
-
-  it('collapses a whitespace-only selection forward to the following word', () => {
-    expect(snap(2, 3)).toBe('nit');
-  });
-
-  it('handles a collapsed caret like a drop at that caret', () => {
-    expect(snap(12, 12)).toBe('sobre');
-  });
-
-  it('returns null for text with nothing to anchor to', () => {
-    expect(snapRangeToWords('', 0, 0)).toBeNull();
-    expect(snapRangeToWords('  ', 0, 2)).toBeNull();
-  });
-});
-
-describe('resolveChordRange', () => {
-  it('finds the anchor in the current text', () => {
-    expect(resolveChordRange({ anchor_text: 'cau', start_offset: 7 }, LINE)).toEqual({ start: 7, end: 10 });
-  });
-
-  it('survives an edit that shifted every offset to the right', () => {
-    const edited = `ja ${LINE}`; // 3 chars inserted at the front
-    expect(resolveChordRange({ anchor_text: 'cau', start_offset: 7 }, edited)).toEqual({ start: 10, end: 13 });
-  });
-
-  it('uses start_offset only to disambiguate a repeated anchor', () => {
-    const text = 'mar i mar i mar';
-    expect(resolveChordRange({ anchor_text: 'mar', start_offset: 0 }, text)).toEqual({ start: 0, end: 3 });
-    expect(resolveChordRange({ anchor_text: 'mar', start_offset: 6 }, text)).toEqual({ start: 6, end: 9 });
-    expect(resolveChordRange({ anchor_text: 'mar', start_offset: 13 }, text)).toEqual({ start: 12, end: 15 });
-  });
-
-  it('detaches (null) when the anchor no longer appears at all', () => {
-    expect(resolveChordRange({ anchor_text: 'cau', start_offset: 7 }, 'la nit queia sobre el mar')).toBeNull();
-  });
-
-  it('is defensive about empty/missing input', () => {
-    expect(resolveChordRange({ anchor_text: '', start_offset: 0 }, LINE)).toBeNull();
-    expect(resolveChordRange({ anchor_text: 'cau' }, '')).toBeNull();
-    expect(resolveChordRange(null, LINE)).toBeNull();
-  });
-
-  it('accepts the camelCased shape an optimistic, unsaved chord carries', () => {
-    expect(resolveChordRange({ anchorText: 'mar', startOffset: 20 }, LINE)).toEqual({ start: 20, end: 23 });
-  });
-});
-
-describe('sameRange', () => {
-  it('is true only for identical spans', () => {
-    expect(sameRange({ start: 3, end: 6 }, { start: 3, end: 6 })).toBe(true);
-    expect(sameRange({ start: 3, end: 6 }, { start: 3, end: 7 })).toBe(false);
-    expect(sameRange(null, { start: 3, end: 6 })).toBe(false);
-    expect(sameRange({ start: 3, end: 6 }, null)).toBe(false);
-  });
-});
+import { spreadRow, computeChordSpans } from './chordAnchor.js';
 
 describe('spreadRow', () => {
   it('leaves well-separated pills exactly where they were measured', () => {
@@ -206,58 +52,47 @@ describe('spreadRow', () => {
 });
 
 describe('computeChordSpans', () => {
-  // 'la nit cau sobre el mar' — la(0-2) nit(3-6) cau(7-10) sobre(11-16) el(17-19) mar(20-23)
-  // Takes chords already resolved to {start, end} — the shape
-  // NoteEditorScreen's chordsByLine actually hands LineChordStrip, which
-  // is what calls this (see that file's own comment on why it doesn't
-  // re-resolve anchors itself). `start`/`end` here are ONLY the anchor used
-  // to decide ORDER (left-to-right by `start`) — the returned span's own
-  // `start`/`spanEnd` are an equal slice of the line, unrelated to the
-  // anchor's actual width.
-  const c = (id, start, end) => ({ id, start, end });
-  const len = LINE.length;
+  // A line's own text length only, nothing about its actual words — chords
+  // are line-level as of the 2026-10-16 redesign (see this file's own
+  // header comment), so the ONLY thing that decides a chord's slot is its
+  // position in the ARRAY the caller hands in; this never re-sorts.
+  const LEN = 24; // an arbitrary line length, matches none of the ids below on purpose
+  const c = (id) => ({ id, chordName: id });
 
-  it('a single chord holds the whole line, regardless of where its own anchor sits', () => {
-    const [span] = computeChordSpans([c('C', 3, 6)], len);
+  it('a single chord holds the whole line', () => {
+    const [span] = computeChordSpans([c('C')], LEN);
     expect(span.start).toBe(0);
-    expect(span.spanEnd).toBe(len);
+    expect(span.spanEnd).toBe(LEN);
   });
 
-  it('two chords split the line in half', () => {
-    const spans = computeChordSpans([c('C', 3, 6), c('G', 11, 16)], len);
-    expect(spans.map((s) => s.id)).toEqual(['C', 'G']); // order still comes from anchor start
-    expect(spans[0]).toMatchObject({ start: 0, spanEnd: Math.round(len / 2) });
-    expect(spans[1]).toMatchObject({ start: Math.round(len / 2), spanEnd: len });
+  it('two chords split the line in half, in the order given', () => {
+    const spans = computeChordSpans([c('C'), c('G')], LEN);
+    expect(spans.map((s) => s.id)).toEqual(['C', 'G']);
+    expect(spans[0]).toMatchObject({ start: 0, spanEnd: LEN / 2 });
+    expect(spans[1]).toMatchObject({ start: LEN / 2, spanEnd: LEN });
   });
 
-  it('is ordered by anchor position regardless of the order chords are passed in', () => {
-    const forward = computeChordSpans([c('C', 3, 6), c('G', 11, 16)], len);
-    const backward = computeChordSpans([c('G', 11, 16), c('C', 3, 6)], len);
-    expect(backward.map((s) => [s.id, s.start, s.spanEnd])).toEqual(forward.map((s) => [s.id, s.start, s.spanEnd]));
+  it('trusts input order completely — reversing the input reverses the spans', () => {
+    const forward = computeChordSpans([c('C'), c('G')], LEN);
+    const backward = computeChordSpans([c('G'), c('C')], LEN);
+    expect(backward.map((s) => s.id)).toEqual(['G', 'C']);
+    expect(backward.map((s) => [s.start, s.spanEnd])).toEqual(forward.map((s) => [s.start, s.spanEnd]));
   });
 
-  it('three chords split the line into thirds, in anchor order', () => {
-    const spans = computeChordSpans([c('C', 3, 6), c('G', 11, 16), c('Am', 20, 23)], len);
+  it('three chords split the line into thirds', () => {
+    const spans = computeChordSpans([c('C'), c('G'), c('Am')], LEN);
     expect(spans.map((s) => s.id)).toEqual(['C', 'G', 'Am']);
-    expect(spans.map((s) => s.start)).toEqual([0, Math.round(len / 3), Math.round((2 * len) / 3)]);
-    expect(spans.map((s) => s.spanEnd)).toEqual([Math.round(len / 3), Math.round((2 * len) / 3), len]);
+    expect(spans.map((s) => s.start)).toEqual([0, Math.round(LEN / 3), Math.round((2 * LEN) / 3)]);
+    expect(spans.map((s) => s.spanEnd)).toEqual([Math.round(LEN / 3), Math.round((2 * LEN) / 3), LEN]);
   });
 
-  it('reordering is just re-anchoring: moving a chord earlier moves its slot earlier', () => {
-    // G was second (anchor 11); re-anchor it ahead of C (anchor 3) by
-    // giving it an earlier start — same thing NoteEditorScreen's
-    // handleMoveChord does by updating a chord's own anchor on a drag.
-    const spans = computeChordSpans([c('C', 3, 6), c('G', 1, 2)], len);
-    expect(spans.map((s) => s.id)).toEqual(['G', 'C']);
-    expect(spans[0].start).toBe(0);
-  });
-
-  it('preserves every field already on the chord, not just start/end', () => {
-    const [span] = computeChordSpans([{ id: 'C', start: 3, end: 6, chordName: 'C' }], len);
+  it('preserves every field already on the chord, not just id', () => {
+    const [span] = computeChordSpans([{ id: 'x', chordName: 'C', position: 0 }], LEN);
     expect(span.chordName).toBe('C');
+    expect(span.position).toBe(0);
   });
 
   it('returns nothing for no chords', () => {
-    expect(computeChordSpans([], len)).toEqual([]);
+    expect(computeChordSpans([], LEN)).toEqual([]);
   });
 });

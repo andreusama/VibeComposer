@@ -1,8 +1,11 @@
 -- ─── line_chords ────────────────────────────────────────────────────────────────
--- Chords attached to a WORD RANGE inside a lyric line — "mainstream
--- tablature": the chord symbol sits above the exact word/syllable where the
--- strum change happens, the way Ultimate-Guitar-style sheets print it.
--- Additive only — safe to re-run, nothing here touches existing data.
+-- A stackable, reorderable, overridable sequence of chords per lyric line —
+-- NOT anchored to any particular word (see src/utils/chordAnchor.js's own
+-- header for the 2026-10-16 redesign that moved off word-anchoring; a fresh
+-- install goes straight to this shape — an existing database that already
+-- has line_chords in the old anchor_text/start_offset/end_offset shape needs
+-- migration_line_chords_position.sql instead). Additive only — safe to
+-- re-run, nothing here touches existing data.
 --
 -- Anchored by (line_id, line_index), NOT by a per-physical-line row: `lines`
 -- holds exactly ONE row per section (the whole block's text as one string
@@ -13,15 +16,12 @@
 -- already accept. line_id rather than section_id because a chord is attached
 -- to TEXT, and the text row is what a cascade should take it out with.
 --
--- anchor_text is the source of truth for WHERE the chord sits — NOT
--- start_offset/end_offset. Raw offsets go stale the moment anything is typed
--- to the left of them, so they are only a best-effort tie-breaker: the client
--- re-locates anchor_text in the live line text on every render
--- (resolveChordRange, src/utils/chordAnchor.js), biased toward start_offset
--- when the same substring occurs more than once, and simply stops drawing a
--- chord whose anchor no longer appears at all. Exactly how word_variants
--- re-locates its own span (resolveVariantRange) — one anchoring model for
--- every sub-line attachment in the app, not a second, offset-trusting one.
+-- `position` is a chord's only location: a plain 0-based rank among the
+-- other chords on its own (line_id, line_index) — renumbered to a clean
+-- 0..N-1 run by the client (NoteEditorScreen.jsx) on every insert, move or
+-- delete, since a line rarely holds more than a handful of chords and
+-- renumbering the lot is simpler to reason about than maintaining gapped
+-- ranks for a sequence this short.
 --
 -- chord_name is free text on purpose, never an enum/check: real chord names
 -- have far too many shapes to enumerate — slash chords (G/B), extensions
@@ -30,9 +30,7 @@ create table if not exists line_chords (
   id           uuid primary key default gen_random_uuid(),
   line_id      uuid not null references lines(id) on delete cascade,
   line_index   integer not null default 0,
-  anchor_text  text    not null,
-  start_offset integer not null default 0,
-  end_offset   integer not null default 0,
+  position     integer not null default 0,
   chord_name   text    not null,
   created_at   timestamptz not null default now()
 );

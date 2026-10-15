@@ -23,8 +23,6 @@ import ChordStrumSheet from './ChordStrumSheet.jsx';
 import TempoStrumCard from './TempoStrumCard.jsx';
 import { loadLineChords, addLineChord, updateLineChord, deleteLineChord } from '../canvas/lineChordData.js';
 import { loadStrumPattern, saveStrumPattern, deleteStrumPattern } from '../canvas/strumPatternData.js';
-import { resolveChordRange, snapRangeToWords, wordRangeAt, sameRange } from '../utils/chordAnchor.js';
-import { offsetFromPoint } from '../utils/caretFromPoint.js';
 import { lineIndexFromPoint } from '../utils/lineHitTest.js';
 import useLineDragDrop from './useLineDragDrop.js';
 import LineDragPill from './LineDragPill.jsx';
@@ -470,25 +468,19 @@ export default function NoteEditorScreen({
     return map;
   }, [wordVariants, lineTexts]);
 
-  // Chord pills per physical line, with every span re-resolved against the
-  // live text on every edit — exactly the same treatment variantRangesByLine
-  // gives word variants, for the same reason: a chord stored at offset 14
-  // is at offset 19 the moment five characters are typed in front of it, so
-  // the stored offsets are only a tie-breaker and anchor_text is what
-  // actually locates it. A chord whose anchor has been typed over entirely
-  // is simply not drawn (detached, not deleted) — it comes back if the word
-  // does, and is removable from the line it was on in the meantime only
-  // once it reappears. Sorted by position so the de-collision pass in
-  // LineChordStrip reads left to right.
+  // Chord pills per physical line, sorted by each chord's own `position` —
+  // a plain integer rank among the other chords on its line, not a word
+  // anchor (2026-10-16 redesign: chords belong to the VERSE, not to any
+  // particular word — see chordAnchor.js's own header). `computeChordSpans`
+  // (called from LineChordStrip) trusts this array's order completely and
+  // does not re-sort, so this is the one place that order gets decided.
   const chordsByLine = useMemo(() => {
     const map = {};
     lineChords.forEach((c) => {
-      const text = lineTexts[c.line_index];
-      if (text == null) return;
-      const range = resolveChordRange(c, text);
-      if (range) (map[c.line_index] ??= []).push({ id: c.id, chordName: c.chord_name, ...range });
+      if (lineTexts[c.line_index] == null) return; // the line itself no longer exists
+      (map[c.line_index] ??= []).push({ id: c.id, chordName: c.chord_name, position: c.position });
     });
-    Object.values(map).forEach((arr) => arr.sort((a, b) => a.start - b.start));
+    Object.values(map).forEach((arr) => arr.sort((a, b) => a.position - b.position));
     return map;
   }, [lineChords, lineTexts]);
 
@@ -948,66 +940,24 @@ export default function NoteEditorScreen({
     return { ...target, resource, previewText };
   }, [resourceDragHover, resolveResourceDropTarget, lines]);
 
-  // ─── Chords on a word range ───────────────────────────────────────────────
+  // ─── Chords, line-level ───────────────────────────────────────────────────
   // KeyboardAccessoryBar → Acordes y rasgueo. Like Recursos (and unlike
   // Rima/Alternativa), it needs no selection to be useful: the strum
-  // recorder is section-level, and a chord with just a caret attaches to the
-  // word under it. Captures the target as a static snapshot at open time
-  // because `selection` is gone the moment the sheet takes focus.
+  // recorder is section-level, and tapping a chord with no selection just
+  // appends it to whatever line is focused — there's no word to attach it
+  // to anymore (2026-10-16 — see chordAnchor.js's own header for why).
   const handleOpenChordSheet = useCallback(() => {
     if (selection) {
-      const text = lines[selection.lineIndex]?.text ?? '';
-      setChordSheet({ lineIndex: selection.lineIndex, start: selection.before.length, end: text.length - selection.after.length });
+      setChordSheet({ lineIndex: selection.lineIndex });
     } else if (focusedIndex != null) {
-      const line = lines[focusedIndex];
-      const el = rowRefs.current[line?.id];
-      const caret = el ? el.selectionStart : (line?.text.length ?? 0);
-      setChordSheet({ lineIndex: focusedIndex, start: caret, end: caret });
+      setChordSheet({ lineIndex: focusedIndex });
     } else {
       setChordSheet({}); // strum-only entry — nowhere to put a chord, and that's fine
     }
     setSelection(null);
     setFocusedIndex(null);
-  }, [selection, focusedIndex, lines]);
+  }, [selection, focusedIndex]);
 
-  // The one place a chord actually gets attached, shared by the sheet's tap
-  // (at the captured selection/caret) and its drag (at a dropped word).
-  // `lineIndex`/`offsets` come in already decided; the word-boundary snap and
-  // the "same range replaces, different range accumulates" rule live here so
-  // both entry points obey them identically.
-  const attachChord = useCallback(async (lineIndex, rawStart, rawEnd, chordName) => {
-    const name = (chordName || '').trim();
-    const text = lines[lineIndex]?.text ?? '';
-    if (!name || !lineId || !text.trim()) return;
-    const range = snapRangeToWords(text, rawStart, rawEnd);
-    if (!range) return;
-    const anchorText = text.slice(range.start, range.end);
-
-    // Part A's one replacement case: a chord landing on the EXACT same span
-    // as an existing one renames it rather than stacking a second,
-    // overlapping symbol on the identical word. Any other span accumulates.
-    const existing = lineChords.find((c) => (
-      c.line_index === lineIndex && sameRange(resolveChordRange(c, text), range)
-    ));
-    if (existing) {
-      if (existing.chord_name === name) return;
-      const { data } = await updateLineChord(existing.id, { chord_name: name, anchor_text: anchorText, start_offset: range.start, end_offset: range.end });
-      setLineChords((cur) => cur.map((c) => (c.id === existing.id ? (data || { ...c, chord_name: name }) : c)));
-      return;
-    }
-
-    const { data, error } = await addLineChord(lineId, lineIndex, {
-      anchorText, startOffset: range.start, endOffset: range.end, chordName: name,
-    });
-    if (!error && data) setLineChords((cur) => [...cur, data]);
-  }, [lines, lineId, lineChords]);
-
-  // Tap a chord in the palette (or type one into the free-text field) — the
-  // typed/desktop path, and the fallback whenever dragging isn't practical.
-  // Closes the sheet on a successful placement (2026-10-15 feedback: it used
-  // to stay open, which read as broken — you just placed the one chord you
-  // came for, the sheet staying up over the lyric you're trying to look at
-  // doesn't help, and it's one tap to bring it back for another).
   // Every path that ends the chord sheet (a tap-placed chord, a
   // drag-dropped one, or the sheet's own cancel) funnels through here so
   // focus comes back exactly once, the same way regardless of which one
@@ -1023,15 +973,14 @@ export default function NoteEditorScreen({
   // all: focusedIndex stayed stuck at null (KeyboardAccessoryBar's own
   // mount condition), so "Acordes y rasgueo" never came back until the
   // person happened to tap some OTHER element first to force a real
-  // blur/focus pair — reported 2026-10-16 as "I can only add [a few]
-  // chords". Setting focusedIndex directly (not relying on the native
-  // event) fixes it whether or not DOM focus actually moved; calling
-  // .focus() on top keeps real DOM focus in sync for whichever case it did.
-  // `overrideLineIndex` is for the drag case: a dropped chord can land on
-  // a different line than the one the sheet was opened from (it was opened
-  // off whatever line was focused BEFORE the drag started), and the line
-  // that should end up focused afterward is the one the chord actually
-  // landed on, not the stale open-time one.
+  // blur/focus pair — reported 2026-10-16. Setting focusedIndex directly
+  // (not relying on the native event) fixes it whether or not DOM focus
+  // actually moved; calling .focus() on top keeps real DOM focus in sync
+  // for whichever case it did. `overrideLineIndex` is for the drag case: a
+  // dropped chord can land on a different line than the one the sheet was
+  // opened from (it was opened off whatever line was focused BEFORE the
+  // drag started), and the line that should end up focused afterward is
+  // the one the chord actually landed on, not the stale open-time one.
   const closeChordSheet = useCallback((overrideLineIndex) => {
     const targetLineIndex = overrideLineIndex ?? chordSheet?.lineIndex;
     setChordSheet(null);
@@ -1041,91 +990,207 @@ export default function NoteEditorScreen({
     rowRefs.current[lines[targetLineIndex].id]?.focus();
   }, [chordSheet, lines]);
 
+  // Renames a chord already on a line — dropping onto, or switching the
+  // palette to, a slot that already holds one overrides it rather than
+  // stacking a second symbol there. The only one of the three chord writes
+  // (insert / replace / renumber-after-removal) that never touches
+  // `position`.
+  const replaceChordName = useCallback(async (chordId, chordName) => {
+    const existing = lineChords.find((c) => c.id === chordId);
+    if (!existing || existing.chord_name === chordName) return;
+    const { data } = await updateLineChord(chordId, { chord_name: chordName });
+    setLineChords((cur) => cur.map((c) => (c.id === chordId ? (data || { ...c, chord_name: chordName }) : c)));
+  }, [lineChords]);
+
+  // Adds a brand-new chord at `index` within lineIndex's own sequence,
+  // shifting every chord already at or past that index one slot to the
+  // right and renumbering them — a line rarely holds more than a handful
+  // of chords, so renumbering the lot on every change is simpler to reason
+  // about (and far easier to verify) than maintaining gapped ranks for a
+  // sequence this short.
+  const insertChordAt = useCallback(async (lineIndex, index, chordName) => {
+    const onLine = chordsByLine[lineIndex] || [];
+    const at = Math.max(0, Math.min(index, onLine.length));
+    const shifted = onLine.slice(at);
+    const { data, error } = await addLineChord(lineId, lineIndex, { chordName, position: at });
+    if (error || !data) return;
+    if (shifted.length) await Promise.all(shifted.map((c) => updateLineChord(c.id, { position: c.position + 1 })));
+    setLineChords((cur) => [
+      ...cur.map((c) => (
+        c.line_index === lineIndex && shifted.some((s) => s.id === c.id) ? { ...c, position: c.position + 1 } : c
+      )),
+      data,
+    ]);
+  }, [lineId, chordsByLine]);
+
+  // Closes the gap left on a line after one of its chords is gone (removed
+  // outright, or moved off to a different line) — every chord that was
+  // after it shifts down by one so positions stay a clean 0..N-1 run.
+  const closeChordGap = useCallback(async (lineIndex, removedPosition) => {
+    const after = (chordsByLine[lineIndex] || []).filter((c) => c.position > removedPosition);
+    if (!after.length) return;
+    setLineChords((cur) => cur.map((c) => (
+      c.line_index === lineIndex && c.position > removedPosition ? { ...c, position: c.position - 1 } : c
+    )));
+    await Promise.all(after.map((c) => updateLineChord(c.id, { position: c.position - 1 })));
+  }, [chordsByLine]);
+
   const handlePickChord = useCallback((chordName) => {
     const target = chordSheet;
     if (!target || target.lineIndex == null) return;
-    attachChord(target.lineIndex, target.start, target.end, chordName);
+    const name = (chordName || '').trim();
+    if (!name || !lineId) return;
+    // A tap has no drop point to resolve a slot from — it always appends,
+    // which is also just "stack one more chord on this verse" in its
+    // plainest form.
+    insertChordAt(target.lineIndex, (chordsByLine[target.lineIndex] || []).length, name);
     closeChordSheet();
-  }, [chordSheet, attachChord, closeChordSheet]);
+  }, [chordSheet, lineId, chordsByLine, insertChordAt, closeChordSheet]);
 
-  // The one definition of "which word is this viewport point over" for
-  // chord dragging — a brand-new chord from the palette and an existing
-  // one being repositioned both need it, to commit a drop AND to drive the
-  // phantom-pill move preview (chordMovePreview), which was four copies of
-  // the same lineIndexFromPoint → mirror lookup → offsetFromPoint →
-  // wordRangeAt chain before this. Word-level, not line-level, because the
-  // anchor itself still needs a specific word to survive text edits
-  // (resolveChordRange/chordAnchor.js) even though what the chord visually
-  // COVERS is the whole verse (computeChordSpans' equal division) — the
-  // anchor is only ever used to decide ORDER, never shown to the person
-  // dragging (see NoteEditorScreen's own note on why there's no per-word
-  // highlight during the drag itself).
-  const resolveWordAtPoint = useCallback((x, y) => {
+  // What a drop at this viewport point means for the line underneath it —
+  // shared by a brand-new chord from the palette (handleDropChord) and an
+  // existing pill being repositioned (handleMoveChordDrop), same as
+  // resolveWordAtPoint used to be shared by both before this redesign.
+  // Two outcomes, decided by what's actually under the finger rather than
+  // by an invisible word boundary in the text:
+  //  - landed on an existing pill → 'replace' that one (an override, same
+  //    as switching the palette to a slot that already has a chord);
+  //  - landed anywhere else on the line's own lyric → 'insert' at whatever
+  //    position its x falls at among the chords already there, the same
+  //    left-to-right fraction of the line's width computeChordSpans
+  //    already lays them out across, so "drop near the middle of the
+  //    verse" resolves to the same place it's drawn.
+  // Hit-tests the REAL rendered pills (:not(.lc-pill-preview) — the
+  // move-drag's own phantom is never a valid replace target), not a
+  // character offset into the text: a chord has no idea what word, if any,
+  // it's sitting over any more, so "did I land on an existing chord" can
+  // only be answered by the chord's own rendered element.
+  //
+  // `excludeChordId` is for repositioning an already-placed chord
+  // (chordMovePreview/handleMoveChordDrop): the instant the drag starts,
+  // the pointer is still directly over the pill being dragged, which used
+  // to resolve this to "replace the chord under the finger" — itself.
+  // previewChordsByLine had ALREADY filtered that chord out of the array
+  // by the time it tried to act on that, so the "replace" could never find
+  // a match and silently dropped the phantom instead of rendering it —
+  // which orphaned the dragged pill's own DOM node exactly like the
+  // sheet-unmount bug fixed earlier, just from a different cause: nothing
+  // in the new render carried its key any more, so React tore it down,
+  // and the touch sequence (bound to that now-detached node) died with it.
+  // Excluding the dragged chord's own pill from the hit-test means the
+  // drag can never self-target — it always resolves to 'insert' at
+  // wherever it currently sits among its (real) neighbours instead,
+  // which is what a drag that hasn't moved yet should mean anyway.
+  const resolveChordDropOnLine = useCallback((x, y, excludeChordId) => {
     const lineIndex = lineIndexFromPoint(x, y);
     if (lineIndex == null) return null;
     const text = lines[lineIndex]?.text ?? '';
-    if (!text.trim()) return null; // an empty line has no word to sit a chord over
+    if (!text.trim()) return null; // an empty line has nothing to hold a chord
     const rowEl = document.querySelector(`[data-line-index="${lineIndex}"]`);
+    const hitPill = rowEl
+      ? Array.from(rowEl.querySelectorAll('.lc-pill:not(.lc-pill-preview)')).find((el) => {
+        if (excludeChordId != null && el.dataset.chordId === String(excludeChordId)) return false;
+        const r = el.getBoundingClientRect();
+        return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+      })
+      : null;
+    if (hitPill) return { lineIndex, mode: 'replace', chordId: hitPill.dataset.chordId };
+
     const mirror = rowEl?.querySelector('.lc-mirror');
-    const offset = offsetFromPoint(mirror, x, y);
-    const word = wordRangeAt(text, offset ?? 0);
-    if (!word) return null;
-    return { lineIndex, word };
-  }, [lines]);
+    const rect = mirror?.getBoundingClientRect();
+    const count = (chordsByLine[lineIndex] || []).filter((c) => c.id !== excludeChordId).length;
+    if (!rect || !rect.width) return { lineIndex, mode: 'insert', index: count };
+    const frac = Math.max(0, Math.min(1, (x - rect.left) / rect.width));
+    return { lineIndex, mode: 'insert', index: Math.round(frac * count) };
+  }, [lines, chordsByLine]);
 
   // ChordStrumSheet's long-press-and-drag (via useLineDragDrop.js) →
-  // dropped somewhere over the editor. Unlike handleDropResourceOnLine
-  // (which only needs to know WHICH line, and appends to its end), a chord
-  // has to land on a specific word — resolveWordAtPoint above. Closes the
-  // sheet on a successful drop rather than letting it revert to its full
-  // view (the drag-collapsed strip un-collapsing back to the chip grid,
-  // per the sheet's own drag mechanics) — same reasoning as
-  // handlePickChord's own close: you just placed it, the lyric is what you
-  // want to see next, not the palette again. A miss (no word under the
-  // point) leaves the sheet as-is — nothing happened, so nothing closes.
+  // dropped somewhere over the editor. Closes the sheet on a successful
+  // drop rather than letting it revert to its full view (the
+  // drag-collapsed strip un-collapsing back to the chip grid, per the
+  // sheet's own drag mechanics) — same reasoning as handlePickChord's own
+  // close: you just placed it, the lyric is what you want to see next, not
+  // the palette again. A miss (no line under the point) leaves the sheet
+  // as-is — nothing happened, so nothing closes.
   const handleDropChord = useCallback((x, y, chordName) => {
     setDropTargetIndex(null);
-    const hit = resolveWordAtPoint(x, y);
-    if (!hit) return;
-    attachChord(hit.lineIndex, hit.word.start, hit.word.end, chordName);
-    closeChordSheet(hit.lineIndex);
-  }, [resolveWordAtPoint, attachChord, closeChordSheet]);
+    const target = resolveChordDropOnLine(x, y);
+    if (!target) return;
+    const name = (chordName || '').trim();
+    if (!name) return;
+    if (target.mode === 'replace') replaceChordName(target.chordId, name);
+    else insertChordAt(target.lineIndex, target.index, name);
+    closeChordSheet(target.lineIndex);
+  }, [resolveChordDropOnLine, replaceChordName, insertChordAt, closeChordSheet]);
 
   const handleRemoveChord = useCallback(async (id) => {
+    const removed = lineChords.find((c) => c.id === id);
     setLineChords((cur) => cur.filter((c) => c.id !== id));
     await deleteLineChord(id);
-  }, []);
+    if (removed) await closeChordGap(removed.line_index, removed.position);
+  }, [lineChords, closeChordGap]);
 
   // Reorganizing an already-placed chord: long-press a pill (LineChordStrip's
-  // own ChordPillView, via useLongPressDrag) and drag it onto a different
-  // word — same place, a different line, doesn't matter. Unlike attachChord
-  // this never creates a new row or folds into an existing one at the
-  // target span: it just re-anchors THIS chord, which is also the entire
-  // mechanism behind "reorganizing" a line's chords at all — order (and so
-  // computeChordSpans' equal-slice layout) is read straight off each
-  // chord's own anchor, so moving one earlier/later in the line, or to
-  // another line entirely, is nothing more than giving it a new anchor.
-  const moveChord = useCallback(async (chordId, lineIndex, rawStart, rawEnd) => {
-    const text = lines[lineIndex]?.text ?? '';
-    if (!text.trim()) return;
-    const range = snapRangeToWords(text, rawStart, rawEnd);
-    if (!range) return;
-    const anchorText = text.slice(range.start, range.end);
-    const fields = { line_index: lineIndex, anchor_text: anchorText, start_offset: range.start, end_offset: range.end };
-    const { data } = await updateLineChord(chordId, fields);
-    setLineChords((cur) => cur.map((c) => (c.id === chordId ? (data || { ...c, ...fields }) : c)));
-  }, [lines]);
+  // own ChordPillView, via useLongPressDrag) and drag it onto a new spot —
+  // same line, reordered, or a different line entirely, resolved through
+  // the exact same resolveChordDropOnLine a brand-new chord from the
+  // palette uses (it has no idea the chord it's resolving a drop for
+  // already existed somewhere else). Dropped onto another chord's pill,
+  // it overrides that one exactly like a fresh chord would — the dragged
+  // chord is consumed into whichever slot it landed on, not duplicated.
+  const moveChordTo = useCallback(async (chordId, target) => {
+    if (!target) return; // dropped nowhere valid — leave it exactly where it was
+    const dragged = lineChords.find((c) => c.id === chordId);
+    if (!dragged) return;
 
-  // The drop half of a pill drag — resolveWordAtPoint above, same as a
+    if (target.mode === 'replace') {
+      if (target.chordId === chordId) return; // dropped back on itself
+      await replaceChordName(target.chordId, dragged.chord_name);
+      setLineChords((cur) => cur.filter((c) => c.id !== chordId));
+      await deleteLineChord(chordId);
+      await closeChordGap(dragged.line_index, dragged.position);
+      return;
+    }
+
+    const fromLine = dragged.line_index;
+    const toLine = target.lineIndex;
+
+    if (fromLine === toLine) {
+      const onLine = (chordsByLine[toLine] || []).filter((c) => c.id !== chordId);
+      const at = Math.max(0, Math.min(target.index, onLine.length));
+      const reordered = [...onLine.slice(0, at), dragged, ...onLine.slice(at)];
+      setLineChords((cur) => cur.map((c) => {
+        const i = reordered.findIndex((r) => r.id === c.id);
+        return i === -1 ? c : { ...c, position: i };
+      }));
+      await Promise.all(reordered.map((c, i) => (c.position === i ? null : updateLineChord(c.id, { position: i }))));
+      return;
+    }
+
+    // A different line: close the gap on the old one, make room on the new
+    // one, then give the chord itself its new line + position.
+    const toOnLine = chordsByLine[toLine] || [];
+    const at = Math.max(0, Math.min(target.index, toOnLine.length));
+    const toReordered = [...toOnLine.slice(0, at), dragged, ...toOnLine.slice(at)];
+    setLineChords((cur) => cur.map((c) => {
+      if (c.id === chordId) return { ...c, line_index: toLine, position: at };
+      const ti = toReordered.findIndex((r) => r.id === c.id);
+      if (ti !== -1) return { ...c, position: ti };
+      return c;
+    }));
+    await updateLineChord(chordId, { line_index: toLine, position: at });
+    await Promise.all(toReordered.map((c, i) => (c.id !== chordId && c.position !== i ? updateLineChord(c.id, { position: i }) : null)));
+    await closeChordGap(fromLine, dragged.position);
+  }, [lineChords, chordsByLine, replaceChordName, closeChordGap]);
+
+  // The drop half of a pill drag — resolveChordDropOnLine above, same as a
   // brand-new chord from the palette. `payload` is { id, chordName } — the
   // name is only for the floating pill's own label while it's in flight,
   // the move itself only needs id.
   const handleMoveChordDrop = useCallback((x, y, payload) => {
     setDropTargetIndex(null);
-    const hit = resolveWordAtPoint(x, y);
-    if (!hit) return;
-    moveChord(payload.id, hit.lineIndex, hit.word.start, hit.word.end);
-  }, [resolveWordAtPoint, moveChord]);
+    moveChordTo(payload.id, resolveChordDropOnLine(x, y, payload.id));
+  }, [resolveChordDropOnLine, moveChordTo]);
 
   // Owns the live drag itself (document-level listeners, hover, the
   // floating pill) exactly like ChordStrumSheet/ResourcePickerSheet do via
@@ -1139,57 +1204,72 @@ export default function NoteEditorScreen({
   });
 
   // While an existing pill is mid-drag, where would it land right now? Same
-  // resolveWordAtPoint handleMoveChordDrop uses to actually commit the
+  // resolveChordDropOnLine handleMoveChordDrop uses to actually commit the
   // move — this is the identical lookup, just run on every hover tick
   // instead of once on release, purely to drive the phantom-pill preview
   // below (previewChordsByLine).
   const chordMovePreview = useMemo(() => {
     if (!chordMoveDrag) return null;
-    const hit = resolveWordAtPoint(chordMoveDrag.x, chordMoveDrag.y);
-    return hit ? { lineIndex: hit.lineIndex, start: hit.word.start, end: hit.word.end } : null;
-  }, [chordMoveDrag, resolveWordAtPoint]);
+    return resolveChordDropOnLine(chordMoveDrag.x, chordMoveDrag.y, chordMoveDrag.payload.id);
+  }, [chordMoveDrag, resolveChordDropOnLine]);
 
-  // No per-word live highlight during a chord drag (an earlier version of
-  // this had one — a solid-border box measured over whichever word the
-  // finger was on). A chord is assigned to the VERSE, not to that one
-  // word: the equal-division layout (chordAnchor.js's computeChordSpans)
-  // already treats it that way, dividing the whole line by however many
-  // chords sit on it rather than sizing each one to its own anchor word, so
-  // highlighting a single word mid-drag was telling a different, narrower
-  // story than what actually happens on drop. The existing line-level
-  // highlight (dropTargetIndex → LineRow's own .ne-row-drop-target) already
-  // says "this verse", which is the right scope — chord drags just use it
-  // plainly now, same as a resource drag does.
-
-  // The equal-division layout every OTHER chord on the origin and
-  // destination lines would settle into if the drag ended right now —
-  // without touching real state until it actually does
-  // (handleMoveChordDrop). Pulls the dragged chord out of wherever
-  // chordsByLine currently has it and drops a phantom copy (`preview: true`)
-  // at chordMovePreview's word, same id, so LineChordStrip's own
-  // key={c.id}/placement machinery reads it as the SAME pill continuing to
-  // move rather than one disappearing and a different one appearing — same
-  // "preview, don't mutate real state" shape previewOverride above already
-  // uses for a dragged Muse suggestion. Hovering nowhere valid (between
-  // lines, off any row) just removes the pill from view entirely but for
-  // the floating LineDragPill following the finger — informative on its
-  // own: this chord has been picked up and its old neighbours have
-  // reflowed to fill the gap.
+  // The sequence every OTHER chord on the origin and destination lines
+  // would settle into if the drag ended right now — without touching real
+  // state until it actually does (handleMoveChordDrop). Pulls the dragged
+  // chord out of wherever chordsByLine currently has it and splices a
+  // phantom copy (`preview: true`) in at chordMovePreview's resolved spot,
+  // same id, so LineChordStrip's own key={c.id}/placement machinery reads
+  // it as the SAME pill continuing to move rather than one disappearing
+  // and a different one appearing — same "preview, don't mutate real
+  // state" shape previewOverride above already uses for a dragged Muse
+  // suggestion. A preview landing in 'replace' mode takes over the target
+  // pill's own array slot (so it inherits that slot's position rather than
+  // jumping to the end) instead of removing it outright — the target chord
+  // is still really there until the drop commits, this is only what it
+  // would look like if it didn't survive.
+  //
+  // The phantom MUST appear somewhere on every single render for as long
+  // as chordMoveDrag is truthy, even hovering nowhere valid (between
+  // lines, off any row, or — the very first tick, before any real
+  // movement — still directly over the pill's own original spot, which
+  // resolveChordDropOnLine now deliberately can't resolve to "replace
+  // itself" either). This used to just omit the phantom in that case
+  // ("informative on its own: this chord has been picked up"), which
+  // reads fine visually but is NOT fine structurally: the live touch
+  // sequence is bound to whatever DOM node React rendered for this
+  // chord's key on the PREVIOUS tick, and a render that drops every
+  // element carrying that key unmounts it — severing the sequence for
+  // good, the exact same class of bug fixed for ChordStrumSheet/
+  // ResourcePickerSheet, just triggered by a different path (reported
+  // again 2026-10-16 as "the drag stops until you get it again"). Falling
+  // back to the dragged chord's own last real line/position keeps a
+  // matching key alive on every tick regardless of where the finger is.
   const previewChordsByLine = useMemo(() => {
     if (!chordMoveDrag) return chordsByLine;
     const draggedId = chordMoveDrag.payload.id;
+    const dragged = lineChords.find((c) => c.id === draggedId);
     const map = {};
     Object.entries(chordsByLine).forEach(([lineIndex, arr]) => {
       const kept = arr.filter((c) => c.id !== draggedId);
       if (kept.length) map[lineIndex] = kept;
     });
+    const phantom = { id: draggedId, chordName: chordMoveDrag.payload.chordName, preview: true };
     if (chordMovePreview) {
-      const { lineIndex, start, end } = chordMovePreview;
-      const phantom = { id: draggedId, chordName: chordMoveDrag.payload.chordName, start, end, preview: true };
-      map[lineIndex] = [...(map[lineIndex] || []), phantom].sort((a, b) => a.start - b.start);
+      const { lineIndex, mode, index, chordId } = chordMovePreview;
+      const target = map[lineIndex] || [];
+      if (mode === 'replace') {
+        map[lineIndex] = target.map((c) => (c.id === chordId ? phantom : c));
+      } else {
+        const at = Math.max(0, Math.min(index, target.length));
+        map[lineIndex] = [...target.slice(0, at), phantom, ...target.slice(at)];
+      }
+    } else if (dragged) {
+      const line = map[dragged.line_index] || [];
+      const at = Math.max(0, Math.min(dragged.position, line.length));
+      map[dragged.line_index] = [...line.slice(0, at), phantom, ...line.slice(at)];
     }
     return map;
-  }, [chordMoveDrag, chordMovePreview, chordsByLine]);
+  }, [chordMoveDrag, chordMovePreview, chordsByLine, lineChords]);
 
   // ─── Strum pattern ────────────────────────────────────────────────────────
   const handleSaveStrum = useCallback(async (bpmValue, pattern) => {

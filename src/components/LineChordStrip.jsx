@@ -2,25 +2,29 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { spreadRow, computeChordSpans } from '../utils/chordAnchor.js';
 import useLongPressDrag from '../mobile/useLongPressDrag.js';
 
-// ─── Chord symbols sitting above the exact words they're strummed on ───────
-// "Mainstream tablature": a chord pill horizontally aligned to the precise
-// character range of the lyric it belongs to, the way Ultimate-Guitar-style
-// sheets print it — see supabase/migration_line_chords.sql.
+// ─── Chord symbols strung across a verse ────────────────────────────────────
+// A stackable, reorderable, overridable sequence of chords per line — each
+// one's only "location" is its rank among the others on the same line
+// (chordAnchor.js's computeChordSpans divides the line evenly by however
+// many there are), not a specific word. See supabase/migration_line_chords.sql
+// and chordAnchor.js's own header for the 2026-10-16 redesign that moved
+// chords off word-anchoring entirely.
 //
-// The alignment problem: the lyric lives in a real <textarea> in a
+// The layout problem that's left: the lyric lives in a real <textarea> in a
 // proportional font, so there is no character width to multiply by and no
 // way to ask the textarea where character 14 is. The only reliable answer is
 // to measure it — so this renders a transparent text MIRROR of the line
 // (identical font/size/line-height/width/padding, so identical glyph boxes)
-// and reads each chord's span out of it with a DOM Range. The same mirror
-// technique components/LineHighlight.jsx already uses to draw word-variant
-// underlines a textarea can't draw itself; this one measures instead of
-// painting.
+// and reads each chord's equal-division span out of it with a DOM Range.
+// The same mirror technique components/LineHighlight.jsx already uses to
+// draw word-variant underlines a textarea can't draw itself; this one
+// measures instead of painting.
 //
 // The mirror is rendered for EVERY line, not only chorded ones, because it
-// is also the hit-test surface the chord drag-and-drop resolves a drop's
-// character offset against (utils/caretFromPoint.js) — a line with no chords
-// yet is precisely the line you are about to drop the first one onto.
+// is also the hit-test surface NoteEditorScreen's resolveChordDropOnLine
+// measures a drop's x-position against (to decide where in the sequence an
+// inserted chord lands) — a line with no chords yet is precisely the line
+// you are about to drop the first one onto.
 
 const PILL_GAP = 4; // minimum px between two pills on the same visual row
 
@@ -91,6 +95,12 @@ function ChordPillView({ chord: c, placement: p, armed, onArm, onDismissArm, onR
     <span
       ref={pillRef}
       className={`lc-pill${armed ? ' lc-pill-armed' : ''}`}
+      // NoteEditorScreen's resolveChordDropOnLine reads this straight off
+      // the DOM to decide a drop landed ON this chord (an override) rather
+      // than somewhere else on the line (a new chord, inserted by
+      // position) — chords have no word to hit-test against any more, so
+      // the rendered pill itself is the only thing a drop can land "on".
+      data-chord-id={c.id}
       style={p ? { left: p.left, top: p.top, width: p.width } : { left: 0, top: 0, visibility: 'hidden' }}
       onTouchStart={(e) => { const t = e.touches[0]; lp.start(t.clientX, t.clientY, { id: c.id, chordName: c.chordName }); }}
       onTouchMove={(e) => { const t = e.touches[0]; lp.move(t.clientX, t.clientY); }}
@@ -153,14 +163,13 @@ export default function LineChordStrip({ text, chords, onRemove, onMoveStart }) 
     spans.forEach((c) => {
       const el = pillRefs.current[c.id];
       const start = Math.max(0, Math.min(c.start, len));
-      // Measured out to the computed SPAN end, not the chord's own anchor
-      // word — a chord's pill is drawn as wide as the EQUAL SLICE of the
-      // line it holds (chordAnchor.js's computeChordSpans: one chord holds
-      // the whole line, two split it in half, three a third each), not as
-      // wide as the gap to the next dropped-on word. That slice can be
-      // narrower than the label itself needs (a short slice, a long chord
-      // name) — .lc-pill's own min-width:fit-content (style.css) is what
-      // floors it there, not this measurement.
+      // Measured out to the computed SPAN end — a chord's pill is drawn as
+      // wide as the EQUAL SLICE of the line it holds (chordAnchor.js's
+      // computeChordSpans: one chord holds the whole line, two split it in
+      // half, three a third each), not as wide as any particular word.
+      // That slice can be narrower than the label itself needs (a short
+      // slice, a long chord name) — .lc-pill's own min-width:fit-content
+      // (style.css) is what floors it there, not this measurement.
       const spanEnd = Math.max(start, Math.min(c.spanEnd, len));
       range.setStart(node, start);
       range.setEnd(node, spanEnd);

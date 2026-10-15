@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { lineIndexFromPoint } from '../utils/lineHitTest.js';
+import { lineIndexFromPoint, effectiveDragPoint } from '../utils/lineHitTest.js';
 
 // ─── "carry a picked-up thing across the screen, onto a line" ──────────────
 // The live half of a long-press-and-drag-onto-a-line gesture, picked up
@@ -61,7 +61,12 @@ export default function useLineDragDrop({ onDragHoverLine, onDragActiveChange, o
 
   const endDrag = useCallback((x, y) => {
     const payload = dragRef.current?.payload;
-    if (x != null && y != null && payload != null) onDrop?.(x, y, payload);
+    if (x != null && y != null && payload != null) {
+      // Hit-test where the pill visually IS, not the raw finger point that
+      // positions it — see effectiveDragPoint's own comment.
+      const hit = effectiveDragPoint(x, y);
+      onDrop?.(hit.x, hit.y, payload);
+    }
     onDragHoverLine?.(null);
     onDragActiveChange?.(false);
     dragRef.current = null;
@@ -74,10 +79,15 @@ export default function useLineDragDrop({ onDragHoverLine, onDragActiveChange, o
       e.preventDefault();
       const t = e.touches[0];
       if (!t) return;
+      // `next` (and the `drag` state it becomes) keeps the RAW point —
+      // that's what LineDragPill's own x/y props position the floating
+      // pill from, offset included. Only the hit-test below switches to
+      // the pill's own effective (visual) point.
       const next = { ...dragRef.current, x: t.clientX, y: t.clientY };
       dragRef.current = next;
       setDrag(next);
-      onDragHoverLine?.(lineIndexFromPoint(t.clientX, t.clientY), t.clientX, t.clientY, next.payload);
+      const hit = effectiveDragPoint(t.clientX, t.clientY);
+      onDragHoverLine?.(lineIndexFromPoint(hit.x, hit.y), hit.x, hit.y, next.payload);
     };
     const handleEnd = (e) => {
       if (!dragRef.current) return;

@@ -21,12 +21,13 @@ import {
 // hold-then-lift timing) and useLineDragDrop.js (the live drag + drop) are
 // shared with ResourcePickerSheet's identical gesture, not cloned under
 // chord-specific names — along with that sheet's own CSS classes
-// (.res-picker-scrim-dragging / -sheet-shrunk / -drag-hint / -drag-pill).
-// What IS different is where the drop lands: a resource drops onto a whole
-// LINE, a chord has to land on a specific WORD, so the drop resolves a
-// character offset first (see NoteEditorScreen's handleDropChord →
-// offsetFromPoint → wordRangeAt) — that part is genuinely chord-specific
-// and stays here/in NoteEditorScreen, not in the shared hooks.
+// (.res-picker-scrim-dragging / -sheet-dragging / -drag-pill). What IS
+// different is where the drop lands: a resource drops onto a whole LINE, a
+// chord resolves to a SLOT in that line's own chord sequence (see
+// NoteEditorScreen's handleDropChord → resolveChordDropOnLine — landed on
+// an existing pill overrides it, landed anywhere else on the lyric inserts
+// at that x-position) — that part is genuinely chord-specific and stays
+// here/in NoteEditorScreen, not in the shared hooks.
 //
 // The swipe-left-to-reveal half of ResourcePickerSheet's vocabulary is
 // deliberately NOT reused: it exists there because a resource row is a
@@ -279,8 +280,9 @@ export default function ChordStrumSheet({
   // The live drag (document-level move/end listeners, hover, drop) is
   // identical to ResourcePickerSheet's own — see useLineDragDrop.js. Only
   // what a drop actually RESOLVES TO differs: a chord needs the raw point
-  // (NoteEditorScreen's handleDropChord turns it into a character offset
-  // inside a specific word), where a resource only needs the line.
+  // (NoteEditorScreen's handleDropChord turns it into a line + a slot —
+  // an existing pill it landed on, or a position among that line's other
+  // chords), where a resource only needs the line.
   const { drag, beginDrag: handleDragStart } = useLineDragDrop({
     onDragHoverLine,
     onDragActiveChange,

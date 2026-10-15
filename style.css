@@ -289,6 +289,33 @@ body::before {
 
 .auth-submit { width: 100%; text-align: center; }
 
+.auth-google { width: 100%; text-align: center; font-weight: 600; margin-bottom: var(--space-4); }
+
+.auth-divider {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin: 0 0 var(--space-4);
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    color: var(--graphite-soft);
+}
+.auth-divider::before, .auth-divider::after { content: ''; flex: 1; height: 1px; background: var(--hairline); }
+
+.auth-link {
+    background: none;
+    border: none;
+    padding: var(--space-1) 0 0;
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    color: var(--graphite);
+    text-decoration: underline;
+    cursor: pointer;
+    text-align: center;
+}
+.auth-link:hover { color: var(--ink); }
+.auth-link:disabled { opacity: 0.5; cursor: default; }
+
 /* ─── Body ───────────────────────────────────────────────────────────────────── */
 .body {
     padding: var(--space-8);
@@ -8592,6 +8619,13 @@ body::before {
 .beat-cell.down svg { width: 15px; height: 15px; }
 .beat-cell.up { width: 22px; height: 22px; border-radius: 7px; }
 .beat-cell.up svg { width: 10px; height: 10px; stroke-width: 2; }
+/* A mute isn't a point on the up/down size scale (there's no "how big
+   would a mute be" answer), so it gets a size of its own rather than
+   being squeezed into reading as a small up or a small down — between
+   the two in both footprint and corner radius, so it visually reads as
+   its own third category, not a variant of either. */
+.beat-cell.mute { width: 26px; height: 26px; border-radius: 8px; }
+.beat-cell.mute svg { width: 12px; height: 12px; stroke-width: 2.25; }
 /* Same 30px column width and 7px gap as .strum-row above — not incidental:
    it's what keeps a label centred under its own cell, small or large, and
    what keeps this row scrolling in lockstep with .strum-row (both are

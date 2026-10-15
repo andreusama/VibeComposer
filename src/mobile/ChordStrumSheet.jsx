@@ -5,7 +5,7 @@ import useLongPressDrag from './useLongPressDrag.js';
 import useLineDragDrop from './useLineDragDrop.js';
 import { IcChord, IcStrumDown, IcStrumUp, IcTrash, IcPlus, IcRegenerate } from './icons.jsx';
 import {
-  classifyStroke, deriveBpm, arrowSizeFor,
+  createStrokeSegmenter, deriveBpm, arrowSizeFor,
   BPM_MIN, BPM_MAX,
 } from '../utils/strum.js';
 
@@ -123,17 +123,33 @@ function CustomChordTile({ open, value, onOpen, onChange, onSubmit }) {
 
 // ─── the strum pad ────────────────────────────────────────────────────────
 // A tall touch surface the artist actually strums on: one vertical swipe =
-// one stroke. Direction is the sign of the displacement, intensity comes
-// from the swipe's velocity (see utils/strum.js), and the time each stroke
-// landed is what the tempo is read off afterwards. No metronome to follow,
-// no tempo to dial in first — the gesture is the input, including its
-// timing.
+// one continuous touch, many strokes — no lift between them, the way a
+// real strumming hand plays (createStrokeSegmenter, utils/strum.js, has
+// the actual "is this still the same stroke" judgment; this component
+// just wires touch events to it). Direction is the sign of each
+// displacement, intensity comes from its velocity, and the time each
+// stroke landed is what the tempo is read off afterwards — no metronome to
+// follow, no tempo to dial in first, the gesture is the input, including
+// its timing. A touch that never swipes at all resolves to a single MUTE
+// on release (the segmenter's own end()) — a tap of the strumming hand
+// against the strings, not a failed stroke.
 function StrumPad({ recording, onStroke, children }) {
   const padRef = useRef(null);
-  // { y, t } of the live touch, plus a running preview so the pad reacts
-  // under the finger instead of only at the end of the gesture.
-  const touchRef = useRef(null);
-  const [preview, setPreview] = useState(null); // { direction, intensity }
+  // One segmenter instance per mounted pad, reset at the start of every
+  // touch (not recreated — it owns no per-touch state until start() is
+  // called, so reuse is free).
+  const segmenterRef = useRef(null);
+  if (!segmenterRef.current) segmenterRef.current = createStrokeSegmenter();
+  const [preview, setPreview] = useState(null); // { direction, intensity } | null — the in-progress segment only, never a mute (that's only ever known at release)
+
+  // Shared by every path that can finish a stroke (touchmove's own
+  // mid-gesture commits, touchend's final one) — one vibration policy, one
+  // call into onStroke, regardless of which of those fired it.
+  const emit = useCallback((stroke) => {
+    if (!stroke) return;
+    navigator.vibrate?.(stroke.direction === 'mute' ? 15 : Math.round(6 + stroke.intensity * 18));
+    onStroke(stroke, Date.now());
+  }, [onStroke]);
 
   useEffect(() => {
     const el = padRef.current;
@@ -143,36 +159,36 @@ function StrumPad({ recording, onStroke, children }) {
     // not a strum. touch-action:none in CSS handles the same thing for
     // browsers that honour it; this covers the ones that don't.
     const move = (e) => {
-      const start = touchRef.current;
-      if (!start) return;
       e.preventDefault();
       const t = e.touches[0];
-      const dy = t.clientY - start.y;
-      const stroke = classifyStroke(dy, Date.now() - start.t);
-      setPreview(stroke);
+      const now = Date.now();
+      // A stroke can finish mid-gesture now (the finger reversed past
+      // STROKE_REVERSAL_PX without lifting) — emit it the instant the
+      // segmenter says so, then keep tracking the NEXT one from the same
+      // touch.
+      emit(segmenterRef.current.move(t.clientY, now));
+      setPreview(segmenterRef.current.preview(t.clientY, now));
     };
     el.addEventListener('touchmove', move, { passive: false });
     return () => el.removeEventListener('touchmove', move);
-  }, []);
+  }, [emit]);
 
   const handleStart = useCallback((e) => {
     const t = e.touches[0];
-    touchRef.current = { y: t.clientY, t: Date.now() };
+    segmenterRef.current.start(t.clientY, Date.now());
     setPreview(null);
   }, []);
 
   const handleEnd = useCallback((e) => {
-    const start = touchRef.current;
-    touchRef.current = null;
     setPreview(null);
-    if (!start) return;
     const t = e.changedTouches[0];
-    const stroke = classifyStroke(t.clientY - start.y, Date.now() - start.t);
-    if (stroke) {
-      navigator.vibrate?.(Math.round(6 + stroke.intensity * 18));
-      onStroke(stroke, Date.now());
-    }
-  }, [onStroke]);
+    emit(segmenterRef.current.end(t.clientY, Date.now()));
+  }, [emit]);
+
+  const handleCancel = useCallback(() => {
+    segmenterRef.current.cancel();
+    setPreview(null);
+  }, []);
 
   const PreviewArrow = preview?.direction === 'up' ? IcStrumUp : IcStrumDown;
 
@@ -182,7 +198,7 @@ function StrumPad({ recording, onStroke, children }) {
       className={`cs-pad${recording ? ' cs-pad-live' : ''}`}
       onTouchStart={handleStart}
       onTouchEnd={handleEnd}
-      onTouchCancel={() => { touchRef.current = null; setPreview(null); }}
+      onTouchCancel={handleCancel}
     >
       {preview
         ? <span className="cs-pad-preview"><PreviewArrow size={arrowSizeFor(preview.intensity, 28, 72)} /></span>

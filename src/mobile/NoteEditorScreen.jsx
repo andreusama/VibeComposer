@@ -880,14 +880,18 @@ export default function NoteEditorScreen({
   }, [lines]);
 
   // ResourcePickerSheet's long-press-and-drag (via useLineDragDrop.js) →
-  // dropped somewhere over the editor.
+  // dropped somewhere over the editor. Closes the sheet on every successful
+  // outcome (into a line, or a new line before/after) rather than letting
+  // it revert to its full list — same "you just placed it, let the lyric
+  // have the screen" reasoning as handleDropChord's own close. A miss
+  // (dropped nowhere valid) leaves the sheet open as-is.
   const handleDropResourceOnLine = useCallback((x, y, resource) => {
     setDropTargetIndex(null);
     const target = resolveResourceDropTarget(x, y);
     if (!target) return;
 
-    if (target.mode === 'before') { handleInsertLineAfter(target.lineIndex - 1, resource.body); return; }
-    if (target.mode === 'after') { handleInsertLineAfter(target.lineIndex, resource.body); return; }
+    if (target.mode === 'before') { handleInsertLineAfter(target.lineIndex - 1, resource.body); setResourcePicker(null); return; }
+    if (target.mode === 'after') { handleInsertLineAfter(target.lineIndex, resource.body); setResourcePicker(null); return; }
 
     const line = lines[target.lineIndex];
     const current = line.text;
@@ -898,6 +902,7 @@ export default function NoteEditorScreen({
     next[target.lineIndex] = { ...next[target.lineIndex], text: joined };
     setLines(ensureTrailingEmpty(next));
     persist(next);
+    setResourcePicker(null);
   }, [lines, persist, pushUndo, logLineHistory, handleInsertLineAfter, resolveResourceDropTarget]);
 
   // ResourcePickerSheet's onDragHoverLine (now carrying the live point and
@@ -983,10 +988,15 @@ export default function NoteEditorScreen({
 
   // Tap a chord in the palette (or type one into the free-text field) — the
   // typed/desktop path, and the fallback whenever dragging isn't practical.
+  // Closes the sheet on a successful placement (2026-10-15 feedback: it used
+  // to stay open, which read as broken — you just placed the one chord you
+  // came for, the sheet staying up over the lyric you're trying to look at
+  // doesn't help, and it's one tap to bring it back for another).
   const handlePickChord = useCallback((chordName) => {
     const target = chordSheet;
     if (!target || target.lineIndex == null) return;
     attachChord(target.lineIndex, target.start, target.end, chordName);
+    setChordSheet(null);
   }, [chordSheet, attachChord]);
 
   // The one definition of "which word is this viewport point over" for
@@ -1017,12 +1027,19 @@ export default function NoteEditorScreen({
   // ChordStrumSheet's long-press-and-drag (via useLineDragDrop.js) →
   // dropped somewhere over the editor. Unlike handleDropResourceOnLine
   // (which only needs to know WHICH line, and appends to its end), a chord
-  // has to land on a specific word — resolveWordAtPoint above.
+  // has to land on a specific word — resolveWordAtPoint above. Closes the
+  // sheet on a successful drop rather than letting it revert to its full
+  // view (the drag-collapsed strip un-collapsing back to the chip grid,
+  // per the sheet's own drag mechanics) — same reasoning as
+  // handlePickChord's own close: you just placed it, the lyric is what you
+  // want to see next, not the palette again. A miss (no word under the
+  // point) leaves the sheet as-is — nothing happened, so nothing closes.
   const handleDropChord = useCallback((x, y, chordName) => {
     setDropTargetIndex(null);
     const hit = resolveWordAtPoint(x, y);
     if (!hit) return;
     attachChord(hit.lineIndex, hit.word.start, hit.word.end, chordName);
+    setChordSheet(null);
   }, [resolveWordAtPoint, attachChord]);
 
   const handleRemoveChord = useCallback(async (id) => {

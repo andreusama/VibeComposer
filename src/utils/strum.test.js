@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   velocityToIntensity, classifyStroke, deriveBpm, arrowSizeFor, msPerStroke, patternGlyphs,
-  STROKE_MIN_PX, VELOCITY_FLOOR, VELOCITY_CEIL, BPM_MIN, BPM_MAX, ARROW_MIN, ARROW_MAX,
+  createStrokeSegmenter,
+  STROKE_MIN_PX, STROKE_REVERSAL_PX, VELOCITY_FLOOR, VELOCITY_CEIL, BPM_MIN, BPM_MAX, ARROW_MIN, ARROW_MAX,
 } from './strum.js';
 
 describe('velocityToIntensity', () => {
@@ -168,8 +169,114 @@ describe('patternGlyphs', () => {
     ])).toBe('↓↑↓');
   });
 
+  it('renders a mute as its own glyph, not an arrow', () => {
+    expect(patternGlyphs([{ direction: 'down' }, { direction: 'mute' }, { direction: 'up' }])).toBe('↓✕↑');
+  });
+
   it('handles an empty or missing pattern', () => {
     expect(patternGlyphs([])).toBe('');
     expect(patternGlyphs(null)).toBe('');
+  });
+});
+
+describe('createStrokeSegmenter', () => {
+  it('commits nothing mid-gesture for a single unbroken swipe — only on end()', () => {
+    const seg = createStrokeSegmenter();
+    seg.start(0, 0);
+    expect(seg.move(20, 50)).toBeNull(); // establishing direction, no reversal yet
+    expect(seg.move(30, 90)).toBeNull(); // still extending the same stroke
+    const final = seg.end(35, 110);
+    expect(final).toEqual({ direction: 'down', intensity: velocityToIntensity(35, 110) });
+  });
+
+  it('reads an upward swipe the same way, sign flipped', () => {
+    const seg = createStrokeSegmenter();
+    seg.start(100, 0);
+    const final = seg.end(40, 100);
+    expect(final.direction).toBe('up');
+  });
+
+  it('commits a stroke mid-gesture the instant the finger reverses, without a lift', () => {
+    const seg = createStrokeSegmenter();
+    seg.start(0, 0);
+    seg.move(30, 50); // establish the downstroke
+    // Reverses past STROKE_REVERSAL_PX without ever releasing the touch.
+    const firstStroke = seg.move(5, 100);
+    expect(firstStroke).toEqual({ direction: 'down', intensity: velocityToIntensity(30, 50) });
+  });
+
+  it('keeps decomposing a continuous zigzag into one stroke per direction change', () => {
+    const seg = createStrokeSegmenter();
+    const strokes = [];
+    seg.start(0, 0);
+    const commit = (y, t) => { const s = seg.move(y, t); if (s) strokes.push(s.direction); };
+    commit(30, 50);   // extending stroke 1 (down)
+    commit(5, 100);   // reverses past threshold -> stroke 1 commits (down), stroke 2 (up) begins
+    commit(-25, 150); // extending stroke 2 (up)
+    commit(10, 200);  // reverses -> stroke 2 commits (up), stroke 3 (down) begins
+    const last = seg.end(40, 250); // stroke 3 finishes on release
+    if (last) strokes.push(last.direction);
+    expect(strokes).toEqual(['down', 'up', 'down']);
+  });
+
+  it('ignores a reversal smaller than STROKE_REVERSAL_PX as noise in the same stroke', () => {
+    const seg = createStrokeSegmenter();
+    seg.start(0, 0);
+    seg.move(30, 50); // peak at 30
+    expect(seg.move(30 - (STROKE_REVERSAL_PX - 1), 60)).toBeNull(); // too small a pullback to be a new stroke
+    const final = seg.end(40, 100); // still extends the SAME stroke, now from 0 to 40
+    expect(final).toEqual({ direction: 'down', intensity: velocityToIntensity(40, 100) });
+  });
+
+  it('resolves a pure tap (never crosses STROKE_MIN_PX) into a mute on release', () => {
+    const seg = createStrokeSegmenter();
+    seg.start(0, 0);
+    expect(seg.move(3, 20)).toBeNull();
+    expect(seg.end(5, 40)).toEqual({ direction: 'mute', intensity: 0 });
+  });
+
+  it('resolves a tap with no move() calls at all into a mute', () => {
+    const seg = createStrokeSegmenter();
+    seg.start(0, 0);
+    expect(seg.end(1, 30)).toEqual({ direction: 'mute', intensity: 0 });
+  });
+
+  it('does NOT register a mute for a tiny settle right after a real stroke in the same touch', () => {
+    const seg = createStrokeSegmenter();
+    seg.start(0, 0);
+    seg.move(30, 50); // establishes the downstroke, peak at 30
+    // Pulls back 12px (past REVERSAL_PX, under STROKE_MIN_PX) — commits the
+    // downstroke, but 12px isn't enough to establish a SECOND stroke's own
+    // direction yet, so the new segment starts with no peak of its own.
+    const first = seg.move(18, 90);
+    expect(first).toEqual({ direction: 'down', intensity: velocityToIntensity(30, 50) });
+    // Releases only 10px further from the new segment's own start (30) —
+    // under STROKE_MIN_PX, so this settle is neither a second stroke nor
+    // (since a real stroke already fired this touch) a mute.
+    expect(seg.end(20, 110)).toBeNull();
+  });
+
+  it('cancel() discards the in-progress gesture entirely — no stroke, no mute', () => {
+    const seg = createStrokeSegmenter();
+    seg.start(0, 0);
+    seg.move(30, 50);
+    seg.cancel();
+    expect(seg.end(40, 100)).toBeNull(); // nothing to end, start() was never called again
+  });
+
+  it('preview() reflects the in-progress segment without committing it', () => {
+    const seg = createStrokeSegmenter();
+    seg.start(0, 0);
+    seg.move(10, 50); // below STROKE_MIN_PX, no direction established yet
+    expect(seg.preview(10, 50)).toBeNull();
+    seg.move(20, 80); // establishes the stroke
+    expect(seg.preview(25, 90)).toEqual({ direction: 'down', intensity: velocityToIntensity(25, 90) });
+  });
+
+  it('returns null for every method before start() has been called', () => {
+    const seg = createStrokeSegmenter();
+    expect(seg.move(10, 10)).toBeNull();
+    expect(seg.end(10, 10)).toBeNull();
+    expect(seg.preview(10, 10)).toBeNull();
   });
 });

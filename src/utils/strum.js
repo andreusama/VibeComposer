@@ -45,15 +45,113 @@ export function velocityToIntensity(distancePx, durationMs) {
   return Math.round(clamp01(scaled) * 100) / 100;
 }
 
-// One finished touch on the pad → one stroke, or null when it wasn't a
-// stroke at all. `dy` is (endY - startY) in px, so a NEGATIVE dy (finger
-// moved up the screen) is an upstroke.
+// One already-isolated swipe → one stroke, or null when it wasn't a stroke
+// at all. `dy` is (endY - startY) in px, so a NEGATIVE dy (finger moved up
+// the screen) is an upstroke. Used both for a single-swipe segment
+// (createStrokeSegmenter below) and directly wherever a start/end pair is
+// already known.
 export function classifyStroke(dy, durationMs) {
   const dist = Math.abs(dy || 0);
   if (dist < STROKE_MIN_PX) return null;
   return {
     direction: dy < 0 ? 'up' : 'down',
     intensity: velocityToIntensity(dist, durationMs),
+  };
+}
+
+// How far back, in px, a finger has to pull away from a stroke's own
+// furthest point before that counts as the START of the NEXT stroke rather
+// than a wobble in the one still underway. Smaller than STROKE_MIN_PX on
+// purpose: deciding a stroke is happening at all takes real conviction,
+// but once one is already underway, it takes less to read "now going the
+// other way" — a held note's hand doesn't sit perfectly still.
+export const STROKE_REVERSAL_PX = 10;
+
+// A continuous rasgueo gesture, decomposed into strokes as it happens — one
+// finger-down, many strokes, no lift between them, the way a real
+// strumming hand actually plays (reported 2026-10-09: the one-stroke-per-
+// touch model this replaced required lifting and re-touching for every
+// single stroke, which is not how anyone strums). Call start() once per
+// touch, move() on every touchmove sample, end() on touchend/touchcancel.
+//
+// move() returns a finished stroke the instant one completes — the finger
+// has moved STROKE_MIN_PX in a direction, then pulled back STROKE_REVERSAL_PX
+// from however far it got — or null while nothing has finished yet. end()
+// always returns something: whatever final partial stroke was in progress,
+// or — if nothing in this whole touch ever moved far enough to register as
+// a stroke at all — a single MUTE. That last part is deliberate, not a
+// fallback: in funk/rumba strumming, a tap of the hand flat against the
+// strings to cut them off IS the gesture, not a failed swipe, so a touch
+// that never swipes isn't nothing, it's a mute.
+//
+// Pure and stateful by construction (one instance per live touch, owned by
+// the pad component — see ChordStrumSheet.jsx's StrumPad) rather than a
+// single do-it-all function, because "is this still the same stroke"
+// genuinely depends on everything that happened since start(), not just
+// the latest sample.
+export function createStrokeSegmenter() {
+  let segStart = null; // { y, t } — anchor of the current, uncommitted stroke
+  let peak = null; // { y, t } — furthest point reached in segStart's established direction; null until a direction is established
+  let struckAnything = false; // true once ANY real stroke has fired this touch — a tap-sized settle AFTER a real stroke is noise, not a mute
+
+  const commit = (to) => {
+    const stroke = classifyStroke(to.y - segStart.y, to.t - segStart.t);
+    if (stroke) struckAnything = true;
+    segStart = to;
+    peak = null;
+    return stroke;
+  };
+
+  return {
+    start(y, t) {
+      segStart = { y, t };
+      peak = null;
+      struckAnything = false;
+    },
+    move(y, t) {
+      if (!segStart) return null;
+      if (!peak) {
+        if (Math.abs(y - segStart.y) >= STROKE_MIN_PX) peak = { y, t };
+        return null;
+      }
+      const dirSign = Math.sign(peak.y - segStart.y);
+      const sincePeak = y - peak.y;
+      if (Math.sign(sincePeak) === dirSign || sincePeak === 0) {
+        // Still extending the same stroke — keep tracking its furthest point.
+        if (Math.abs(y - segStart.y) > Math.abs(peak.y - segStart.y)) peak = { y, t };
+        return null;
+      }
+      // Moving back the other way — real reversal, or just a wobble?
+      if (Math.abs(sincePeak) < STROKE_REVERSAL_PX) return null;
+      const finished = commit(peak);
+      // The reversal itself may already reach far enough to establish the
+      // NEXT stroke's own direction in this same sample, not the next one.
+      if (Math.abs(y - segStart.y) >= STROKE_MIN_PX) peak = { y, t };
+      return finished;
+    },
+    end(y, t) {
+      if (!segStart) return null;
+      const finished = commit({ y, t });
+      const result = finished || (struckAnything ? null : { direction: 'mute', intensity: 0 });
+      segStart = null;
+      peak = null;
+      return result;
+    },
+    // A cancelled touch (touchcancel) registers nothing at all — not a
+    // partial stroke, not a mute. Whatever was in progress just didn't
+    // happen.
+    cancel() {
+      segStart = null;
+      peak = null;
+      struckAnything = false;
+    },
+    // Read-only: the in-progress segment's own stroke, for live feedback
+    // (StrumPad's own under-the-finger preview) — same classifyStroke a
+    // commit would use, just without committing anything.
+    preview(y, t) {
+      if (!segStart) return null;
+      return classifyStroke(y - segStart.y, t - segStart.t);
+    },
   };
 }
 
@@ -111,8 +209,11 @@ export function msPerStroke(bpm) {
 }
 
 // Compact human summary of a pattern, for the one-line strip in the note
-// editor: "↓↑↓↓" style, no sizes. Kept here rather than inline in the strip
+// editor: "↓↑✕↓" style, no sizes. Kept here rather than inline in the strip
 // so the arrow vocabulary has exactly one definition.
 export function patternGlyphs(pattern) {
-  return (pattern || []).map((s) => (s.direction === 'up' ? '↑' : '↓')).join('');
+  return (pattern || []).map((s) => {
+    if (s.direction === 'mute') return '✕';
+    return s.direction === 'up' ? '↑' : '↓';
+  }).join('');
 }

@@ -33,7 +33,20 @@
 // need a bolder 2.5/2 stroke to read clearly at this size — scoped locally
 // rather than widening the shared set's one weight for this one use (same
 // call TempoStrumCard's own predecessor already made).
+//
+// A third glyph, mute — an X, the same cut-off-the-strings mark real chord
+// charts use for a percussive hit (funk/rumba's muted scratch) —
+// unlike up/down this isn't a bigger-or-smaller slot on the same scale, so
+// its own cell (.beat-cell.mute) gets a size of its own rather than being
+// forced to read as a small up or a small down.
 function BeatArrow({ direction }) {
+  if (direction === 'mute') {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M6 6l12 12M18 6 6 18" />
+      </svg>
+    );
+  }
   const d = direction === 'up' ? 'M12 19V5M5 12l7-7 7 7' : 'M12 5v14M5 12l7 7 7-7';
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">

@@ -841,6 +841,22 @@ export default function NoteEditorScreen({
   // pushUndo + logLineHistory + direct mutation shape as
   // handleSaveWordVariant, since this is a one-shot programmatic edit, not
   // continuous typing (handleLineChange's coalescing is for the latter).
+  //
+  // Same focus-restoring close as closeChordSheet (see its own comment for
+  // the full reasoning) — handleOpenResourcePicker nulls focusedIndex on
+  // the same "opening the sheet also blurs the textarea" assumption, which
+  // a long-press-and-drag breaks the same way. `overrideLineIndex` is for
+  // handleDropResourceOnLine: a drop can land on a different line (or a
+  // brand-new one) than the line the sheet was opened from.
+  const closeResourcePicker = useCallback((overrideLineIndex) => {
+    const targetLineIndex = overrideLineIndex ?? resourcePicker?.lineIndex;
+    setResourcePicker(null);
+    setDropTargetIndex(null);
+    if (targetLineIndex == null || !lines[targetLineIndex]) return;
+    setFocusedIndex(targetLineIndex);
+    rowRefs.current[lines[targetLineIndex].id]?.focus();
+  }, [resourcePicker, lines]);
+
   const handleInsertResource = useCallback((resource) => {
     const target = resourcePicker;
     if (!target) return;
@@ -852,8 +868,8 @@ export default function NoteEditorScreen({
     next[target.lineIndex] = { ...next[target.lineIndex], text: nextText };
     setLines(ensureTrailingEmpty(next));
     persist(next);
-    setResourcePicker(null);
-  }, [resourcePicker, lines, persist, pushUndo, logLineHistory]);
+    closeResourcePicker();
+  }, [resourcePicker, lines, persist, pushUndo, logLineHistory, closeResourcePicker]);
 
   // Where exactly within a row's own bounds a point falls decides what a
   // resource drop there means: the top/bottom sliver reads as "between
@@ -890,8 +906,8 @@ export default function NoteEditorScreen({
     const target = resolveResourceDropTarget(x, y);
     if (!target) return;
 
-    if (target.mode === 'before') { handleInsertLineAfter(target.lineIndex - 1, resource.body); setResourcePicker(null); return; }
-    if (target.mode === 'after') { handleInsertLineAfter(target.lineIndex, resource.body); setResourcePicker(null); return; }
+    if (target.mode === 'before') { handleInsertLineAfter(target.lineIndex - 1, resource.body); closeResourcePicker(target.lineIndex); return; }
+    if (target.mode === 'after') { handleInsertLineAfter(target.lineIndex, resource.body); closeResourcePicker(target.lineIndex); return; }
 
     const line = lines[target.lineIndex];
     const current = line.text;
@@ -902,8 +918,8 @@ export default function NoteEditorScreen({
     next[target.lineIndex] = { ...next[target.lineIndex], text: joined };
     setLines(ensureTrailingEmpty(next));
     persist(next);
-    setResourcePicker(null);
-  }, [lines, persist, pushUndo, logLineHistory, handleInsertLineAfter, resolveResourceDropTarget]);
+    closeResourcePicker(target.lineIndex);
+  }, [lines, persist, pushUndo, logLineHistory, handleInsertLineAfter, resolveResourceDropTarget, closeResourcePicker]);
 
   // ResourcePickerSheet's onDragHoverLine (now carrying the live point and
   // payload — see useLineDragDrop.js) — captures both the row highlight
@@ -992,12 +1008,45 @@ export default function NoteEditorScreen({
   // to stay open, which read as broken — you just placed the one chord you
   // came for, the sheet staying up over the lyric you're trying to look at
   // doesn't help, and it's one tap to bring it back for another).
+  // Every path that ends the chord sheet (a tap-placed chord, a
+  // drag-dropped one, or the sheet's own cancel) funnels through here so
+  // focus comes back exactly once, the same way regardless of which one
+  // fired. handleOpenChordSheet nulls focusedIndex on the assumption that
+  // opening the sheet also blurs the textarea — true for a genuine tap on
+  // the chord icon, but NOT for picking a chord via long-press-and-drag: a
+  // long-press that resolves into a drag never synthesizes a click/focus-
+  // steal on the chip in the first place (confirmed via Playwright — no
+  // 'blur' ever fires on the textarea across an entire drag), so DOM focus
+  // never actually leaves it, and a browser never re-fires 'focus' on an
+  // element that's already the activeElement. Without restoring it here,
+  // re-tapping the SAME still-focused line after a drag-drop did nothing at
+  // all: focusedIndex stayed stuck at null (KeyboardAccessoryBar's own
+  // mount condition), so "Acordes y rasgueo" never came back until the
+  // person happened to tap some OTHER element first to force a real
+  // blur/focus pair — reported 2026-10-16 as "I can only add [a few]
+  // chords". Setting focusedIndex directly (not relying on the native
+  // event) fixes it whether or not DOM focus actually moved; calling
+  // .focus() on top keeps real DOM focus in sync for whichever case it did.
+  // `overrideLineIndex` is for the drag case: a dropped chord can land on
+  // a different line than the one the sheet was opened from (it was opened
+  // off whatever line was focused BEFORE the drag started), and the line
+  // that should end up focused afterward is the one the chord actually
+  // landed on, not the stale open-time one.
+  const closeChordSheet = useCallback((overrideLineIndex) => {
+    const targetLineIndex = overrideLineIndex ?? chordSheet?.lineIndex;
+    setChordSheet(null);
+    setDropTargetIndex(null);
+    if (targetLineIndex == null || !lines[targetLineIndex]) return;
+    setFocusedIndex(targetLineIndex);
+    rowRefs.current[lines[targetLineIndex].id]?.focus();
+  }, [chordSheet, lines]);
+
   const handlePickChord = useCallback((chordName) => {
     const target = chordSheet;
     if (!target || target.lineIndex == null) return;
     attachChord(target.lineIndex, target.start, target.end, chordName);
-    setChordSheet(null);
-  }, [chordSheet, attachChord]);
+    closeChordSheet();
+  }, [chordSheet, attachChord, closeChordSheet]);
 
   // The one definition of "which word is this viewport point over" for
   // chord dragging — a brand-new chord from the palette and an existing
@@ -1039,8 +1088,8 @@ export default function NoteEditorScreen({
     const hit = resolveWordAtPoint(x, y);
     if (!hit) return;
     attachChord(hit.lineIndex, hit.word.start, hit.word.end, chordName);
-    setChordSheet(null);
-  }, [resolveWordAtPoint, attachChord]);
+    closeChordSheet(hit.lineIndex);
+  }, [resolveWordAtPoint, attachChord, closeChordSheet]);
 
   const handleRemoveChord = useCallback(async (id) => {
     setLineChords((cur) => cur.filter((c) => c.id !== id));
@@ -1503,7 +1552,7 @@ export default function NoteEditorScreen({
         <ResourcePickerSheet
           userId={userId}
           onInsert={handleInsertResource}
-          onClose={() => setResourcePicker(null)}
+          onClose={() => closeResourcePicker()}
           onDragHoverLine={handleResourceDragHover}
           onDropOnLine={handleDropResourceOnLine}
           onDragActiveChange={setExternalDragActive}
@@ -1542,7 +1591,7 @@ export default function NoteEditorScreen({
           onDragHoverLine={setDropTargetIndex}
           onDropChord={handleDropChord}
           onDragActiveChange={setExternalDragActive}
-          onClose={() => { setChordSheet(null); setDropTargetIndex(null); }}
+          onClose={() => closeChordSheet()}
         />
       )}
 

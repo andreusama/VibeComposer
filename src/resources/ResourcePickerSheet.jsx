@@ -163,18 +163,21 @@ export default function ResourcePickerSheet({ userId, onInsert, onClose, onDragH
 
   return (
     <div className={`baul-sheet-scrim${drag ? ' res-picker-scrim-dragging' : ''}`} onClick={drag ? undefined : onClose}>
+      {/* Slides fully off-screen for a drag's duration
+          (.res-picker-sheet-dragging, style.css) — was a 56px peeking strip
+          with a drag hint, but that sliver ate exactly the lyric-area room
+          a precise drop needs most, and the resource being dragged already
+          has its own floating pill (LineDragPill below) following the
+          finger. The row list underneath stays mounted throughout (a
+          transform doesn't detach it) — see .res-picker-sheet-content's
+          own comment in style.css for why that still matters even though
+          nothing in here is visible mid-drag. */}
       <div
-        className={`baul-sheet res-picker-sheet${drag ? ' res-picker-sheet-shrunk' : ''}`}
+        className={`baul-sheet res-picker-sheet${drag ? ' res-picker-sheet-dragging' : ''}`}
         style={dismissY ? { transform: `translateY(${dismissY}px)`, transition: 'none' } : undefined}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="ts-grabber" {...dismissHandlers} />
-
-        {/* Renders ALONGSIDE the normal content below, not instead of it —
-            see .res-picker-sheet-content's own comment in style.css for why
-            the row list has to stay mounted through the whole drag rather
-            than being swapped out for this hint. */}
-        {drag && <p className="res-picker-drag-hint">Suelta sobre un verso para añadirlo ahí</p>}
 
         <div className={`res-picker-sheet-content${drag ? ' res-picker-drag-hidden' : ''}`}>
             <div className="res-picker-head" {...dismissHandlers}>

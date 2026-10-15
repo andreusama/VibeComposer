@@ -8045,12 +8045,22 @@ body::before {
    already disabled for the whole dragging state (see each sheet's own
    `onClick={drag ? undefined : onClose}`). Reported 2026-10-09. */
 .res-picker-scrim-dragging { background: rgba(29, 28, 26, 0.04); transition: background 0.2s ease; pointer-events: none; }
-.res-picker-sheet-shrunk {
-    max-height: 56px;
-    overflow: hidden;
-    transition: max-height 0.2s cubic-bezier(0.32, 0.72, 0, 1);
+/* Slides the WHOLE sheet fully off-screen for a drag's duration (was a
+   56px peeking strip — 2026-10-15: that strip still ate a sliver of the
+   lyric area right where a precise drop needs the most room, and the
+   chip grid underneath it serves no purpose mid-drag anyway, since the
+   thing being dragged already has its own floating pill
+   (.res-picker-drag-pill, fixed to the viewport, unaffected by this
+   transform) following the finger). A transform doesn't detach the sheet
+   from the document the way unmounting it would — see
+   .res-picker-sheet-content's own comment for why that distinction is
+   load-bearing here, not cosmetic. */
+.res-picker-sheet-dragging {
+    transform: translateY(100%);
+    transition: transform 0.2s cubic-bezier(0.32, 0.72, 0, 1);
+    pointer-events: none;
 }
-.res-picker-sheet:not(.res-picker-sheet-shrunk) { transition: max-height 0.2s cubic-bezier(0.32, 0.72, 0, 1); }
+.res-picker-sheet:not(.res-picker-sheet-dragging) { transition: transform 0.2s cubic-bezier(0.32, 0.72, 0, 1); }
 
 /* Wraps the sheet's normal (non-strip) content — ChordStrumSheet's own
    cs-head+cs-body, ResourcePickerSheet's res-picker-head+res-picker-list.
@@ -8754,10 +8764,9 @@ body::before {
 /* ─── Acordes y rasgueo sheet ──────────────────────────────────────────────
    Same .baul-sheet shell + separate sticky head / scrolling body split as
    .res-picker-sheet, and it borrows that sheet's drag classes wholesale
-   (.res-picker-scrim-dragging / -sheet-shrunk / -drag-hint / -drag-pill) —
-   one drag vocabulary for the app, not a second one under chord-specific
-   names. */
-.cs-sheet { max-height: 86vh; display: flex; flex-direction: column; }
+   (.res-picker-scrim-dragging / -sheet-dragging / -drag-pill) — one drag
+   vocabulary for the app, not a second one under chord-specific names. */
+.cs-sheet { max-height: 86vh; display: flex; flex-direction: column; transition: transform 0.2s cubic-bezier(0.32, 0.72, 0, 1); }
 
 .cs-head {
     flex-shrink: 0;
@@ -8946,30 +8955,6 @@ body::before {
     color: var(--ink);
 }
 .cs-custom-input:focus { outline: none; }
-
-/* Estado 2 · arrastrando — the collapsed sheet's own strip (ChordStrumSheet.jsx).
-   Reuses .cs-chip + its variant classes for the relief/tone (same chips,
-   just smaller and in one scrolling row instead of a 7/7/6 grid), so a
-   future change to what a chip looks like never has to be made twice. */
-.cs-drag-strip {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    padding: var(--space-2) var(--space-4) var(--space-3);
-    overflow-x: auto;
-}
-.cs-drag-strip .cs-chip { flex: 0 0 44px; width: 44px; height: 36px; font-size: 13px; cursor: default; }
-/* The dragged chip's own spot in the strip — an empty hole, not a gap,
-   so the strip's width/scroll position never jumps the instant a drag
-   starts. !important because the variant classes (.cs-chip-major/-minor/
-   -seventh) each set their own background/border/shadow, and this state
-   has to win over all three uniformly, not be re-declared per variant. */
-.cs-drag-strip-hole {
-    background: transparent !important;
-    border: 1.5px dashed var(--key-edge) !important;
-    box-shadow: none !important;
-}
-.cs-drag-strip-sep { flex: 0 0 auto; width: 1px; height: 28px; background: var(--hairline); }
 
 /* The chord following the finger mid-drag — redesigned 2026-10-09 into an
    actual lifted object: fixed size (not padding-fit), tilted -5deg like a

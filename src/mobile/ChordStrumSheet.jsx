@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import StrumPattern from './StrumPattern.jsx';
 import LineDragPill from './LineDragPill.jsx';
 import useLongPressDrag from './useLongPressDrag.js';
@@ -317,37 +317,17 @@ export default function ChordStrumSheet({
 
   return (
     <div className={`baul-sheet-scrim${drag ? ' res-picker-scrim-dragging' : ''}`} onClick={drag ? undefined : onClose}>
-      <div className={`baul-sheet cs-sheet${drag ? ' res-picker-sheet-shrunk' : ''}`} onClick={(e) => e.stopPropagation()}>
+      {/* Slides fully off-screen for a drag's duration (.res-picker-sheet-dragging,
+          style.css) — was a 56px peeking strip showing the other chips, but
+          that sliver ate exactly the lyric-area room a precise drop needs
+          most, and the chip being dragged already has its own floating pill
+          (LineDragPill below) following the finger, so the strip bought
+          nothing. The content underneath stays mounted throughout (a
+          transform doesn't detach it) — see .res-picker-sheet-content's own
+          comment in style.css for why that still matters even though
+          nothing in here is visible mid-drag. */}
+      <div className={`baul-sheet cs-sheet${drag ? ' res-picker-sheet-dragging' : ''}`} onClick={(e) => e.stopPropagation()}>
         <div className="ts-grabber" />
-
-        {/* Estado 2 · arrastrando — this strip renders ALONGSIDE the normal
-            content below, not instead of it (see .res-picker-sheet-content's
-            own comment in style.css for why the normal content has to stay
-            mounted). Same fixed chips as the reposo grid (Mayores → Menores
-            → Séptimas, same order, thin separators between groups) but
-            scrolled horizontally at a uniform 44px instead of the grid's own
-            7/7/6 columns — there's no room for three separate groups stacked
-            in a 56px-tall strip, so they become one row instead. The chip
-            actually being dragged renders as an empty dashed hole in its own
-            spot (.cs-drag-strip-hole) rather than disappearing, so the
-            strip's layout doesn't jump the instant a drag starts. */}
-        {drag && (
-          <div className="cs-drag-strip">
-            {PALETTE.map((group, gi) => (
-              <Fragment key={group.label}>
-                {gi > 0 && <span className="cs-drag-strip-sep" />}
-                {group.chords.map((name) => (
-                  <span
-                    key={name}
-                    className={`cs-chip cs-chip-${group.variant}${name === drag.payload ? ' cs-drag-strip-hole' : ''}`}
-                  >
-                    {name === drag.payload ? '' : name}
-                  </span>
-                ))}
-              </Fragment>
-            ))}
-          </div>
-        )}
 
         <div className={`res-picker-sheet-content${drag ? ' res-picker-drag-hidden' : ''}`}>
             <div className="cs-head">

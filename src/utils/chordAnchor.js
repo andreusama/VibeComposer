@@ -40,9 +40,26 @@ export function wordsIn(text) {
 // character under the fingertip would be precision theatre — real tablature
 // puts the symbol over a whole word/syllable, never over half a letter.
 //
-// In whitespace or punctuation → the nearest word, and on a tie the word
-// that FOLLOWS the drop point, because a chord change is heard as landing
-// with the next thing sung, not as trailing the previous one.
+// In whitespace or punctuation → ALWAYS the word that FOLLOWS the drop
+// point, never whichever word happens to be fewer characters away, because
+// a chord change is heard as landing with the next thing sung, not as
+// trailing the previous one. This used to pick whichever side was merely
+// nearer by character count, "on a tie" going to the following word — but
+// for the (overwhelmingly common) single-space gap between two words,
+// there IS no in-between offset to be a true tie: offsetFromMirrorPoint
+// quantizes a pixel hit to either the index right after the preceding
+// word or the index right before the following one, so "nearer" reduced to
+// "which half of that one space glyph the finger happened to land in",
+// functionally unpredictable from the person's own perspective. A chord
+// drop aimed at a word that lands a hair into the gap BEFORE it used to
+// silently resolve to the PRECEDING word instead — which, since dropping
+// on a word that already carries a chord renames it in place rather than
+// adding a new one (attachChord's own "same range replaces" rule), read as
+// "I can only place N chords, every drop after that just overwrites the
+// last one" (reported 2026-10-16, root-caused via Playwright the same
+// day). Falls back to the nearest (preceding) word only when there is no
+// following one, i.e. the drop is past the end of the last word in the
+// line.
 //
 // Returns null only when there is no word at all to attach to.
 export function wordRangeAt(text, offset) {
@@ -53,13 +70,8 @@ export function wordRangeAt(text, offset) {
   const inside = words.find((w) => pos >= w.start && pos < w.end);
   if (inside) return { ...inside };
 
-  let best = words[0];
-  let bestD = Infinity;
-  for (const w of words) {
-    const d = pos < w.start ? w.start - pos : pos - w.end;
-    if (d < bestD || (d === bestD && w.start > pos)) { bestD = d; best = w; }
-  }
-  return { ...best };
+  const following = words.find((w) => w.start >= pos);
+  return { ...(following || words[words.length - 1]) };
 }
 
 // Grow a raw [start, end) — typically a native text selection, which users

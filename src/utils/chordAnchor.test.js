@@ -38,10 +38,10 @@ describe('wordRangeAt', () => {
     expect(at(12)).toBe('sobre');
   });
 
-  it('snaps to the nearest word from whitespace, preferring the following word on a tie', () => {
-    //                                la_nit  -> offset 2 is the space; 'la' ends at 2, 'nit' starts at 3
-    expect(at(2)).toBe('la');   // distance 0 to la's end, 1 to nit's start
-    expect(at(10)).toBe('cau'); // the space after cau
+  it('always snaps forward to the following word from whitespace, never back to the preceding one', () => {
+    //                                la_nit  -> offset 2 is the space right after 'la' ends
+    expect(at(2)).toBe('nit');   // one char into the gap is still "the next word", not "la" again
+    expect(at(10)).toBe('sobre'); // the space right after 'cau' ends
   });
 
   it('prefers the following word when both are equally far', () => {
@@ -62,6 +62,26 @@ describe('wordRangeAt', () => {
     expect(wordRangeAt('   ', 1)).toBeNull();
     expect(wordRangeAt('...', 1)).toBeNull();
   });
+
+  // Regression for 2026-10-16: a chord drop that lands a hair into the gap
+  // BEFORE its intended word used to resolve back to the PRECEDING word
+  // instead — which, through attachChord's own "same range renames it"
+  // rule, silently overwrote whatever chord was already on that word
+  // rather than placing a new one on the word actually being aimed at.
+  // Every offset across the whole gap between two words must resolve to
+  // the one that follows it, with no exceptions.
+  it('never resolves a gap offset back to the word before it, at any point across the gap', () => {
+    // 'dos' ends at 7, 'tres' starts at 8 — the single-space gap is just
+    // offset 7 here, but walk every integer in [prevEnd, nextStart] anyway
+    // so this still catches a regression if the gap ever widens.
+    const t = 'Una dos tres';
+    const prevEnd = 7; // 'dos'.length offset within this string
+    const nextStart = 8; // 'tres' start
+    for (let pos = prevEnd; pos <= nextStart; pos += 1) {
+      const r = wordRangeAt(t, pos);
+      expect(t.slice(r.start, r.end)).toBe('tres');
+    }
+  });
 });
 
 describe('snapRangeToWords', () => {
@@ -80,8 +100,8 @@ describe('snapRangeToWords', () => {
     expect(snap(0, 22)).toBe(LINE);
   });
 
-  it('collapses a whitespace-only selection to the nearest word', () => {
-    expect(snap(2, 3)).toBe('la');
+  it('collapses a whitespace-only selection forward to the following word', () => {
+    expect(snap(2, 3)).toBe('nit');
   });
 
   it('handles a collapsed caret like a drop at that caret', () => {

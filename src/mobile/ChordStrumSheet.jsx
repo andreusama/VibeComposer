@@ -72,13 +72,22 @@ const PALETTE = [
 // chip itself, finishing the drag from the chip's own onTouchEnd), which
 // worked in every test here because testing never kept one real finger
 // down across the state change that follows onDragStart: the moment a drag
-// begins, the PARENT sheet swaps its whole rendered content (shrinks to a
-// strip, the chip grid — including this chip — unmounts). A touch sequence
-// whose origin element just left the DOM stops being delivered to it; on a
-// real device this read as "drag picks up, then the sheet just freezes"
-// (reported 2026-10-08, same bug, same fix, as ResourcePickerSheet.jsx's
-// identical history). ChordStrumSheet owns the live drag via
-// useLineDragDrop.js from the moment onDragStart fires.
+// begins, the PARENT sheet used to swap its whole rendered content (shrink
+// to a strip, the chip grid — including this chip — unmounted). A touch
+// sequence whose origin element left the DOM stopped being delivered to
+// it; on a real device this read as "drag picks up, then the sheet just
+// freezes" (reported 2026-10-08). Moving the live drag to document-level
+// listeners (useLineDragDrop.js) looked like the fix but wasn't the whole
+// one — a touch's move/end are bound to whatever element was hit at
+// touchstart for the gesture's whole lifetime, and once THAT element is
+// detached from the document it has no path up to `document` for those
+// listeners to catch either (reconfirmed on a real phone via BrowserStack
+// as "it worked after I re-tapped it", 2026-10-15, then root-caused via
+// Playwright CDP touch events the same day). The actual fix is that the
+// chip grid no longer unmounts during a drag at all — see
+// .res-picker-sheet-content in style.css and this file's own render: the
+// strip renders alongside the grid, not instead of it, and only the
+// shrunk sheet's overflow:hidden hides the grid visually.
 function ChordChip({ name, variant = 'major', onPick, onDragStart }) {
   const lp = useLongPressDrag({ onDragStart });
 
@@ -311,17 +320,18 @@ export default function ChordStrumSheet({
       <div className={`baul-sheet cs-sheet${drag ? ' res-picker-sheet-shrunk' : ''}`} onClick={(e) => e.stopPropagation()}>
         <div className="ts-grabber" />
 
-        {drag ? (
-          // Estado 2 · arrastrando — the sheet collapses to this one strip,
-          // same fixed chips as the reposo grid (Mayores → Menores →
-          // Séptimas, same order, thin separators between groups) but
-          // scrolled horizontally at a uniform 44px instead of the grid's
-          // own 7/7/6 columns — there's no room for three separate groups
-          // stacked in a 56px-tall strip, so they become one row instead.
-          // The chip actually being dragged renders as an empty dashed
-          // hole in its own spot (.cs-drag-strip-hole) rather than
-          // disappearing, so the strip's layout doesn't jump the instant a
-          // drag starts.
+        {/* Estado 2 · arrastrando — this strip renders ALONGSIDE the normal
+            content below, not instead of it (see .res-picker-sheet-content's
+            own comment in style.css for why the normal content has to stay
+            mounted). Same fixed chips as the reposo grid (Mayores → Menores
+            → Séptimas, same order, thin separators between groups) but
+            scrolled horizontally at a uniform 44px instead of the grid's own
+            7/7/6 columns — there's no room for three separate groups stacked
+            in a 56px-tall strip, so they become one row instead. The chip
+            actually being dragged renders as an empty dashed hole in its own
+            spot (.cs-drag-strip-hole) rather than disappearing, so the
+            strip's layout doesn't jump the instant a drag starts. */}
+        {drag && (
           <div className="cs-drag-strip">
             {PALETTE.map((group, gi) => (
               <Fragment key={group.label}>
@@ -337,8 +347,9 @@ export default function ChordStrumSheet({
               </Fragment>
             ))}
           </div>
-        ) : (
-          <>
+        )}
+
+        <div className={`res-picker-sheet-content${drag ? ' res-picker-drag-hidden' : ''}`}>
             <div className="cs-head">
               <div className="attach-title">Acordes y rasgueo</div>
               <div className="cs-tabs">
@@ -503,8 +514,7 @@ export default function ChordStrumSheet({
                 </div>
               </div>
             )}
-          </>
-        )}
+        </div>
       </div>
 
       {drag && <LineDragPill x={drag.x} y={drag.y} className="cs-drag-pill">{drag.payload}</LineDragPill>}

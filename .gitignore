@@ -4,3 +4,9 @@ dist/
 .env
 .env*.local
 scripts/.cache/
+
+# Playwright (e2e/ — see playwright.config.js)
+e2e/.auth/
+playwright-report/
+test-results/
+blob-report/

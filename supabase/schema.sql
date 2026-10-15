@@ -908,6 +908,21 @@ create policy voice_memos_owner_delete on storage.objects
 -- not a claim of poetic authority — and NOT the right sort key on its own
 -- for a "show me everything, common and cool first" word bank (see
 -- src/utils/lexicon.js's queryWordBank for the actual blended sort).
+--
+-- CAPACITY NOTE (2026-10-15): `syllables >= 6` rows were bulk-deleted
+-- (+ VACUUM FULL) to fit the Supabase free-tier 0.5GB database-size limit —
+-- lexicon alone was 489MB of a 543MB total, almost entirely from the
+-- Catalan seed's deliberate choice to keep every inflected verb form (see
+-- scripts/seed-lexicon-softcatala.ts's own comment), not from junk/non-
+-- words — function words were already excluded at seed time (KEEP_POS).
+-- 6+-syllable words are genuinely rare in singable lyrics, so this was the
+-- least damaging cut available on the EXISTING data; it was NOT a quality
+-- cleanup. Known tradeoff, not a bug: queries for long/compound words will
+-- come back thinner than the real dictionaries actually have. Reversible
+-- by re-seeding (npm run seed:lexicon / seed:lexicon:ca) without the cap
+-- once there's budget for a paid plan (or a smarter seed-time filter that
+-- keeps lemmas but drops conjugated forms — see the two seed scripts'
+-- own comments on why that wasn't done at seed time either).
 -- ─────────────────────────────────────────────────────────────────────────────
 
 create table if not exists lexicon (
@@ -1363,8 +1378,12 @@ create policy project_invites_owner on project_invites
 --     project or rewrite who owns it. ───────────────────────────────────────
 drop policy if exists songs_owner on songs;
 
+-- user_id = auth.uid() first, is_song_participant(id) second — see
+-- migration_project_collaboration.sql's own comment on this exact line:
+-- the owner's read access shouldn't depend only on a row an AFTER INSERT
+-- trigger creates in a different table within the same statement.
 create policy songs_select on songs
-  for select using (is_song_participant(id));
+  for select using (user_id = auth.uid() or is_song_participant(id));
 
 create policy songs_update on songs
   for update using (is_song_participant(id)) with check (is_song_participant(id));

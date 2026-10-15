@@ -21,15 +21,23 @@ const SWIPE_SLOP = 6; // px of horizontal travel before a touch commits to being
 // row, finishing the drag from the row's own onTouchEnd), which worked in
 // every test here because testing never kept one real finger down across
 // the state change that follows onDragStart: the moment a drag begins, the
-// PARENT swaps its whole rendered content (sheet shrinks to a strip, the
-// row list — including this row — unmounts). A touch sequence whose origin
-// element just left the DOM stops being delivered to it; on a real device
-// this read as "drag picks up, then the sheet just freezes" (reported
-// 2026-10-08), not an error, because nothing threw — the events simply had
-// nowhere left to go. The fix is in ResourcePickerSheet itself (via
-// useLineDragDrop.js): it owns the live drag via document-level listeners
-// from the moment onDragStart fires, so it doesn't matter that the row that
-// started it is gone a frame later.
+// PARENT used to swap its whole rendered content (sheet shrinks to a strip,
+// the row list — including this row — unmounted). A touch sequence whose
+// origin element left the DOM stopped being delivered to it; on a real
+// device this read as "drag picks up, then the sheet just freezes"
+// (reported 2026-10-08), not an error, because nothing threw — the events
+// simply had nowhere left to go. Moving the live drag to document-level
+// listeners (useLineDragDrop.js) looked like the fix but wasn't the whole
+// one — a touch's move/end are bound to whatever element was hit at
+// touchstart for the gesture's whole lifetime, and once THAT element is
+// detached from the document it has no path up to `document` for those
+// listeners to catch either (reconfirmed on a real phone via BrowserStack
+// as "it worked after I re-tapped it", 2026-10-15, then root-caused via
+// Playwright CDP touch events the same day). The actual fix is that the
+// row list no longer unmounts during a drag at all — see
+// .res-picker-sheet-content in style.css and this file's own render: the
+// drag hint renders alongside the list, not instead of it, and only the
+// shrunk sheet's overflow:hidden hides the list visually.
 //
 // This row still owns its OWN swipe-to-reveal gesture locally (useLongPressDrag
 // only replaces the long-press-timing half) — `lp.move` is composed into the
@@ -162,10 +170,13 @@ export default function ResourcePickerSheet({ userId, onInsert, onClose, onDragH
       >
         <div className="ts-grabber" {...dismissHandlers} />
 
-        {drag ? (
-          <p className="res-picker-drag-hint">Suelta sobre un verso para añadirlo ahí</p>
-        ) : (
-          <>
+        {/* Renders ALONGSIDE the normal content below, not instead of it —
+            see .res-picker-sheet-content's own comment in style.css for why
+            the row list has to stay mounted through the whole drag rather
+            than being swapped out for this hint. */}
+        {drag && <p className="res-picker-drag-hint">Suelta sobre un verso para añadirlo ahí</p>}
+
+        <div className={`res-picker-sheet-content${drag ? ' res-picker-drag-hidden' : ''}`}>
             <div className="res-picker-head" {...dismissHandlers}>
               <div className="attach-title">Recursos</div>
               <div className="mp-search res-picker-search">
@@ -205,8 +216,7 @@ export default function ResourcePickerSheet({ userId, onInsert, onClose, onDragH
                 />
               ))}
             </div>
-          </>
-        )}
+        </div>
       </div>
 
       {drag && (

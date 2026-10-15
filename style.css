@@ -5463,6 +5463,17 @@ body::before {
    this off costs the hit-test nothing. Reported 2026-10-09 as the drag
    freezing mid-gesture. */
 .ne-sheet-drag-active .ne-line-input { pointer-events: none; }
+/* The textarea fix above only covers ONE element — .ne-body (this row's
+   actual scrollable ancestor, overflow-y:auto, no touch-action restriction
+   of its own) is a SEPARATE native-gesture-claiming risk: once the finger
+   clears the (now pass-through) textarea, the hit-test resolves to
+   whatever's underneath, and if that's ultimately .ne-body itself (e.g.
+   hovering a row's own padding/gutter rather than text), the browser is
+   still free to read a vertical pan there as "scroll this container" and
+   cancel the drag with a touchcancel no JS can recover from — same failure
+   mode as the textarea one, one layer further out. Reported 2026-10-15 as
+   "the drag stops the instant it leaves the sheet". */
+.ne-sheet-drag-active { touch-action: none; }
 
 .ne-row {
     display: flex;
@@ -8036,9 +8047,39 @@ body::before {
 .res-picker-scrim-dragging { background: rgba(29, 28, 26, 0.04); transition: background 0.2s ease; pointer-events: none; }
 .res-picker-sheet-shrunk {
     max-height: 56px;
+    overflow: hidden;
     transition: max-height 0.2s cubic-bezier(0.32, 0.72, 0, 1);
 }
 .res-picker-sheet:not(.res-picker-sheet-shrunk) { transition: max-height 0.2s cubic-bezier(0.32, 0.72, 0, 1); }
+
+/* Wraps the sheet's normal (non-strip) content — ChordStrumSheet's own
+   cs-head+cs-body, ResourcePickerSheet's res-picker-head+res-picker-list.
+   Always mounted, even mid-drag — only visually clipped away by
+   .res-picker-sheet-shrunk's max-height+overflow:hidden above, never
+   unmounted. The chip/row that actually received the touchstart has to
+   stay in the DOM for that touch's whole move/end sequence: the browser
+   permanently binds those events to whichever element was hit at
+   touchstart, and a target removed from the document mid-gesture has
+   nowhere left to deliver them to (MDN's own documented touch-events
+   gotcha) — capturing move/end at the document level (useLineDragDrop.js)
+   doesn't help once that happens, since a detached node has no path up to
+   document to propagate through either. That's what silently killed the
+   drag before swapping the content for the strip was believed to be a
+   complete fix (reported as "drag picks up then the sheet just freezes",
+   2026-10-08, and again on a real phone via BrowserStack as "it worked
+   after I re-tapped it", 2026-10-15, and finally reproduced + root-caused
+   via Playwright CDP touch events, 2026-10-15) — losing the chip's
+   visibility during a drag was always the intent, losing its DOM node
+   wasn't. flex/min-height mirror .cs-sheet/.res-picker-sheet's own column
+   layout so wrapping the content in one more div changes nothing about
+   how it's sized when not dragging. */
+.res-picker-sheet-content {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+}
+.res-picker-drag-hidden { pointer-events: none; }
 .res-picker-drag-hint {
     margin: 0;
     padding: var(--space-1) var(--space-4) var(--space-3);

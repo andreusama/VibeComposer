@@ -284,8 +284,21 @@ create policy project_invites_owner on project_invites
 --     project or rewrite who owns it. ───────────────────────────────────────
 drop policy if exists songs_owner on songs;
 
+-- user_id = auth.uid() first, is_song_participant(id) second — not just
+-- the latter alone. songs carries an AFTER INSERT trigger
+-- (trg_song_owner_collaborator, above) that creates the owner's
+-- project_collaborators row; routing the owner's OWN read access entirely
+-- through that trigger-created row meant `insert ... returning` (what
+-- createProject's own supabase-js call does) could fail its RLS recheck
+-- against a side-effect that hadn't necessarily become visible yet within
+-- the SAME statement (reported 2026-10-15 — a real, reproducible failure,
+-- not a one-off). The owner's own row is a direct, trigger-independent
+-- fact (songs.user_id itself) and doesn't need the join table to prove it
+-- — only a COLLABORATOR (not the owner) genuinely needs
+-- is_song_participant, and they're never reading a row a trigger just
+-- created in the same statement they're running.
 create policy songs_select on songs
-  for select using (is_song_participant(id));
+  for select using (user_id = auth.uid() or is_song_participant(id));
 
 create policy songs_update on songs
   for update using (is_song_participant(id)) with check (is_song_participant(id));

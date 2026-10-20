@@ -60,7 +60,7 @@ const LONG_PRESS_COPY_SLOP = 10;
 function LineRow({
   id, index, text, previewText, syllables, rhyme, friction, dimmed, showPlaceholder,
   variantRanges, chords, hasHistory, justCopied, dropTarget,
-  onChange, onEnter, onBackspaceAtStart, onFocus, onBlurLine, onSelectionChange, onFrictionTap, onVariantTap, onHistoryTap, onLongPressCopy, onRemoveChord, onMoveChordStart, inputRef,
+  onChange, onEnter, onBackspaceAtStart, onPasteLines, onFocus, onBlurLine, onSelectionChange, onFrictionTap, onVariantTap, onHistoryTap, onLongPressCopy, onRemoveChord, onMoveChordStart, inputRef,
 }) {
   // Live, not just on submit — the moment the line reads as addressing the
   // muse (the wake word + its disambiguating comma/colon typed), the row's
@@ -111,6 +111,26 @@ function LineRow({
   const handleInput = useCallback((e) => {
     onChange(index, e.target.value);
   }, [index, onChange]);
+
+  // A plain single-line paste needs nothing special — the native paste
+  // already lands correctly in a <textarea> value, same as typing. But
+  // this is a ONE-ROW-PER-VERSE-LINE editor (rows={1}; `lines` is the
+  // real source of truth, not the textarea's own value), and a paste that
+  // carries embedded newlines (copying several lyric lines, or a whole
+  // verse, from Notes/a lyrics site/another part of this app) would
+  // otherwise land as ONE row whose value just happens to contain raw \n
+  // characters — syllables/rhyme/chords for that "line" then get computed
+  // against the whole multi-line blob as if it were a single verse line,
+  // and the gutter shows one syllable count for all of it (reported
+  // 2026-10-20). Intercepted here and handed to onPasteLines, which does
+  // the actual line-array splice (same shape handleEnter already uses to
+  // split one line into two, generalized to N).
+  const handlePaste = useCallback((e) => {
+    const pasted = e.clipboardData?.getData('text/plain');
+    if (!pasted || !pasted.includes('\n')) return; // nothing embedded — let the native paste happen
+    e.preventDefault();
+    onPasteLines(index, e.target.selectionStart, e.target.selectionEnd, pasted);
+  }, [index, onPasteLines]);
 
   const handleKeyDown = useCallback((e) => {
     if (e.key === 'Enter') {
@@ -234,6 +254,7 @@ function LineRow({
           onClick={handleClick}
           onBlur={() => onBlurLine(index)}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
         />
       </div>
     </div>
@@ -715,6 +736,37 @@ export default function NoteEditorScreen({
     pendingFocusRef.current = { id: newLine.id, caret: 0 };
     pendingFrictionCheckRef.current = true;
   }, [lines, persist, getLineRect, pushUndo]);
+
+  // LineRow's own handlePaste → a paste that carries embedded newlines.
+  // Same splice shape handleEnter already uses to split one line into two
+  // at the caret, generalized to N: the text before the selection and the
+  // PASTE's own first line merge into the original row, the paste's last
+  // line merges with whatever was after the selection (so pasting midway
+  // through a line properly keeps both halves instead of orphaning one),
+  // and everything the paste carried in between becomes brand-new rows.
+  // splitIntoLines (textLines.js) is what strips \r and trims stray
+  // leading/trailing whitespace off each pasted line — the same function
+  // this screen's own initial load already trusts for "what counts as one
+  // line", so a paste and a freshly-loaded note are held to one standard,
+  // not two. A selection gets replaced, not just a collapsed caret grown.
+  const handlePasteLines = useCallback((index, selectionStart, selectionEnd, pastedText) => {
+    const parts = splitIntoLines(pastedText);
+    if (parts.length <= 1) return; // nothing to split — shouldn't reach here, but a no-op is the safe fallback
+    pushUndo(lines);
+    const line = lines[index];
+    const before = line.text.slice(0, selectionStart);
+    const after = line.text.slice(selectionEnd);
+    const next = [...lines];
+    next[index] = { ...line, text: before + parts[0] };
+    const inserted = parts.slice(1, -1).map((partText) => ({ id: crypto.randomUUID(), text: partText }));
+    const lastPart = parts[parts.length - 1];
+    const lastLine = { id: crypto.randomUUID(), text: lastPart + after };
+    next.splice(index + 1, 0, ...inserted, lastLine);
+    setLines(ensureTrailingEmpty(next));
+    persist(next);
+    pendingFocusRef.current = { id: lastLine.id, caret: lastPart.length };
+    pendingFrictionCheckRef.current = true;
+  }, [lines, persist, pushUndo]);
 
   // The other half of Enter's symmetry: Backspace at the very start of a
   // line (collapsed caret, not deleting a selection) merges it into the
@@ -1543,6 +1595,7 @@ export default function NoteEditorScreen({
             hasHistory={lineHistoryByIndex[i]?.length > 0}
             onChange={handleLineChange}
             onEnter={handleEnter}
+            onPasteLines={handlePasteLines}
             onBackspaceAtStart={handleBackspaceAtStart}
             onFocus={handleRowFocus}
             onBlurLine={handleBlurLine}

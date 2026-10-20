@@ -50,9 +50,28 @@ let state = {
 // doesn't depend on auth state at all).
 captureInviteFromUrl();
 
+// This is the single gate the ENTIRE app sits behind on every boot
+// (main.js's render(): `if (!state.sessionChecked) { show LoadingScreen;
+// return; }`, nothing else ever renders until this resolves) — so it gets
+// a `.catch()` no matter how deep the Supabase SDK's own internal error
+// handling goes. getSession() stays fast in the common case (a cached,
+// non-expired session resolves straight from localStorage, no network
+// call at all) but falls through to a real token-refresh request when the
+// cached session has expired, and that request can fail or stall like any
+// other — the client-level fetch timeout (supabaseClient.js) now bounds
+// how LONG that can hang, but a plain `.then()` with nothing to catch an
+// eventual rejection still leaves sessionChecked stuck at its initial
+// `false` forever, which means the loading screen that's covering the
+// entire app never goes away either — reported 2026-10-20 as "infinite
+// loading when entering the page". Treating a failure as "no session" is
+// the safe fallback either way: worst case the person lands on the auth
+// screen and signs in again, instead of staring at a loading screen with
+// no recovery.
 getSession().then((session) => {
   setState({ session, sessionChecked: true });
   if (session) consumeStoredInvite();
+}).catch(() => {
+  setState({ session: null, sessionChecked: true });
 });
 onAuthChange((session) => {
   setState({ session });

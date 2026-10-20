@@ -71,7 +71,12 @@ const samePlacement = (a, b) => {
 // itself can be the one thing guaranteed to outlive the gesture — same
 // reasoning ChordChip and ResourcePickerRow's own comments give for why
 // they hand the drag off rather than track it locally.
-function ChordPillView({ chord: c, placement: p, armed, onArm, onDismissArm, onRemove, onMoveStart, pillRef }) {
+//
+// `readOnly` (SongPerformanceScreen's full-song read-through, 2026-10-20):
+// the exact same pill, just inert — no arm/delete, no long-press-to-move.
+// That screen is a read-through, not an editing surface; a chord symbol
+// there is notation to glance at, not a control.
+function ChordPillView({ chord: c, placement: p, armed, onArm, onDismissArm, onRemove, onMoveStart, pillRef, readOnly }) {
   const lp = useLongPressDrag({ onDragStart: (payload, x, y) => onMoveStart?.(payload, x, y) });
 
   // A preview entry (NoteEditorScreen's previewChordsByLine): the phantom
@@ -84,6 +89,18 @@ function ChordPillView({ chord: c, placement: p, armed, onArm, onDismissArm, onR
       <span
         ref={pillRef}
         className="lc-pill lc-pill-preview"
+        style={p ? { left: p.left, top: p.top, width: p.width } : { left: 0, top: 0, visibility: 'hidden' }}
+      >
+        {c.chordName}
+      </span>
+    );
+  }
+
+  if (readOnly) {
+    return (
+      <span
+        ref={pillRef}
+        className="lc-pill lc-pill-readonly"
         style={p ? { left: p.left, top: p.top, width: p.width } : { left: 0, top: 0, visibility: 'hidden' }}
       >
         {c.chordName}
@@ -120,7 +137,13 @@ function ChordPillView({ chord: c, placement: p, armed, onArm, onDismissArm, onR
   );
 }
 
-export default function LineChordStrip({ text, chords, onRemove, onMoveStart }) {
+// `readOnly`: this strip IS the visible line (SongPerformanceScreen), not
+// an invisible measuring copy sitting behind a real, visible <textarea>
+// (every other caller). Same measuring/positioning code either way — the
+// mirror's own content and the DOM Range math it feeds computeChordSpans
+// through don't care whether the mirror is painted transparent or not —
+// only the render at the bottom and a couple of classNames change.
+export default function LineChordStrip({ text, chords, onRemove, onMoveStart, readOnly }) {
   const mirrorRef = useRef(null);
   const pillRefs = useRef({});
   const [placement, setPlacement] = useState({}); // id → { left, top }
@@ -203,14 +226,23 @@ export default function LineChordStrip({ text, chords, onRemove, onMoveStart }) 
     <>
       {/* The measuring/hit-testing mirror. Plain text in a single text node
           on purpose — a Range needs one, and it is also what
-          offsetFromMirrorPoint walks character by character. */}
-      <div ref={mirrorRef} className="line-highlight lc-mirror" aria-hidden="true">{text || ''}</div>
+          offsetFromMirrorPoint walks character by character. Transparent
+          and aria-hidden everywhere EXCEPT readOnly: there, there is no
+          separate real <textarea> rendering this line visibly elsewhere —
+          this mirror IS the line, so it has to actually be seen and read. */}
+      <div
+        ref={mirrorRef}
+        className={`line-highlight lc-mirror${readOnly ? ' lc-mirror-readonly' : ''}`}
+        aria-hidden={readOnly ? undefined : 'true'}
+      >{text || ''}</div>
 
       {list.length > 0 && (
         /* aria-hidden: the chords are decoration over a textarea whose value
            a screen reader already reads; announcing "Am" mid-sentence from a
            separate layer would interleave into the lyric. The chord list is
-           reachable as real content from the sheet instead. */
+           reachable as real content from the sheet instead. Still true in
+           readOnly mode — the mirror above now carries the real, readable
+           text, so this stays supplementary notation either way. */
         <div className="lc-layer" aria-hidden="true">
           {list.map((c) => {
             const p = placement[c.id];
@@ -224,6 +256,7 @@ export default function LineChordStrip({ text, chords, onRemove, onMoveStart }) 
                 onDismissArm={() => { clearTimeout(armTimerRef.current); setArmedId(null); }}
                 onRemove={onRemove}
                 onMoveStart={onMoveStart}
+                readOnly={readOnly}
                 pillRef={(el) => { if (el) pillRefs.current[c.id] = el; else delete pillRefs.current[c.id]; }}
               />
             );

@@ -22,6 +22,20 @@ export async function loadLineChords(lineId) {
     .order('position');
 }
 
+// The same read, for every block's lineId in one song at once — the full
+// song read-through (SongPerformanceScreen.jsx) needs every section's
+// chords together, not one query per block. One request either way; `.in`
+// just lets Postgres do the fan-out instead of the client firing N of
+// loadLineChords's own query in parallel.
+export async function loadLineChordsForLines(lineIds) {
+  if (!lineIds?.length) return { data: [] };
+  return supabase.from('line_chords')
+    .select('*')
+    .in('line_id', lineIds)
+    .order('line_index')
+    .order('position');
+}
+
 export async function addLineChord(lineId, lineIndex, { chordName, position }) {
   return supabase.from('line_chords')
     .insert({

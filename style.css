@@ -4979,12 +4979,20 @@ body::before {
     letter-spacing: 0.02em;
     margin-bottom: var(--space-2);
 }
-.perf-line {
-    font-family: var(--font-serif);
-    font-size: 21px;
-    line-height: 1.6;
-    color: var(--ink);
-    margin: 0;
+/* One line's whole box — .perf-line's own font/size/line-height moved onto
+   LineChordStrip's readonly mirror (.lc-mirror-readonly) now that each
+   line can carry a chord layer (2026-10-20); this wrapper's only job is
+   `position: relative`, the anchor .lc-layer's absolute pill positions
+   need. Chordless lines (the common case) render identically either way —
+   this is a transparent, zero-size wrapper around the exact same text. */
+.perf-line-wrap { position: relative; }
+/* Same reasoning as the editor's own .ne-row-has-chords: a pill sitting in
+   a line's own leading needs room reserved above it, or it overlaps the
+   line before it. Scaled up from the editor's own +~1 line-height-unit,
+   +12px bump for this screen's larger 21px type. */
+.perf-line-wrap-has-chords .lc-mirror-readonly {
+    line-height: 2.6;
+    padding-top: 14px;
 }
 
 /* Long-press-to-copy the whole card's text (SongThreadScreen.jsx). A
@@ -8510,6 +8518,29 @@ body::before {
     overflow: visible;
     pointer-events: none;
 }
+
+/* SongPerformanceScreen's read-through (2026-10-20) — the mirror IS the
+   visible line here (see LineChordStrip.jsx's own readOnly comment), so
+   the shared .line-highlight rule's transparent/absolutely-positioned
+   measuring-copy styling has to come back off: real ink colour, back in
+   normal document flow (not inset:0 over a textarea that doesn't exist on
+   this screen), matching .perf-line's own serif/size/line-height exactly
+   so a chorded line reads at the same scale as every other line around
+   it. overflow:visible (not .line-highlight's hidden) because a pill
+   sitting in this row's own leading must not get clipped by it. */
+.lc-mirror-readonly {
+    position: static;
+    color: var(--ink);
+    pointer-events: auto;
+    overflow: visible;
+    font-family: var(--font-serif);
+    font-size: 21px;
+    line-height: 1.6;
+}
+/* A glance-at symbol, not a control, on this screen — same face as the
+   editor's own pill (one chord vocabulary, not two), just without the
+   pointer cursor an inert span shouldn't imply. */
+.lc-pill-readonly { cursor: default; }
 
 .lc-pill {
     position: absolute;

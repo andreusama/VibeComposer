@@ -1342,11 +1342,33 @@ export default function NoteEditorScreen({
     setWordVariantSheet({ variantId });
   }, []);
 
+  // Same focus-restoring close as closeChordSheet/closePopover (see
+  // closeChordSheet's own comment for the full mechanism) — opening this
+  // sheet (handleAddVariantFromSelection) nulls focusedIndex on the same
+  // "opening it also blurs the textarea" assumption those make too.
+  // `overrideLineIndex` covers the three callers that already know exactly
+  // which line they just touched (draft.lineIndex / variant.line_index);
+  // the sheet's own cancel doesn't, so it falls back to resolving the
+  // CURRENT wordVariantSheet state, whichever of its two shapes it's in.
+  const closeWordVariantSheet = useCallback((overrideLineIndex) => {
+    let targetLineIndex = overrideLineIndex;
+    if (targetLineIndex == null) {
+      if (wordVariantSheet?.draft) targetLineIndex = wordVariantSheet.draft.lineIndex;
+      else if (wordVariantSheet?.variantId) {
+        targetLineIndex = wordVariants.find((v) => v.id === wordVariantSheet.variantId)?.line_index;
+      }
+    }
+    setWordVariantSheet(null);
+    if (targetLineIndex == null || !lines[targetLineIndex]) return;
+    setFocusedIndex(targetLineIndex);
+    rowRefs.current[lines[targetLineIndex].id]?.focus();
+  }, [wordVariantSheet, wordVariants, lines]);
+
   const handleCreateWordVariant = useCallback(async (draft, options) => {
     const { data, error } = await addWordVariant(note.id, draft.lineIndex, options, draft.before, 0);
     if (!error && data) setWordVariants((cur) => [...cur, data]);
-    setWordVariantSheet(null);
-  }, [note.id]);
+    closeWordVariantSheet(draft.lineIndex);
+  }, [note.id, closeWordVariantSheet]);
 
   // Swap which wording sits in the line. `nextOptions` may also carry edits
   // to the options list itself (rename/add/remove from the manage sheet).
@@ -1365,14 +1387,14 @@ export default function NoteEditorScreen({
     }
     const { data } = await updateWordVariant(variant.id, { options: nextOptions, active_index: nextActiveIndex });
     setWordVariants((cur) => cur.map((v) => (v.id === variant.id ? (data || { ...v, options: nextOptions, active_index: nextActiveIndex }) : v)));
-    setWordVariantSheet(null);
-  }, [lines, persist, pushUndo, logLineHistory]);
+    closeWordVariantSheet(variant.line_index);
+  }, [lines, persist, pushUndo, logLineHistory, closeWordVariantSheet]);
 
   const handleDeleteWordVariant = useCallback(async (variant) => {
     await deleteWordVariant(variant.id);
     setWordVariants((cur) => cur.filter((v) => v.id !== variant.id));
-    setWordVariantSheet(null);
-  }, []);
+    closeWordVariantSheet(variant.line_index);
+  }, [closeWordVariantSheet]);
 
   // ─── Per-line history sheet ───────────────────────────────────────────────
   const handleHistoryTap = useCallback((index) => setLineHistorySheet(index), []);
@@ -1497,10 +1519,30 @@ export default function NoteEditorScreen({
     setPreviewOverride(text != null && activePopover ? { lineIndex: activePopover.lineIndex, text } : null);
   }, [activePopover]);
 
-  const handlePopoverClose = useCallback(() => {
+  // openPopover/handleAskMuse/handleCultureFromSelection all null
+  // focusedIndex on the assumption that opening the popover also blurs the
+  // textarea — true for a genuine tap on Musa/Rima/Ángulo cultural, but the
+  // SAME class of bug fixed for the chord/resource sheets (2026-10-16:
+  // "I can only add a few chords" — see closeChordSheet's own comment for
+  // the full mechanism) lives here too: if DOM focus genuinely doesn't
+  // leave the textarea for whatever reason on a given device, re-tapping
+  // the SAME still-focused line does nothing (a browser never re-fires
+  // 'focus' on an element that's already the activeElement), and
+  // KeyboardAccessoryBar — whose own mount condition is focusedIndex !=
+  // null — just doesn't come back. This app's own existing comments
+  // already flag iOS blur/focus timing as unreliable (handleBlurLine's
+  // "on iOS the blur beats the accessory-bar button's click"), so trusting
+  // a tap to always blur cleanly is exactly the kind of assumption that
+  // holds on desktop Chrome and not everywhere. Restoring focus directly
+  // here — not waiting on a native blur/focus pair — fixes it regardless.
+  const closePopover = useCallback(() => {
+    const targetLineIndex = activePopover?.lineIndex;
     setActivePopover(null);
     setPreviewOverride(null);
-  }, []);
+    if (targetLineIndex == null || !lines[targetLineIndex]) return;
+    setFocusedIndex(targetLineIndex);
+    rowRefs.current[lines[targetLineIndex].id]?.focus();
+  }, [activePopover, lines]);
 
   const handleTypeChange = useCallback((e) => {
     const val = e.target.value;
@@ -1652,7 +1694,7 @@ export default function NoteEditorScreen({
           sectionId={note.id}
           anchorRect={activePopover.anchorRect}
           originIsReal={Boolean(activePopover.originIsReal)}
-          onClose={handlePopoverClose}
+          onClose={closePopover}
           onReplace={handlePopoverReplace}
           onInsertBelow={handlePopoverInsertBelow}
           onPreviewText={handlePopoverPreviewText}
@@ -1674,7 +1716,7 @@ export default function NoteEditorScreen({
         <WordVariantSheet
           variant={wordVariantSheet.variantId ? wordVariants.find((v) => v.id === wordVariantSheet.variantId) : null}
           draft={wordVariantSheet.draft || null}
-          onClose={() => setWordVariantSheet(null)}
+          onClose={() => closeWordVariantSheet()}
           onCreate={handleCreateWordVariant}
           onSave={handleSaveWordVariant}
           onDelete={handleDeleteWordVariant}

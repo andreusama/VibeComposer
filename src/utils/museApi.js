@@ -15,7 +15,7 @@
 // it's resolving an unfinished thought, sometimes it's just direction, and
 // sometimes it's raw vocabulary, not crafted lines.
 
-import {API_URL, checkAndIncrementLimit} from './api.js';
+import {fetchClaude, checkAndIncrementLimit} from './api.js';
 import {getLineRhymeKey, getWordRhymeKey, wordMatchesRhyme, lineMeter} from './rhyme.js';
 import {splitIntoLines} from './textLines.js';
 import {significantWords} from './repeatedWords.js';
@@ -29,16 +29,18 @@ export const MUSE_TYPES = ['CONTINUITY', 'CONTRAST', 'RESOLUTION'];
 
 async function callClaude(system, userContent, maxTokens) {
     checkAndIncrementLimit();
-    const response = await fetch(API_URL, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-            model: MUSE_MODEL,
-            max_tokens: maxTokens,
-            thinking: {type: 'disabled'},
-            system,
-            messages: [{role: 'user', content: userContent}],
-        }),
+    // fetchClaude (api.js) is what gives this a hard timeout — a bare
+    // fetch() here had none at all, so a stalled response left Musa's own
+    // "thinking…" spinner stuck forever: the try/finally every caller of
+    // askMuse already wraps its own await in only runs once the awaited
+    // promise actually settles, and a fetch that never resolves or
+    // rejects never does (reported 2026-10-20).
+    const response = await fetchClaude({
+        model: MUSE_MODEL,
+        max_tokens: maxTokens,
+        thinking: {type: 'disabled'},
+        system,
+        messages: [{role: 'user', content: userContent}],
     });
     if (!response.ok) throw new Error(`API error ${response.status}`);
     const data = await response.json();

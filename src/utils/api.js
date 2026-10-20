@@ -6,6 +6,46 @@ import { SYSTEM_PROMPT } from '../constants.js';
 export const API_URL = '/api/claude';
 const API_MODEL = 'claude-sonnet-4-5';
 
+// Every direct Claude call in the app (composeProgression/callClaudeOnce
+// below, museApi.js's own callClaude) went through a bare fetch() with no
+// timeout at all — unlike supabaseClient.js's requests (now hard-timed out
+// at the client level), none of THESE calls are even covered by that fix,
+// since they don't go through the Supabase client. A stalled response left
+// whatever feature was waiting (Musa's "thinking…" spinner, Baúl
+// processing, resource-import segmentation) stuck forever: the try/finally
+// each caller already wraps its own await in only runs once the awaited
+// promise actually SETTLES, and a fetch that never resolves or rejects
+// never does — reported 2026-10-20 as "anything that can break the flow".
+// 60s, not the Supabase client's 12s: a real non-streamed completion over
+// a slow connection can legitimately take a while, and a timeout tuned for
+// "fetch some rows" would cut off genuinely-in-progress, successful
+// responses just as often as actually-stalled ones.
+const CLAUDE_TIMEOUT_MS = 60000;
+
+// The one place that actually calls fetch(API_URL, …) — composeProgression,
+// callClaudeOnce and museApi.js's own callClaude all build a different
+// request body, but the timeout/abort plumbing around it is identical, so
+// it only has to be right in one place.
+export async function fetchClaude(body) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), CLAUDE_TIMEOUT_MS);
+  try {
+    return await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err?.name === 'AbortError') {
+      throw new Error("Couldn't reach the Muse — the request took too long. Check your connection and try again.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ─── Toggle to avoid API calls during visual development ──────────────────────
 const MOCK_MODE = false;
 
@@ -28,15 +68,11 @@ export async function composeProgression(vibeProfile) {
   
    checkAndIncrementLimit();
 
-  const response = await fetch(API_URL, {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model:      API_MODEL,
-      max_tokens: 1000,
-      system:     SYSTEM_PROMPT,
-      messages:   [{ role: 'user', content: JSON.stringify(vibeProfile) }],
-    }),
+  const response = await fetchClaude({
+    model:      API_MODEL,
+    max_tokens: 1000,
+    system:     SYSTEM_PROMPT,
+    messages:   [{ role: 'user', content: JSON.stringify(vibeProfile) }],
   });
 
   if (!response.ok) throw new Error(`API error ${response.status}`);
@@ -66,21 +102,17 @@ export function getUsageRemaining() {
 // copy-pasted per feature.
 export async function callClaudeOnce({ model, system, userContent, maxTokens }) {
   checkAndIncrementLimit();
-  const response = await fetch(API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model,
-      max_tokens: maxTokens,
-      // These are fixed-shape JSON extraction tasks, not conversation —
-      // claude-sonnet-5 defaults to extended thinking, which can quietly eat
-      // the entire max_tokens budget and leave zero room for the actual
-      // answer (stop_reason "max_tokens", no text block at all). Disabling
-      // it is what makes this reliably return the JSON instead of nothing.
-      thinking: { type: 'disabled' },
-      system,
-      messages: [{ role: 'user', content: userContent }],
-    }),
+  const response = await fetchClaude({
+    model,
+    max_tokens: maxTokens,
+    // These are fixed-shape JSON extraction tasks, not conversation —
+    // claude-sonnet-5 defaults to extended thinking, which can quietly eat
+    // the entire max_tokens budget and leave zero room for the actual
+    // answer (stop_reason "max_tokens", no text block at all). Disabling
+    // it is what makes this reliably return the JSON instead of nothing.
+    thinking: { type: 'disabled' },
+    system,
+    messages: [{ role: 'user', content: userContent }],
   });
   if (!response.ok) throw new Error(`API error ${response.status}`);
   const data = await response.json();

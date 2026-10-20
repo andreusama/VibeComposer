@@ -7,6 +7,16 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('./api.js', () => ({
   API_URL: '/api/claude',
   checkAndIncrementLimit: vi.fn(),
+  // museApi.js's own callClaude calls this instead of a bare fetch() now
+  // (api.js's fetchClaude adds a timeout — see its own comment) — the mock
+  // just needs to still hit the global fetch these tests stub, with the
+  // same shape, so every `global.fetch.mock.calls[0][1]` assertion below
+  // keeps reading the real request body.
+  fetchClaude: (body) => fetch('/api/claude', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }),
 }));
 
 // lexicon.js imports the real Supabase client (supabaseClient.js), which

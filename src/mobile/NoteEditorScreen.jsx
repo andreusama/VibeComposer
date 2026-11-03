@@ -27,6 +27,7 @@ import { lineIndexFromPoint } from '../utils/lineHitTest.js';
 import useLineDragDrop from './useLineDragDrop.js';
 import LineDragPill from './LineDragPill.jsx';
 import { IcChevronLeft, IcMuse, IcHistory, IcTrash, IcPencil, IcTools } from './icons.jsx';
+import { applySuggestionToLine } from '../utils/suggestionReplace.js';
 
 // The "talk to the muse right inside the lyric" pattern from the design
 // ref — always the same wake word, like addressing Alexa, so it reads
@@ -1488,14 +1489,14 @@ export default function NoteEditorScreen({
     clearTimeout(copiedFlashTimerRef.current);
   }, []);
 
-  const handlePopoverReplace = useCallback((newText) => {
+  const handlePopoverReplace = useCallback((newText, scope) => {
     if (!activePopover?.targetVerse) return;
     const { targetVerse, lineIndex } = activePopover;
     const previousText = lines[lineIndex]?.text ?? '';
     pushUndo(lines);
     logLineHistory(lineIndex, previousText);
     const nextLines = [...lines];
-    nextLines[lineIndex] = { ...nextLines[lineIndex], text: targetVerse.before + newText + targetVerse.after };
+    nextLines[lineIndex] = { ...nextLines[lineIndex], text: applySuggestionToLine(targetVerse, newText, scope) };
     setLines(ensureTrailingEmpty(nextLines));
     persist(nextLines);
     clearTimeout(undoTimerRef.current);
@@ -1515,8 +1516,13 @@ export default function NoteEditorScreen({
     handleInsertLineAfter(activePopover.lineIndex, newText);
   }, [activePopover, handleInsertLineAfter]);
 
-  const handlePopoverPreviewText = useCallback((text) => {
-    setPreviewOverride(text != null && activePopover ? { lineIndex: activePopover.lineIndex, text } : null);
+  const handlePopoverPreviewText = useCallback((text, scope) => {
+    // Preview what Reemplazar would actually produce, so the inline preview
+    // can't promise a different line than the one that lands.
+    const tv = activePopover?.targetVerse;
+    setPreviewOverride(text != null && activePopover
+      ? { lineIndex: activePopover.lineIndex, text: tv ? applySuggestionToLine(tv, text, scope) : text }
+      : null);
   }, [activePopover]);
 
   // openPopover/handleAskMuse/handleCultureFromSelection all null

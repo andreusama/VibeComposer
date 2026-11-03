@@ -19,6 +19,7 @@ import {fetchClaude, checkAndIncrementLimit} from './api.js';
 import {getLineRhymeKey, getWordRhymeKey, wordMatchesRhyme, lineMeter} from './rhyme.js';
 import {splitIntoLines} from './textLines.js';
 import {significantWords} from './repeatedWords.js';
+import {normalizeScope} from './suggestionReplace.js';
 import {logDebugEvent} from './debugLog.js';
 import {queryRhymeCandidates, queryWordBank, verifyWordsInLexicon} from './lexicon.js';
 
@@ -111,7 +112,11 @@ infieras de otra parte del mensaje, es un dato autoritativo:
 - Fragmento seleccionado: "${targetVerse.text}"
 - Línea completa donde vive ese fragmento: "${fullLine}" (antes: "${targetVerse.before}", después: "${targetVerse.after}")
 Cuando actúes en modo SURGEON sobre este fragmento, "targetLineText" en tu
-respuesta debe ser exactamente esa línea completa, copiada tal cual.`;
+respuesta debe ser exactamente esa línea completa, copiada tal cual.
+Cada sugerencia lleva un "scope" que dice QUÉ sustituye al aceptarla: "selection" = el
+"text" reemplaza SOLO el fragmento seleccionado (el resto de la línea se conserva, así
+que NO lo repitas en "text"); "line" = el "text" es la línea completa ya reescrita y
+sustituye la línea entera. Elige uno por sugerencia y haz que "text" sea coherente con él.`;
 }
 
 export function buildStaticMuseInstructions({lyricDna, blockProfile, lang = 'es', dialect = 'central'}) {
@@ -309,7 +314,7 @@ escribas operadores de código (&&, ||, !=, ternarios) como valor — el valor e
 string, número, booleano o null simple, nada más.
 
 SI action_type == "SURGEON" o "ARCHITECT":
-{"action_type": "SURGEON"|"ARCHITECT", "reasoning": "para SURGEON: el diagnóstico técnico concreto (qué estaba roto); para ARCHITECT: explicación técnica/fonética de 1 frase", "targetLineText": "línea física exacta copiada tal cual o null", "isRhymeRequest": true|false, "rhymeTargetWord": "palabra objetivo o null", "suggestions": [{"text": "verso propuesto", "type": "CONTINUITY"|"CONTRAST"|"RESOLUTION"|null}, "... (2-3 para SURGEON, 5-6 para ARCHITECT)"], "themes": ["..."]}
+{"action_type": "SURGEON"|"ARCHITECT", "reasoning": "para SURGEON: el diagnóstico técnico concreto (qué estaba roto); para ARCHITECT: explicación técnica/fonética de 1 frase", "targetLineText": "línea física exacta copiada tal cual o null", "isRhymeRequest": true|false, "rhymeTargetWord": "palabra objetivo o null", "suggestions": [{"text": "verso propuesto", "type": "CONTINUITY"|"CONTRAST"|"RESOLUTION"|null, "scope": "selection"|"line"}, "... (2-3 para SURGEON, 5-6 para ARCHITECT)"], "themes": ["..."]}
 
 SI action_type == "SOCRATIC":
 {"action_type": "SOCRATIC", "reasoning": "justificación del bloqueo, fricción fonética o reflexión", "question": {"text": "pregunta concisa o apunte de estudio", "options": ["opción A", "opción B", "opción C"]}, "themes": ["..."]}
@@ -415,6 +420,8 @@ function normalizeSuggestion(s) {
     return {
         text: s.text.trim(),
         type: MUSE_TYPES.includes(s.type) ? s.type : null,
+        // What accepting it replaces — see suggestionReplace.js for the contract.
+        scope: normalizeScope(s.scope),
     };
 }
 
@@ -620,11 +627,15 @@ export function applyMuseVerification(parsed, {
         // (which is genuinely allowed more rhythmic latitude).
         const metricTolerance = parsed.action_type === 'SURGEON' ? 1 : 2;
         if (targetLine) {
-            const targetSyllables = lineMeter(targetLine, lang, dialect);
-            if (targetSyllables > 0) {
+            // A 'selection' suggestion stands in for the selected fragment only,
+            // so its meter is measured against that fragment, not the full line.
+            const fullSyllables = lineMeter(targetLine, lang, dialect);
+            const fragmentSyllables = targetVerse?.text ? lineMeter(targetVerse.text, lang, dialect) : 0;
+            const targetFor = (s) => (s.scope === 'selection' && fragmentSyllables > 0 ? fragmentSyllables : fullSyllables);
+            if (fullSyllables > 0) {
                 const verifiedByMetric = parsed.suggestions.filter((s) => {
                     const optSyllables = lineMeter(s.text, lang, dialect);
-                    return Math.abs(optSyllables - targetSyllables) <= metricTolerance;
+                    return Math.abs(optSyllables - targetFor(s)) <= metricTolerance;
                 });
                 if (verifiedByMetric.length > 0) parsed.suggestions = verifiedByMetric;
             }

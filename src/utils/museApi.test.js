@@ -68,7 +68,7 @@ describe('parseCompanionResponse', () => {
     const result = parseCompanionResponse(JSON.stringify(SURGEON_JSON));
     expect(result.action_type).toBe('SURGEON');
     expect(result.suggestions).toHaveLength(3);
-    expect(result.suggestions[0]).toEqual({ text: 'Todo el mundo pierde el recelo', type: 'CONTINUITY' });
+    expect(result.suggestions[0]).toEqual({ text: 'Todo el mundo pierde el recelo', type: 'CONTINUITY', scope: 'selection' });
     expect(result.isRhymeRequest).toBe(true);
     expect(result.rhymeTargetWord).toBe('cielo');
     expect(result.themes).toEqual(['miedo', 'ciudad']);
@@ -279,6 +279,38 @@ describe('selectDiverseSuggestions', () => {
     ];
     const result = selectDiverseSuggestions(suggestions, 3);
     expect(result).toHaveLength(3);
+  });
+});
+
+describe('suggestion scope contract', () => {
+  it("parses each suggestion's scope and defaults a missing/unknown one to 'selection'", () => {
+    const result = parseCompanionResponse(JSON.stringify({
+      ...SURGEON_JSON,
+      suggestions: [
+        { text: 'a', type: null, scope: 'line' },
+        { text: 'b', type: null, scope: 'selection' },
+        { text: 'c', type: null },
+        { text: 'd', type: null, scope: 'whatever' },
+      ],
+    }));
+    expect(result.suggestions.map((s) => s.scope)).toEqual(['line', 'selection', 'selection', 'selection']);
+  });
+
+  it("measures a 'selection' suggestion against the selected fragment, a 'line' one against the full line", () => {
+    // Fragment 'casa' = 2 syllables, full line = 'La casa de la luna' = 6.
+    const targetVerse = { before: 'La ', text: 'casa', after: ' de la luna' };
+    const parsed = {
+      action_type: 'SURGEON', targetLineText: 'La casa de la luna', isRhymeRequest: false, rhymeTargetWord: null,
+      suggestions: [
+        { text: 'mesa', type: null, scope: 'selection' },              // 2 — fits the fragment
+        { text: 'La mesa de la luna', type: null, scope: 'line' },     // 6 — fits the line
+        { text: 'La mesa de la luna', type: null, scope: 'selection' }, // 6 — far too long for a fragment
+      ],
+    };
+    applyMuseVerification(parsed, { verseText: 'La casa de la luna', targetVerse, lang: 'es', dialect: 'central' });
+    expect(parsed.suggestions.map((s) => `${s.scope}:${s.text}`)).toEqual([
+      'selection:mesa', 'line:La mesa de la luna',
+    ]);
   });
 });
 

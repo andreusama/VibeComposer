@@ -80,9 +80,9 @@ function SuggestionCard({ suggestion, showReplace, onDiscard, onAccept, onInsert
       setDragX(dx);
     } else if (dy < 0) {
       setDragY(dy);
-      onPreview(dy < -15 ? suggestion.text : null);
+      onPreview(dy < -15 ? suggestion.text : null, suggestion.scope);
     }
-  }, [onPreview, suggestion.text]);
+  }, [onPreview, suggestion.text, suggestion.scope]);
 
   const handleTouchEnd = useCallback(() => {
     if (!dragging.current) return;
@@ -400,8 +400,8 @@ export default function MusePopover({
     });
   }, [send]);
 
-  const handleAccept = useCallback((text) => {
-    if (targetVerse) onReplace(text); else onInsertBelow(text);
+  const handleAccept = useCallback((text, scope) => {
+    if (targetVerse) onReplace(text, scope); else onInsertBelow(text);
     onClose();
   }, [targetVerse, onReplace, onInsertBelow, onClose]);
 
@@ -837,7 +837,7 @@ export default function MusePopover({
                 suggestion={queue[0]}
                 showReplace={!!targetVerse}
                 onDiscard={handleDiscard}
-                onAccept={() => handleAccept(queue[0].text)}
+                onAccept={() => handleAccept(queue[0].text, queue[0].scope)}
                 onInsertBelow={() => handleInsertBelowExplicit(queue[0].text)}
                 onPreview={onPreviewText}
               />

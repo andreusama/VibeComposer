@@ -7,6 +7,11 @@ import react from '@vitejs/plugin-react';
 // routes /api/claude to api/claude.js instead — this proxy is dev-only.
 export default defineConfig({
   plugins: [react()],
+  // Playwright specs live in e2e/ and run with `npx playwright test`; Vitest
+  // must not try to load them (they call Playwright's own test()).
+  test: {
+    exclude: ['**/node_modules/**', 'e2e/**'],
+  },
   server: {
     proxy: {
       '/api/claude': 'http://localhost:3000',

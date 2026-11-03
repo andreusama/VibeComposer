@@ -77,7 +77,10 @@ const samePlacement = (a, b) => {
 // That screen is a read-through, not an editing surface; a chord symbol
 // there is notation to glance at, not a control.
 function ChordPillView({ chord: c, placement: p, armed, onArm, onDismissArm, onRemove, onMoveStart, pillRef, readOnly }) {
-  const lp = useLongPressDrag({ onDragStart: (payload, x, y) => onMoveStart?.(payload, x, y) });
+  // The node the finger actually went down on — handed to the drag so it can
+  // keep listening on it after React re-parents this pill (see useLineDragDrop).
+  const touchTargetRef = useRef(null);
+  const lp = useLongPressDrag({ onDragStart: (payload, x, y) => onMoveStart?.(payload, x, y, touchTargetRef.current) });
 
   // A preview entry (NoteEditorScreen's previewChordsByLine): the phantom
   // this SAME chord would occupy here if the in-flight drag ended right
@@ -119,7 +122,7 @@ function ChordPillView({ chord: c, placement: p, armed, onArm, onDismissArm, onR
       // the rendered pill itself is the only thing a drop can land "on".
       data-chord-id={c.id}
       style={p ? { left: p.left, top: p.top, width: p.width } : { left: 0, top: 0, visibility: 'hidden' }}
-      onTouchStart={(e) => { const t = e.touches[0]; lp.start(t.clientX, t.clientY, { id: c.id, chordName: c.chordName }); }}
+      onTouchStart={(e) => { const t = e.touches[0]; touchTargetRef.current = e.target; lp.start(t.clientX, t.clientY, { id: c.id, chordName: c.chordName }); }}
       onTouchMove={(e) => { const t = e.touches[0]; lp.move(t.clientX, t.clientY); }}
       onTouchEnd={lp.end}
       onTouchCancel={lp.end}

@@ -45,10 +45,46 @@ export default function useLineDragDrop({ onDragHoverLine, onDragActiveChange, o
   // closure over `drag` from whatever render set it up.
   const dragRef = useRef(null);
 
-  const beginDrag = useCallback((payload, x, y) => {
+  // Document-level handlers, mirrored into a ref so listeners bound outside
+  // the effect below (see `touchTarget` in beginDrag) always call the
+  // current ones.
+  const handlersRef = useRef(null);
+  const targetCleanupRef = useRef(null);
+
+  const unbindTouchTarget = useCallback(() => {
+    targetCleanupRef.current?.();
+    targetCleanupRef.current = null;
+  }, []);
+
+  // `touchTarget`: the element the finger originally went down on, when the
+  // gesture starts from something that can be removed from the page while
+  // it's still being dragged (a placed chord pill: the moment its phantom
+  // hovers a DIFFERENT line, React re-parents it into that line's own strip,
+  // which unmounts the node the touch is bound to). A touch's move/end events
+  // are delivered to its original target for the whole gesture — and once
+  // that node is detached they no longer bubble up to `document`, so the
+  // document listeners below go deaf mid-drag and the gesture never ends
+  // (same family as the sheet/chip unmount bug fixed in 4180ed5; there the
+  // node could simply be kept mounted, here re-parenting is unavoidable).
+  // Listening on the target itself keeps hearing the gesture regardless.
+  const beginDrag = useCallback((payload, x, y, touchTarget) => {
     const next = { payload, x, y };
     dragRef.current = next;
     setDrag(next);
+    unbindTouchTarget();
+    if (touchTarget?.addEventListener) {
+      const move = (e) => handlersRef.current?.handleMove(e);
+      const end = (e) => handlersRef.current?.handleEnd(e);
+      const cancel = (e) => handlersRef.current?.handleCancel(e);
+      touchTarget.addEventListener('touchmove', move, { passive: false });
+      touchTarget.addEventListener('touchend', end);
+      touchTarget.addEventListener('touchcancel', cancel);
+      targetCleanupRef.current = () => {
+        touchTarget.removeEventListener('touchmove', move);
+        touchTarget.removeEventListener('touchend', end);
+        touchTarget.removeEventListener('touchcancel', cancel);
+      };
+    }
     // Lets NoteEditorScreen disable pointer-events on its <textarea>s for
     // the drag's whole duration, not just while a specific line is
     // hovered: a mobile browser's native text-selection handling can
@@ -57,7 +93,7 @@ export default function useLineDragDrop({ onDragHoverLine, onDragActiveChange, o
     // listeners can undo once it happens. Reported 2026-10-09 as "drag
     // freezes mid-gesture".
     onDragActiveChange?.(true);
-  }, [onDragActiveChange]);
+  }, [onDragActiveChange, unbindTouchTarget]);
 
   const endDrag = useCallback((x, y) => {
     const payload = dragRef.current?.payload;
@@ -70,8 +106,9 @@ export default function useLineDragDrop({ onDragHoverLine, onDragActiveChange, o
     onDragHoverLine?.(null);
     onDragActiveChange?.(false);
     dragRef.current = null;
+    unbindTouchTarget();
     setDrag(null);
-  }, [onDrop, onDragHoverLine, onDragActiveChange]);
+  }, [onDrop, onDragHoverLine, onDragActiveChange, unbindTouchTarget]);
 
   useEffect(() => {
     const handleMove = (e) => {
@@ -97,6 +134,7 @@ export default function useLineDragDrop({ onDragHoverLine, onDragActiveChange, o
     const handleCancel = () => {
       if (dragRef.current) endDrag(null, null);
     };
+    handlersRef.current = { handleMove, handleEnd, handleCancel };
     document.addEventListener('touchmove', handleMove, { passive: false });
     document.addEventListener('touchend', handleEnd);
     document.addEventListener('touchcancel', handleCancel);
@@ -106,6 +144,9 @@ export default function useLineDragDrop({ onDragHoverLine, onDragActiveChange, o
       document.removeEventListener('touchcancel', handleCancel);
     };
   }, [endDrag, onDragHoverLine]);
+
+  // Never leave a listener on a (possibly detached) node past the hook's life.
+  useEffect(() => unbindTouchTarget, [unbindTouchTarget]);
 
   return { drag, beginDrag };
 }

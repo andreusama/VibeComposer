@@ -10,3 +10,6 @@ e2e/.auth/
 playwright-report/
 test-results/
 blob-report/
+
+# Portfolio demo recordings (local only)
+portfolio-videos/

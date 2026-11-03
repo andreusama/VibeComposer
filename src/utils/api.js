@@ -1,4 +1,5 @@
 import { SYSTEM_PROMPT } from '../constants.js';
+import { getSession } from './supabaseClient.js';
 
 // Exported so other Claude-calling features (e.g. museApi.js) can reuse the
 // same endpoint and rate limit without duplicating them — API_MODEL stays
@@ -30,9 +31,13 @@ export async function fetchClaude(body) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), CLAUDE_TIMEOUT_MS);
   try {
+    // api/claude.js rejects anything without a valid Supabase session.
+    const session = await getSession();
+    const headers = { 'Content-Type': 'application/json' };
+    if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`;
     return await fetch(API_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(body),
       signal: controller.signal,
     });

@@ -26,6 +26,26 @@ as $$
   select coalesce((auth.jwt() ->> 'is_anonymous')::boolean, false);
 $$;
 
+-- ─── 0. Profiles for users without an email ─────────────────────────────────
+-- migration_project_collaboration.sql's trigger names every new account from
+-- its email ("ana@x.com" → "ana"), and profiles.display_name is NOT NULL. A
+-- guest has no email, so that trigger failed and Supabase answered "Database
+-- error creating anonymous user". Same trigger, with a fallback name.
+
+create or replace function ensure_profile_for_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into profiles (id, display_name)
+  values (new.id, coalesce(nullif(split_part(new.email, '@', 1), ''), 'Invitado'))
+  on conflict (id) do nothing;
+  return new;
+end;
+$$;
+
 -- ─── 1. Daily Claude quota: per user (guest limit) + one global cap ─────────
 -- Replaces migration_claude_usage.sql's version. Same name/signature/return
 -- type, so api/claude.js needs no change.
@@ -50,17 +70,22 @@ declare
   v_day    date := (now() at time zone 'utc')::date;
   v_count  int;
   v_global int;
+  v_limit  int;
 begin
   if v_uid is null then
     return false;
   end if;
+
+  -- Worked out up front, not inline in the IF below: PL/pgSQL ends an IF
+  -- condition at the first THEN it sees, which would cut a CASE in half.
+  v_limit := case when is_guest() then v_guest_limit else v_user_limit end;
 
   insert into claude_usage (user_id, day, count)
   values (v_uid, v_day, 1)
   on conflict (user_id, day) do update set count = claude_usage.count + 1
   returning count into v_count;
 
-  if v_count > case when is_guest() then v_guest_limit else v_user_limit end then
+  if v_count > v_limit then
     return false;
   end if;
 

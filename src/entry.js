@@ -7,5 +7,10 @@ if (shouldFrame()) {
   reloadOnBreakpointCross();
 } else {
   if (inPhoneFrame()) installMouseTouchShim();
+  // Also watch the TOP page when it started narrow (dev-tools device mode, a
+  // half-split window): widening it must bring the phone frame back, not let
+  // main.js flip to the old desktop canvas. The iframe itself never needs
+  // this — its own width is fixed by the frame.
+  else reloadOnBreakpointCross();
   import('./main.js');
 }

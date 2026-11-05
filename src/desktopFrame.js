@@ -45,7 +45,7 @@ export function reloadOnBreakpointCross() {
     clearTimeout(timer);
     timer = setTimeout(() => {
       if (shouldFrame() !== framed) window.location.reload();
-    }, 200);
+    }, 80); // under main.js's own 150ms resize debounce, so its desktop layout never flashes first
   });
 }
 

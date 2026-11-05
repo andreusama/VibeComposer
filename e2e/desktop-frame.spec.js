@@ -60,3 +60,24 @@ test('a mouse can long-press and drag a placed chord inside the frame', async ({
     await seed.cleanup();
   }
 });
+
+// Dev-tools device mode → back to a wide window: the page must come back as the
+// phone frame, not as the old desktop canvas layout.
+test('widening a phone-sized window brings the phone frame back', async ({ page }) => {
+  await page.setViewportSize({ width: 412, height: 900 });
+  await page.goto('/');
+  await expect(page.locator('.phone-frame-screen')).toHaveCount(0);
+  await expect(page.getByPlaceholder('Buscar').first()).toBeVisible(); // bare mobile layout, signed in
+
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await expect(page.locator('.phone-frame-screen')).toBeVisible({ timeout: 5000 });
+  await expect(page.locator('.react-flow')).toHaveCount(0);
+});
+
+test('narrowing a framed window drops the frame', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('.phone-frame-screen')).toBeVisible();
+  await page.setViewportSize({ width: 412, height: 900 });
+  await expect(page.locator('.phone-frame-screen')).toHaveCount(0, { timeout: 5000 });
+  await expect(page.getByPlaceholder('Buscar').first()).toBeVisible();
+});

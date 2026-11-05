@@ -3,18 +3,16 @@ import { supabase } from '../utils/supabaseClient.js';
 import { startGuestDemo, GUEST_MUSE_CALLS_PER_DAY } from '../utils/guest.js';
 
 // ─── Sign-in ────────────────────────────────────────────────────────────────
-// Three ways in, same account underneath (Supabase links them by email
-// automatically — Google and password both land on the same row a prior
-// magic-link sign-in created, as long as the email matches and is verified):
+// Two ways in, same account underneath (Supabase links them by email
+// automatically, as long as the email matches and is verified), plus the
+// guest demo (see utils/guest.js):
 //
 // 1. Google — one click, no round trip at all. The one most people already
 //    have ready, and the fastest path for everyone, casual or not.
 // 2. Email + password — for whoever has set one (see "crear contraseña"
-//    below): no email round trip either, just typing. This is what makes
-//    repeat sign-ins during iteration fast; magic link alone meant a real
-//    email wait on every single one.
-// 3. Magic link — unchanged, still the zero-setup default: nothing to
-//    remember, works the first time with no prior step.
+//    below): no email round trip either, just typing. "First time with a
+//    password? create one" is the only way to get one — the magic-link
+//    option was removed (2026-11-05).
 //
 // Deliberately NOT trying to silently fall back from a failed password
 // attempt into "maybe they meant to sign up" — Supabase's own anti-
@@ -43,7 +41,6 @@ export function render(state) {
     <div class="body">
       <div class="auth-card">
         <div class="auth-card-title">sign in to write</div>
-        <div class="auth-card-sub">google is fastest. a password works too, once you've set one — no email wait either way.</div>
 
         ${state.projectError ? `<div class="error-banner">${state.projectError}</div>` : ''}
 
@@ -61,7 +58,6 @@ export function render(state) {
           <input type="password" id="auth-password" class="auth-input" placeholder="password (optional)" autocomplete="current-password" />
 
           <button class="continue-btn enabled auth-submit" id="auth-password-submit">sign in with password</button>
-          <button class="continue-btn secondary auth-submit" id="auth-send">send magic link →</button>
 
           <button class="auth-link" id="auth-create-password">first time with a password? create one</button>
         </div>
@@ -80,7 +76,6 @@ export function attach(state) {
   const demoBtn        = document.getElementById('auth-demo');
   const googleBtn      = document.getElementById('auth-google');
   const passwordBtn     = document.getElementById('auth-password-submit');
-  const sendBtn         = document.getElementById('auth-send');
   const createPwBtn     = document.getElementById('auth-create-password');
   const form           = document.getElementById('auth-form');
   const sentBox        = document.getElementById('auth-sent');
@@ -144,30 +139,6 @@ export function attach(state) {
     // do here.
   });
 
-  sendBtn.addEventListener('click', async () => {
-    const email = emailInput.value.trim();
-    if (!email) return;
-
-    sendBtn.disabled = true;
-    sendBtn.textContent = 'sending…';
-
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: redirectTo() },
-    });
-
-    if (error) {
-      showError(error.message);
-      sendBtn.disabled = false;
-      sendBtn.textContent = 'send magic link →';
-      return;
-    }
-
-    form.classList.add('hidden');
-    sentBox.classList.remove('hidden');
-    sentBox.textContent = `📩 check ${email} for a sign-in link`;
-  });
-
   // signUp() with a password, for an email that has no password yet. If the
   // email already has a CONFIRMED account (from a prior magic-link or
   // Google sign-in) Supabase's own anti-enumeration behavior returns this
@@ -204,7 +175,7 @@ export function attach(state) {
   });
 
   emailInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') (passwordInput.value ? passwordBtn : sendBtn).click();
+    if (e.key === 'Enter') { if (passwordInput.value) passwordBtn.click(); else passwordInput.focus(); }
   });
   passwordInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') passwordBtn.click();

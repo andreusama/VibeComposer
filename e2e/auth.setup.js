@@ -27,7 +27,7 @@ setup('authenticate', async ({ page }) => {
 
   await page.goto('/');
   await page.getByPlaceholder('you@example.com').fill(EMAIL);
-  await page.getByPlaceholder('password (optional)').fill(PASSWORD);
+  await page.getByPlaceholder('password', { exact: true }).fill(PASSWORD);
   await page.getByRole('button', { name: 'sign in with password' }).click();
 
   // Signed in once the auth card is gone — whatever screen we land on

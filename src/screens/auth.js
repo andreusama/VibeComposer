@@ -55,11 +55,11 @@ export function render(state) {
 
         <div id="auth-form" class="auth-form">
           <input type="email" id="auth-email" class="auth-input" placeholder="you@example.com" autocomplete="email" />
-          <input type="password" id="auth-password" class="auth-input" placeholder="password (optional)" autocomplete="current-password" />
+          <input type="password" id="auth-password" class="auth-input" placeholder="password" autocomplete="current-password" />
 
           <button class="continue-btn enabled auth-submit" id="auth-password-submit">sign in with password</button>
 
-          <button class="auth-link" id="auth-create-password">first time with a password? create one</button>
+          <button class="auth-link" id="auth-create-password">create an account</button>
         </div>
 
         <div id="auth-sent" class="confirm-label hidden"></div>
@@ -165,7 +165,7 @@ export function attach(state) {
     if (error) {
       showError(error.message);
       createPwBtn.disabled = false;
-      createPwBtn.textContent = 'first time with a password? create one';
+      createPwBtn.textContent = 'create an account';
       return;
     }
 

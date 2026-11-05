@@ -1,6 +1,6 @@
 import { setState } from '../state/store.js';
 import { supabase } from '../utils/supabaseClient.js';
-import { startGuestDemo, GUEST_MUSE_CALLS_PER_DAY } from '../utils/guest.js';
+import { startGuestDemo, GUEST_MUSE_CALLS_PER_DAY, DEMO_ONLY } from '../utils/guest.js';
 
 // ─── Sign-in ────────────────────────────────────────────────────────────────
 // Two ways in, same account underneath (Supabase links them by email
@@ -33,6 +33,26 @@ const GOOGLE_LOGO = `<svg class="auth-google-logo" viewBox="0 0 48 48" width="18
 const redirectTo = () => window.location.origin + window.location.pathname;
 
 export function render(state) {
+  // Demo-only deployment: no accounts, no providers — just the way in.
+  if (DEMO_ONLY) {
+    return `
+    <div class="header">
+      <h1>vibe composer</h1>
+      <span class="tagline">demo</span>
+    </div>
+    <div class="body">
+      <div class="auth-card">
+        <div class="auth-card-title">try vibe composer</div>
+
+        ${state.projectError ? `<div class="error-banner">${state.projectError}</div>` : ''}
+
+        <button class="continue-btn enabled auth-submit" id="auth-demo">try the demo</button>
+        <div class="auth-demo-note">no sign-up · a sample song, ready to play with · ${GUEST_MUSE_CALLS_PER_DAY} Muse calls a day</div>
+      </div>
+    </div>
+  `;
+  }
+
   return `
     <div class="header">
       <h1>vibe composer</h1>
@@ -94,6 +114,8 @@ export function attach(state) {
     }
     // On success the auth-state listener swaps this screen out by itself.
   });
+
+  if (DEMO_ONLY) return; // nothing else on the page to wire up
 
   const showError = (message) => setState({ projectError: message });
 

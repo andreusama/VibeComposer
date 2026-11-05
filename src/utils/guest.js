@@ -12,6 +12,12 @@ import { loadProjectSummaries } from '../screens/projectsData.js';
 // (hiding upload buttons, the demo banner) is only the friendly face of
 // those limits.
 
+// A separate "demo-only" deployment (its own Vercel project, built with
+// VITE_DEMO_ONLY=true) shows nothing but the demo button on the sign-in screen,
+// so its public link can only ever be used to try the demo. Same code, same
+// Supabase project — only this flag differs.
+export const DEMO_ONLY = import.meta.env.VITE_DEMO_ONLY === 'true';
+
 export const GUEST_MUSE_CALLS_PER_DAY = 10;
 export const GUEST_UPLOADS_MESSAGE = 'No disponible en la demo';
 

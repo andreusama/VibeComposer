@@ -29,7 +29,9 @@ export function mountPhoneFrame() {
   app.innerHTML = `
     <div class="phone-frame-stage">
       <div class="phone-frame-device">
-        <iframe class="phone-frame-screen" title="Vibe Composer" src="${window.location.pathname}${window.location.search}${window.location.hash}" allow="microphone"></iframe>
+        <div class="phone-frame-clip">
+          <iframe class="phone-frame-screen" title="Vibe Composer" src="${window.location.pathname}${window.location.search}${window.location.hash}" allow="microphone"></iframe>
+        </div>
       </div>
       <p class="phone-frame-caption">VibeComposer está pensada para el móvil — esta es su vista.</p>
     </div>

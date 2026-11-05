@@ -23,6 +23,24 @@ const API_MODEL = 'claude-sonnet-4-5';
 // responses just as often as actually-stalled ones.
 const CLAUDE_TIMEOUT_MS = 60000;
 
+// api/claude.js refuses with 429 (a per-minute burst limit, the per-user daily
+// cap — only 10 for a demo guest — or the shared all-users cap) or 503 (the
+// usage check itself couldn't run). Callers would otherwise surface those as
+// a bare "API error 429", which is exactly what a guest sees the moment they
+// use up their calls — so say what actually happened, in the app's language.
+export async function throwIfQuotaRefused(response) {
+  if (response.status !== 429 && response.status !== 503) return;
+  let reason = '';
+  try { reason = String((await response.clone().json())?.error || ''); } catch { /* body isn't JSON */ }
+  if (/daily limit/i.test(reason)) {
+    throw new Error('La Musa ha llegado a su límite de hoy. Vuelve mañana.');
+  }
+  if (response.status === 429) {
+    throw new Error('Demasiadas peticiones seguidas — espera un minuto y vuelve a probar.');
+  }
+  throw new Error('La Musa no está disponible ahora mismo — prueba de nuevo en un momento.');
+}
+
 // The one place that actually calls fetch(API_URL, …) — composeProgression,
 // callClaudeOnce and museApi.js's own callClaude all build a different
 // request body, but the timeout/abort plumbing around it is identical, so
@@ -35,12 +53,14 @@ export async function fetchClaude(body) {
     const session = await getSession();
     const headers = { 'Content-Type': 'application/json' };
     if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`;
-    return await fetch(API_URL, {
+    const response = await fetch(API_URL, {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
       signal: controller.signal,
     });
+    await throwIfQuotaRefused(response);
+    return response;
   } catch (err) {
     if (err?.name === 'AbortError') {
       throw new Error("Couldn't reach the Muse — the request took too long. Check your connection and try again.");

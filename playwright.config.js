@@ -56,8 +56,20 @@ export default defineConfig({
     },
     {
       name: 'mobile-chrome',
+      testIgnore: /desktop-.*\.spec\.js/,
       use: {
         ...devices['Pixel 7'], // real touch device profile — hasTouch: true, mobile viewport/UA
+        storageState: 'e2e/.auth/user.json',
+      },
+      dependencies: ['setup'],
+    },
+    {
+      // Wide screens get the app inside a phone-sized frame (src/desktopFrame.js);
+      // these specs exercise that frame and its mouse→touch bridge.
+      name: 'desktop-chrome',
+      testMatch: /desktop-.*\.spec\.js/,
+      use: {
+        ...devices['Desktop Chrome'],
         storageState: 'e2e/.auth/user.json',
       },
       dependencies: ['setup'],

@@ -289,6 +289,19 @@ body::before {
 
 .auth-submit { width: 100%; text-align: center; }
 
+.auth-demo-note {
+    margin: var(--space-2) 0 var(--space-4);
+    text-align: center;
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    color: var(--graphite-soft);
+}
+.guest-locked-hint {
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    color: var(--graphite-soft);
+}
+
 .auth-google { width: 100%; text-align: center; font-weight: 600; margin-bottom: var(--space-4); }
 
 .auth-divider {
@@ -9193,4 +9206,43 @@ body::before {
     border-color: var(--rose-soft);
     background: var(--rose-soft);
     color: var(--rose);
+}
+
+/* ─── Desktop: the app lives in a phone-sized frame (src/desktopFrame.js) ─── */
+body.phone-frame-page { background: #1b1b1f; margin: 0; }
+.phone-frame-stage {
+    min-height: 100vh;
+    min-height: 100dvh;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    padding: 24px 16px;
+}
+.phone-frame-device {
+    width: 412px;
+    max-width: 100%;
+    height: min(880px, calc(100dvh - 90px));
+    box-sizing: border-box;
+    padding: 10px;
+    border-radius: 44px;
+    background: #0b0b0d;
+    box-shadow: 0 0 0 2px #2c2c31, 0 30px 80px rgba(0, 0, 0, 0.55);
+}
+.phone-frame-screen {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    border-radius: 34px;
+    background: #faf8f3;
+}
+.phone-frame-caption {
+    margin: 0;
+    font-family: var(--font-sans, system-ui, sans-serif);
+    font-size: 13px;
+    color: #8a8a93;
+    text-align: center;
 }

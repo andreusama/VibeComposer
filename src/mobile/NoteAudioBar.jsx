@@ -4,6 +4,7 @@ import {
 } from '../canvas/lineAudioData.js';
 import { WaveformCanvas, extractPeaks } from './waveform.jsx';
 import AudioRecorder from './AudioRecorder.jsx';
+import { isGuestNow, GUEST_UPLOADS_MESSAGE } from '../utils/guest.js';
 import { IcMic, IcPlay, IcPause, IcChevronUp, IcChevronDown } from './icons.jsx';
 
 function relativeDay(iso) {
@@ -235,8 +236,8 @@ export default function NoteAudioBar({ sectionId, songId, memos, startExpanded, 
         </div>
 
         <div className="na-scroll">
-          <button className="na-record" disabled={atCap} onClick={startRecording}>
-            <span className="na-record-dot" /> {atCap ? `Límite de ${MAX_AUDIOS_PER_NOTE} audios` : 'Grabar'}
+          <button className="na-record" disabled={atCap || isGuestNow()} onClick={startRecording}>
+            <span className="na-record-dot" /> {atCap ? `Límite de ${MAX_AUDIOS_PER_NOTE} audios` : isGuestNow() ? `Grabar · ${GUEST_UPLOADS_MESSAGE.toLowerCase()}` : 'Grabar'}
           </button>
           {atCap && <p className="na-cap-hint">Borra algún audio para grabar más.</p>}
 

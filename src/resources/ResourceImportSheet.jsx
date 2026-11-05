@@ -2,6 +2,7 @@ import { useState, useCallback, useMemo, useRef } from 'react';
 import { segmentImportedText, segmentImportedImage, MAX_IMPORT_CHARS, MAX_IMPORT_IMAGE_BYTES } from './resourceImportProcessor.js';
 import { readFileAsBase64 } from '../utils/baulProcessor.js';
 import { createResource, setResourceFolders, RESOURCE_TYPES, RESOURCE_TYPE_LABELS, formatSourceLoc } from './resourcesData.js';
+import { isGuestNow, GUEST_UPLOADS_MESSAGE } from '../utils/guest.js';
 import FolderChipPicker from './FolderChipPicker.jsx';
 import { IcCheck, IcPencil, IcFolder, IcImage, IcClose } from '../mobile/icons.jsx';
 
@@ -266,7 +267,8 @@ export default function ResourceImportSheet({ userId, folders, onCreateFolder, o
               <button
                 className="baul-attach-btn res-import-attach-btn"
                 onClick={() => bulkFileInputRef.current?.click()}
-                disabled={bulkAnalyzing}
+                disabled={bulkAnalyzing || isGuestNow()}
+                title={isGuestNow() ? GUEST_UPLOADS_MESSAGE : undefined}
               >
                 <IcImage size={16} /> añadir fotos
               </button>
@@ -358,7 +360,8 @@ export default function ResourceImportSheet({ userId, folders, onCreateFolder, o
                   <button
                     className="baul-attach-btn res-import-attach-btn"
                     onClick={() => fileInputRef.current?.click()}
-                    disabled={analyzing || !!text.trim()}
+                    disabled={analyzing || !!text.trim() || isGuestNow()}
+                    title={isGuestNow() ? GUEST_UPLOADS_MESSAGE : undefined}
                   >
                     <IcImage size={16} /> adjuntar foto de una página
                   </button>

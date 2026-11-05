@@ -1,5 +1,6 @@
 import { setState } from '../state/store.js';
 import { supabase } from '../utils/supabaseClient.js';
+import { startGuestDemo, GUEST_MUSE_CALLS_PER_DAY } from '../utils/guest.js';
 
 // ─── Sign-in ────────────────────────────────────────────────────────────────
 // Three ways in, same account underneath (Supabase links them by email
@@ -38,6 +39,11 @@ export function render(state) {
 
         ${state.projectError ? `<div class="error-banner">${state.projectError}</div>` : ''}
 
+        <button class="continue-btn enabled auth-submit" id="auth-demo">try the demo</button>
+        <div class="auth-demo-note">no sign-up · a sample song, ready to play with · ${GUEST_MUSE_CALLS_PER_DAY} Muse calls a day</div>
+
+        <div class="auth-divider"><span>or sign in</span></div>
+
         <button class="ghost-btn auth-google" id="auth-google">continue with Google</button>
 
         <div class="auth-divider"><span>or</span></div>
@@ -63,6 +69,7 @@ export function render(state) {
 export function attach(state) {
   const emailInput    = document.getElementById('auth-email');
   const passwordInput = document.getElementById('auth-password');
+  const demoBtn        = document.getElementById('auth-demo');
   const googleBtn      = document.getElementById('auth-google');
   const passwordBtn     = document.getElementById('auth-password-submit');
   const sendBtn         = document.getElementById('auth-send');
@@ -70,7 +77,20 @@ export function attach(state) {
   const form           = document.getElementById('auth-form');
   const sentBox        = document.getElementById('auth-sent');
 
-  emailInput.focus();
+  // No emailInput.focus() here on purpose: the demo button is the first thing
+  // to try, and focusing a field pops the keyboard over it on a phone.
+
+  demoBtn.addEventListener('click', async () => {
+    demoBtn.disabled = true;
+    demoBtn.textContent = 'abriendo la demo…';
+    const { error } = await startGuestDemo();
+    if (error) {
+      setState({ projectError: error });
+      demoBtn.disabled = false;
+      demoBtn.textContent = 'try the demo';
+    }
+    // On success the auth-state listener swaps this screen out by itself.
+  });
 
   const showError = (message) => setState({ projectError: message });
 
@@ -80,10 +100,14 @@ export function attach(state) {
   // magic-link redirects).
   googleBtn.addEventListener('click', async () => {
     googleBtn.disabled = true;
-    const { error } = await supabase.auth.signInWithOAuth({
+    // Google refuses to render inside an iframe (the desktop phone frame), so
+    // there the redirect has to happen on the TOP page instead.
+    const inFrame = window.top !== window.self;
+    const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: redirectTo() },
+      options: { redirectTo: redirectTo(), skipBrowserRedirect: inFrame },
     });
+    if (inFrame && data?.url) window.top.location.href = data.url;
     // Only reachable on an immediate failure (e.g. the provider isn't
     // configured yet) — a successful call navigates away before this runs.
     if (error) {

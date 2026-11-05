@@ -13,6 +13,10 @@ const PASSWORD = process.env.PLAYWRIGHT_TEST_PASSWORD;
 
 const authFile = 'e2e/.auth/user.json';
 
+// Phone-width, so the sign-in form is on the page itself: at desktop width the
+// app lives inside a phone-sized iframe (src/desktopFrame.js).
+setup.use({ viewport: { width: 412, height: 915 } });
+
 setup('authenticate', async ({ page }) => {
   if (!EMAIL || !PASSWORD) {
     throw new Error(

@@ -2,6 +2,7 @@ import { useState, useCallback, useRef } from 'react';
 import { processBaulInput, readFileAsBase64, inputTypeForFile, emptyAdnLirico } from '../utils/baulProcessor.js';
 import { saveLyricDna, insertBaulEntry, clearBaulEntries } from '../canvas/canvasData.js';
 import { addBaulItem, clearBaulItems, MAX_ITEM_BYTES } from '../canvas/baulItemsData.js';
+import { isGuestNow, GUEST_UPLOADS_MESSAGE } from '../utils/guest.js';
 import { IcMuse, IcCheck, IcNote, IcImage, IcPaperclip, IcTrash, IcChevronLeft } from './icons.jsx';
 
 // The mobile "tap to attach" entry point (design ref, 2026-08-11 mockup) —
@@ -116,13 +117,17 @@ export default function BaulSheet({ songId, lyricDna, onLyricDnaUpdated, onItems
                 <span className="aic aic-thread"><IcNote size={18} /></span>
                 <span className="tt">Escribir un apunte</span>
               </button>
-              <button className="attach-option" onClick={() => photoInputRef.current?.click()} disabled={processing}>
+              {/* Guests can't upload (the database refuses it too — see
+                  migration_guest_demo.sql); say so instead of failing later. */}
+              <button className="attach-option" onClick={() => photoInputRef.current?.click()} disabled={processing || isGuestNow()}>
                 <span className="aic aic-amber"><IcImage size={18} /></span>
                 <span className="tt">Elegir una foto</span>
+                {isGuestNow() && <span className="guest-locked-hint">{GUEST_UPLOADS_MESSAGE}</span>}
               </button>
-              <button className="attach-option" onClick={() => fileInputRef.current?.click()} disabled={processing}>
+              <button className="attach-option" onClick={() => fileInputRef.current?.click()} disabled={processing || isGuestNow()}>
                 <span className="aic aic-graphite"><IcPaperclip size={18} /></span>
                 <span className="tt">Importar un archivo</span>
+                {isGuestNow() && <span className="guest-locked-hint">{GUEST_UPLOADS_MESSAGE}</span>}
               </button>
               <input ref={photoInputRef} type="file" accept="image/*" className="baul-file-input" onChange={handleFilePick} />
               <input ref={fileInputRef} type="file" accept="application/pdf" className="baul-file-input" onChange={handleFilePick} />

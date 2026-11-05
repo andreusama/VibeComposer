@@ -397,6 +397,28 @@ from a whitelist otherwise built from Catalan's accent set, which has no
 diphthong — "rayo" computed the *same* rhyme key as "cacao," which don't
 rhyme. Both have regression tests in `rhyme.test.js`.
 
+## Public demo: guests + desktop phone frame
+
+- **"try the demo"** (auth screen) → `src/utils/guest.js` `startGuestDemo()`:
+  Supabase *anonymous* sign-in, then the `create_demo_song()` RPC seeds a
+  sample song. Everything that makes it a demo and not free reign lives in the
+  database (`supabase/migration_guest_demo.sql`), not the client: ~10 Muse
+  calls/guest/day, one shared all-users daily cap (both inside
+  `claude_consume_quota()`, which `api/claude.js` calls), a restrictive
+  Storage policy (no uploads), a 3-song cap, and an hourly pg_cron job that
+  deletes guest accounts older than a day (everything cascades off
+  `auth.users`). The client only hides upload buttons (`isGuestNow()`) and
+  turns 429/503 from the proxy into readable errors (`throwIfQuotaRefused`).
+  Dashboard prerequisites: enable *anonymous sign-ins*, enable *pg_cron*,
+  ideally CAPTCHA.
+- **Desktop = phone frame.** `index.html` loads `src/entry.js`; on a wide
+  screen it mounts a phone-sized iframe of the same URL (`desktopFrame.js`) and
+  never boots the app itself, so the mobile layout runs unmodified at a real
+  phone width. Inside the frame a mouse is translated to touch events
+  (Chromium only) so long-press drags work. `?desktop=1` bypasses the frame
+  (developer escape hatch to the old canvas). Google OAuth redirects the top
+  page, since Google refuses to render in an iframe.
+
 ## Deployment
 
 - Web: Vercel, `vercel.json` rewrites `/api/claude` to the serverless

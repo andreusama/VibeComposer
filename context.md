@@ -419,7 +419,11 @@ rhyme. Both have regression tests in `rhyme.test.js`.
   `LineChordStrip` re-measures its pills on resize (ResizeObserver). Everything
   `position: fixed` stays viewport-relative — JS positions the drag pill and
   popovers from `clientX/Y`, so no transformed ancestor — and the full-width
-  layers are inset by `--gutter` instead. Bottom sheets become centred dialogs.
+  layers are inset by `--gutter` instead. Bottom sheets become centred dialogs. Anything that slides in from outside a
+  screen (the Baúl cabinet, the pager's second page) is positioned by percentages of
+  its OWN box — never `window.innerWidth`/`100vw`, which on a wide window is wider
+  than the column and let the closed cabinet show in the margin — and
+  `.mobile-screen` clips its overflow.
 - **Input mode** (docs/adr/0002, `src/utils/inputMode.js`): `data-input="touch|mouse"`
   on `<html>`, taken from the LAST pointer used. Touch keeps its long-press/swipe
   gestures untouched; a mouse gets press-and-drag after 4px

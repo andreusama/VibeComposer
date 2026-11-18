@@ -9321,7 +9321,10 @@ body::before {
         left: var(--gutter);
         right: var(--gutter);
     }
-    .mobile-screen { box-shadow: 0 0 0 1px var(--hairline), 0 0 80px rgba(29, 28, 26, 0.08); }
+    /* Whatever slides out of a screen (the Baúl cabinet waits just left of the song
+       screen) must stay hidden inside the column, not show in the margin. Does not
+       affect position:fixed children — sheets, scrims, the drag pill. */
+    .mobile-screen { overflow: hidden; box-shadow: 0 0 0 1px var(--hairline), 0 0 80px rgba(29, 28, 26, 0.08); }
     .mobile-screen.mobile-screen-relative { left: auto; right: auto; box-shadow: none; }
 
     /* Bottom sheets become centred dialogs. The dimmed backdrop still covers

@@ -402,7 +402,13 @@ export default function SongThreadScreen({ state, onExit }) {
   // whenever something is added so an open cabinet reloads its shelves.
   const [cabinetOpen, setCabinetOpen] = useState(false);
   const [cabinetRefresh, setCabinetRefresh] = useState(0);
-  const cabinetSwipe = useCabinetSwipe({ open: cabinetOpen, setOpen: setCabinetOpen });
+  // The cabinet is as wide as the screen it slides over — the column on a wide
+  // window, not window.innerWidth.
+  const cabinetPaneRef = useRef(null);
+  const cabinetSwipe = useCabinetSwipe({
+    open: cabinetOpen, setOpen: setCabinetOpen,
+    width: () => cabinetPaneRef.current?.clientWidth || window.innerWidth,
+  });
   const [renaming, setRenaming] = useState(false);
   const [titleDraft, setTitleDraft] = useState(song?.title || '');
   // Desktop's CanvasScreen has a toolbar-wide "saving…" indicator
@@ -810,8 +816,13 @@ export default function SongThreadScreen({ state, onExit }) {
       )}
 
       <div
+        ref={cabinetPaneRef}
         className={`cab-pane${cabinetSwipe.revealed !== null ? ' dragging' : ''}${cabinetOpen ? ' open' : ''}`}
-        style={{ transform: `translateX(calc(-100% + ${cabinetSwipe.revealed ?? (cabinetOpen ? window.innerWidth : 0)}px))` }}
+        // Resting positions are fixed (fully in / fully out of the pane's own box);
+        // only a drag in progress is measured in px, from the pane's own width.
+        style={{ transform: cabinetSwipe.revealed !== null
+          ? `translateX(calc(-100% + ${cabinetSwipe.revealed}px))`
+          : (cabinetOpen ? 'translateX(0)' : 'translateX(-100%)') }}
         {...cabinetSwipe.handlers}
       >
         <BaulCabinet

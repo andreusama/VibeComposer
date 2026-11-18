@@ -234,3 +234,39 @@ test('switching to Recursos lines the page up with the column, also after a resi
   a = await aligned();
   expect(a.slideWidth).toBe(a.viewportWidth);
 });
+
+test('the Baúl cabinet stays out of the margin when closed, and opens over the column', async ({ page }) => {
+  const title = `E2E cabinet ${Date.now()}`;
+  const seed = await seedSongWithChord({ title, lines: LINES, chords: [] });
+  try {
+    await page.setViewportSize({ width: 1692, height: 993 });
+    await page.goto('/');
+    await page.getByPlaceholder('Buscar').first().fill(title);
+    await page.getByText(title).first().click();
+    await expect(page.locator('.thread-card').first()).toBeVisible();
+
+    const column = await page.locator('.thread-screen').boundingBox();
+    // Closed: nothing of the cabinet is hit-testable (or painted) left of the column.
+    const hitInMargin = await page.evaluate((x) => {
+      const hits = [];
+      for (const y of [40, 150, 300, 480, 700]) {
+        const el = document.elementFromPoint(x, y);
+        hits.push(el?.closest('.cab-pane') ? 'cabinet' : 'ok');
+      }
+      return hits;
+    }, column.x - 20);
+    expect(hitInMargin).not.toContain('cabinet');
+
+    // Opened with the arrow: it covers exactly the column, no more, no less.
+    await page.locator('.cab-handle').click();
+    await expect.poll(async () => Math.round((await page.locator('.cab-pane').boundingBox()).x - column.x), { timeout: 4000 }).toBe(0);
+    const pane = await page.locator('.cab-pane').boundingBox();
+    expect(Math.round(pane.width)).toBe(Math.round(column.width));
+
+    // And closed again, it goes back out of sight.
+    await page.locator('.cab-close').click();
+    await expect.poll(async () => (await page.locator('.cab-pane').boundingBox()).x + (await page.locator('.cab-pane').boundingBox()).width, { timeout: 4000 }).toBeLessThanOrEqual(column.x + 1);
+  } finally {
+    await seed.cleanup();
+  }
+});

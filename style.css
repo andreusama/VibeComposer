@@ -9450,3 +9450,10 @@ html[data-input="mouse"] .lc-pill-remove {
     margin: -4px -4px -4px 0;
     padding: 4px;
 }
+
+/* With a mouse the pill stays light (it is only ever "armed" — turned solid amber
+   with a white ×, see .lc-pill-armed — by a tap), so the × has to be dark to be
+   seen at all; it turns the rose of a destructive action when it is under the cursor. */
+html[data-input="mouse"] .lc-pill-remove { color: var(--ink); border-radius: 50%; }
+html[data-input="mouse"] .lc-pill-remove:hover,
+html[data-input="mouse"] .lc-pill-remove:focus-visible { color: var(--rose); background: rgba(29, 28, 26, 0.08); }

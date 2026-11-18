@@ -131,6 +131,8 @@ test('hovering a chord reveals a × that deletes it', async ({ page }) => {
     await expect(remove).toHaveCSS('opacity', '0');
     await pill.hover();
     await expect(remove).toHaveCSS('opacity', '1');
+    // Dark on the light pill — white (the armed, touch colour) was invisible here.
+    await expect(remove).toHaveCSS('color', 'rgb(29, 28, 26)');
     await remove.click();
     await expect.poll(() => seed.chordsNow(), { timeout: 8000 }).toEqual([]);
   } finally {

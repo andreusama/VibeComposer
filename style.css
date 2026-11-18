@@ -9278,15 +9278,18 @@ body::before {
    from clientX/clientY, so a transformed ancestor would shift them); the
    full-width layers are inset by --gutter instead, which is 0 on a phone. */
 :root {
-    --col-w: 760px;
+    /* Fluid: the column is a share of the window (never narrower than a phone-ish
+       760px), and on a wide screen the type grows with it — the UI scales
+       like a zoom instead of sitting in a fixed box. */
+    --col-w: max(760px, 82vw);
     --gutter: 0px;
 }
 @media (min-width: 900px) {
     :root { --gutter: calc((100vw - var(--col-w)) / 2); }
 
     /* More room means a bigger page: every rem-based size (the lyric included)
-       grows by an eighth. */
-    html { font-size: 112.5%; }
+       grows with the window, from an eighth up to ~1.75x. */
+    html { font-size: clamp(112.5%, calc(62.5% + 0.7vw), 175%); }
     body { background-color: var(--paper-deeper); }
     body::before { display: none; }
 
@@ -9318,8 +9321,8 @@ body::before {
     .baul-sheet .ts-grabber { display: none; } /* a drag handle is a touch affordance */
     .ts-sheet,
     .baul-sheet {
-        width: min(560px, calc(100vw - 2 * var(--space-6)));
-        max-height: min(80vh, 720px);
+        width: min(35rem, calc(100vw - 2 * var(--space-6)));
+        max-height: min(80vh, 45rem);
         border-radius: var(--r-lg);
         overflow-y: auto;
     }

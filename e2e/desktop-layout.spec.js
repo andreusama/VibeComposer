@@ -16,17 +16,48 @@ async function openSong(page, title) {
 
 const centre = (box) => ({ x: box.x + box.width / 2, y: box.y + box.height / 2 });
 
-test('a wide window shows the mobile app in a centred column, no canvas, no frame', async ({ page }) => {
+test('a wide window shows the mobile app in a centred, fluid column — no canvas, no frame', async ({ page }) => {
   await page.goto('/');
   const screen = page.locator('.mobile-screen').first();
   await expect(screen).toBeVisible();
   const box = await screen.boundingBox();
-  expect(box.width).toBeGreaterThan(600);
-  expect(box.width).toBeLessThanOrEqual(761);
-  expect(Math.abs(box.x + box.width / 2 - 640)).toBeLessThan(2); // centred in a 1280 window
+  // 82% of the window (never under 760px), centred.
+  expect(Math.abs(box.width - 1280 * 0.82)).toBeLessThan(3);
+  expect(Math.abs(box.x + box.width / 2 - 640)).toBeLessThan(2);
   await expect(page.locator('.react-flow')).toHaveCount(0);
   await expect(page.locator('.phone-frame-screen')).toHaveCount(0);
   await expect(page.locator('html')).toHaveAttribute('data-input', 'mouse');
+});
+
+test('the column and the type grow with the window instead of sitting in a fixed box', async ({ page }) => {
+  await page.goto('/');
+  const measure = async () => ({
+    width: (await page.locator('.mobile-screen').first().boundingBox()).width,
+    font: await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize)),
+  });
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const small = await measure();
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  const large = await measure();
+  expect(large.width).toBeGreaterThan(small.width * 1.3);
+  expect(large.font).toBeGreaterThan(small.font * 1.15);
+});
+
+test('chords re-measure when the window is resized', async ({ page }) => {
+  const title = `E2E resize chords ${Date.now()}`;
+  const seed = await seedSongWithChord({ title, lines: LINES, chords: [{ lineIndex: 0, position: 0, name: 'Am' }, { lineIndex: 0, position: 1, name: 'G' }] });
+  try {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await openSong(page, title);
+    const pill = page.locator('.lc-pill[data-chord-id]').first();
+    await expect(pill).toBeVisible();
+    const before = (await pill.boundingBox()).width;
+    await page.setViewportSize({ width: 2200, height: 1000 });
+    // A pill is as wide as its slice of the line, and the type got bigger.
+    await expect.poll(async () => (await pill.boundingBox()).width, { timeout: 5000 }).toBeGreaterThan(before * 1.2);
+  } finally {
+    await seed.cleanup();
+  }
 });
 
 test('a narrow window fills the width, like a phone', async ({ page }) => {

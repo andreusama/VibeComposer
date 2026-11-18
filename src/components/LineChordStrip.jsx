@@ -163,6 +163,23 @@ export default function LineChordStrip({ text, chords, onRemove, onMoveStart, re
 
   const list = chords || NO_CHORDS;
 
+  // Re-measure when the line's own box changes size — a resized window on
+  // desktop, or the root font growing with it, re-wraps the text and moves every
+  // pill's target. (The measuring effect below otherwise only runs when the
+  // text or chords change, which was enough while a phone's width never moved.)
+  const [layoutTick, setLayoutTick] = useState(0);
+  useEffect(() => {
+    const mirror = mirrorRef.current;
+    if (!mirror || typeof ResizeObserver === 'undefined') return undefined;
+    let first = true; // observe() reports the initial size once; that is not a change
+    const ro = new ResizeObserver(() => {
+      if (first) { first = false; return; }
+      setLayoutTick((t) => t + 1);
+    });
+    ro.observe(mirror);
+    return () => ro.disconnect();
+  }, []);
+
   useEffect(() => () => clearTimeout(armTimerRef.current), []);
 
   // Any change to the chords on this line retires a stale armed pill — the
@@ -231,7 +248,7 @@ export default function LineChordStrip({ text, chords, onRemove, onMoveStart, re
       items.forEach((it) => { next[it.id] = { left: lefts[it.id], top: tops[it.id], width: it.width }; });
     });
     setPlacement((cur) => (samePlacement(cur, next) ? cur : next));
-  }, [text, list]);
+  }, [text, list, layoutTick]);
 
   return (
     <>

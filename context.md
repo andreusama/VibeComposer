@@ -413,8 +413,10 @@ rhyme. Both have regression tests in `rhyme.test.js`.
   Dashboard prerequisites: enable *anonymous sign-ins*, enable *pg_cron*,
   ideally CAPTCHA.
 - **Desktop = the mobile app, expanded** (docs/adr/0001). On a wide screen
-  (≥900px) the same screens sit in a centred 760px column (`--col-w`,
-  `--gutter` in style.css; `html` font-size raised an eighth). Everything
+  (≥900px) the same screens sit in a centred, FLUID column — `--col-w` is
+  `max(760px, 82vw)`, `--gutter` the rest — and `html` font-size grows with the
+  window (112.5% up to 175%), so it scales like a zoom rather than a fixed box.
+  `LineChordStrip` re-measures its pills on resize (ResizeObserver). Everything
   `position: fixed` stays viewport-relative — JS positions the drag pill and
   popovers from `clientX/Y`, so no transformed ancestor — and the full-width
   layers are inset by `--gutter` instead. Bottom sheets become centred dialogs.

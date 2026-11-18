@@ -40,12 +40,12 @@ export async function removeCollaborator(collaboratorRowId) {
 // NOT checked here — accept_project_invite re-checks it at redemption time,
 // since the cap can be reached by a different invite link between now and
 // then.
-export async function createInvite(songId, { singleUse = false, expiresInHours = null } = {}) {
+export async function createInvite(songId, { singleUse = false, expiresInHours = null, viewOnly = false } = {}) {
   const expires_at = expiresInHours ? new Date(Date.now() + expiresInHours * 3600_000).toISOString() : null;
   const { data: userRes } = await supabase.auth.getUser();
   return supabase
     .from('project_invites')
-    .insert({ song_id: songId, single_use: singleUse, expires_at, created_by: userRes?.user?.id })
+    .insert({ song_id: songId, single_use: singleUse, view_only: viewOnly, expires_at, created_by: userRes?.user?.id })
     .select()
     .single();
 }
@@ -89,6 +89,15 @@ export async function acceptInvite(code) {
   const { data, error } = await supabase.rpc('accept_project_invite', { p_code: code });
   if (error) return { songId: null, error };
   return { songId: data, error: null };
+}
+
+// The read-only snapshot behind a share link — callable with NO session (it
+// runs as the anon role; the code is the only credential). See
+// get_shared_song in supabase/migration_shared_readonly_link.sql.
+export async function getSharedSong(code) {
+  const { data, error } = await supabase.rpc('get_shared_song', { p_code: code });
+  if (error) return { snapshot: null, error };
+  return { snapshot: data, error: null };
 }
 
 // Lets the signed-in user set how they appear to collaborators. Defaults to

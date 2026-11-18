@@ -16,6 +16,9 @@ export default function CollaboratorsSheet({ songId, userId, isOwner, onClose })
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [creatingInvite, setCreatingInvite] = useState(false);
+  // On by default: signing in from a link normally joins as an editor. Off makes
+  // a link that only ever shows the song, even to someone with an account.
+  const [allowEdit, setAllowEdit] = useState(true);
   const [copiedId, setCopiedId] = useState(null);
   const [removingId, setRemovingId] = useState(null);
 
@@ -34,11 +37,11 @@ export default function CollaboratorsSheet({ songId, userId, isOwner, onClose })
   const handleCreateInvite = useCallback(async () => {
     setCreatingInvite(true);
     setError(null);
-    const { data, error: err } = await createInvite(songId, {});
+    const { data, error: err } = await createInvite(songId, { viewOnly: !allowEdit });
     setCreatingInvite(false);
     if (err) { setError(err.message || String(err)); return; }
     setInvites((cur) => [data, ...cur]);
-  }, [songId]);
+  }, [songId, allowEdit]);
 
   const handleCopy = useCallback(async (invite) => {
     const url = inviteUrl(invite.code);
@@ -123,6 +126,14 @@ export default function CollaboratorsSheet({ songId, userId, isOwner, onClose })
                 </button>
               </div>
 
+              <label className="collab-allow-edit">
+                <input type="checkbox" checked={allowEdit} onChange={(e) => setAllowEdit(e.target.checked)} />
+                <span>Permitir editar al iniciar sesión</span>
+              </label>
+              <p className="attach-sub collab-allow-edit-hint">
+                Quien abra el enlace sin cuenta siempre verá la canción en solo lectura.
+              </p>
+
               {invites.length === 0 ? (
                 <p className="attach-sub">Sin enlaces activos.</p>
               ) : (
@@ -130,6 +141,7 @@ export default function CollaboratorsSheet({ songId, userId, isOwner, onClose })
                   {invites.map((inv) => (
                     <div key={inv.id} className="collab-invite-row">
                       <code className="collab-invite-code">{inv.code.slice(0, 10)}…</code>
+                      {inv.view_only && <span className="collab-invite-tag">solo lectura</span>}
                       <button className="collab-invite-copy" onClick={() => handleCopy(inv)} title="copiar enlace">
                         {copiedId === inv.id ? <IcCheck size={15} /> : <IcCopy size={15} />}
                       </button>

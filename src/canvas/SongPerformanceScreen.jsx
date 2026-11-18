@@ -17,7 +17,12 @@ import { IcChevronLeft } from '../mobile/icons.jsx';
 // reading straight through the song wants to see the chord changes too,
 // not just the words); empty blocks are skipped entirely, since a blank
 // verse has nothing to offer here.
-export default function SongPerformanceScreen({ title, groups, onClose }) {
+//
+// `preloadedChords` / `banner` / no `onClose`: the same screen is the SHARED
+// read-only view (SharedSongScreen) — a visitor with no session can't query
+// line_chords, so the chords arrive already loaded (get_shared_song), there
+// is no thread to go back to, and a strip above the song says who's looking.
+export default function SongPerformanceScreen({ title, groups, onClose, preloadedChords, banner }) {
   // groups is the only real dependency — splitIntoLines runs across every
   // block's full text, so this shouldn't redo the work on a render triggered
   // by something unrelated bubbling through from the parent thread screen.
@@ -45,8 +50,10 @@ export default function SongPerformanceScreen({ title, groups, onClose }) {
   // Keyed by lineId (the block's own text-row id, which `position`/
   // `line_index` are scoped under) so a section whose note has since been
   // deleted/changed id simply shows no chords rather than stale ones.
-  const [chordsByLineId, setChordsByLineId] = useState({});
+  const [fetchedChords, setChordsByLineId] = useState({});
+  const chordsByLineId = preloadedChords ?? fetchedChords;
   useEffect(() => {
+    if (preloadedChords) return undefined;
     const lineIds = [...new Set(sections.map((s) => s.lineId).filter(Boolean))];
     if (!lineIds.length) { setChordsByLineId({}); return undefined; }
     let cancelled = false;
@@ -81,9 +88,10 @@ export default function SongPerformanceScreen({ title, groups, onClose }) {
   return (
     <MobileScreen className="perf-screen">
       <div className="perf-header">
-        <button className="thread-back" onClick={onClose} title="cerrar"><IcChevronLeft size={24} /></button>
+        {onClose && <button className="thread-back" onClick={onClose} title="cerrar"><IcChevronLeft size={24} /></button>}
         <h1 className="perf-title">{title || 'Sin título'}</h1>
       </div>
+      {banner}
       <div className="perf-body">
         {sections.length === 0 ? (
           <p className="thread-status">Aún no hay letra que leer.</p>

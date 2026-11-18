@@ -406,7 +406,7 @@ rhyme. Both have regression tests in `rhyme.test.js`.
   calls/guest/day, one shared all-users daily cap (both inside
   `claude_consume_quota()`, which `api/claude.js` calls), a restrictive
   Storage policy (no uploads), a 3-song cap, and an hourly pg_cron job that
-  deletes guest accounts older than a day (everything cascades off
+  deletes guest accounts older than three days (everything cascades off
   `auth.users`). The client only hides upload buttons (`isGuestNow()`) and
   turns 429/503 from the proxy into readable errors (`throwIfQuotaRefused`).
   Dashboard prerequisites: enable *anonymous sign-ins*, enable *pg_cron*,

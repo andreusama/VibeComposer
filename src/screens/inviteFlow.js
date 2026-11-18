@@ -13,6 +13,8 @@
 import { setState, getState } from '../state/store.js';
 import { acceptInvite } from '../canvas/collaborationData.js';
 import { loadSongById } from './projectsData.js';
+import { supabase } from '../utils/supabaseClient.js';
+import { isGuest } from '../utils/guest.js';
 
 const STORAGE_KEY = 'vibecomposer_pending_invite';
 
@@ -28,50 +30,98 @@ export function captureInviteFromUrl() {
   window.history.replaceState({}, '', url.pathname + (url.search ? `?${url.searchParams}` : '') + url.hash);
 }
 
+// True while someone on the read-only view has asked to sign in to edit. Their
+// session is (still) absent or a guest's, so without this the very next auth
+// change would just put them straight back on the read-only view.
+let signingInToEdit = false;
+
+function storedCode() {
+  try { return localStorage.getItem(STORAGE_KEY); } catch { return null; }
+}
+
 // store.js calls this from both getSession().then(...) and onAuthChange,
 // which can both fire within the same tick on boot — this guard is what
 // keeps that from redeeming (and burning a single-use invite on) the same
 // code twice, not any expectation that callers track it themselves.
 let consuming = false;
 
-// Call once a real session exists. No-ops instantly if nothing's pending —
-// safe to call on every auth-state change rather than tracking "did I
-// already try this" separately.
-export async function consumeStoredInvite() {
+// Call on every session change, signed in or not.
+//   • A real ACCOUNT joins the song as an editor (accept_project_invite).
+//   • Anyone else — no session, or a guest session — sees the read-only view
+//     (docs/adr/0003): a guest is not an account, and viewing creates nothing.
+// No-ops instantly when no link is pending, so it's safe to call every time.
+export async function consumeStoredInvite(session) {
   if (consuming) return;
-  let code;
-  try { code = localStorage.getItem(STORAGE_KEY); } catch { code = null; }
+  const code = storedCode();
   if (!code) return;
+
+  const isAccount = Boolean(session) && !isGuest(session);
+  if (!isAccount) {
+    if (!signingInToEdit) setState({ sharedCode: code });
+    return;
+  }
+
   consuming = true;
+  signingInToEdit = false;
+  setState({ sharedCode: null, inviteStatus: 'joining' });
 
-  setState({ inviteStatus: 'joining' });
+  try {
+    const { songId, error } = await acceptInvite(code);
 
-  const { songId, error } = await acceptInvite(code);
-  try { localStorage.removeItem(STORAGE_KEY); } catch { /* nothing more to do if storage is unavailable */ }
+    // An owner's view-only link never grants editing, even to an account: keep
+    // the code (a refresh should still land here) and show the read-only view.
+    if (error && /view only/i.test(error.message)) {
+      setState({ inviteStatus: null, sharedCode: code });
+      return;
+    }
 
-  if (error) {
-    setState({ inviteStatus: 'error', inviteError: humanizeInviteError(error.message) });
-    return;
+    try { localStorage.removeItem(STORAGE_KEY); } catch { /* nothing more to do if storage is unavailable */ }
+
+    if (error) {
+      setState({ inviteStatus: 'error', inviteError: humanizeInviteError(error.message) });
+      return;
+    }
+
+    const { song, error: songError } = await loadSongById(songId);
+    if (songError || !song) {
+      setState({ inviteStatus: 'error', inviteError: 'Joined, but the project could not be opened. Try from the projects list.' });
+      return;
+    }
+
+    // Drop it into the normal songs list too, same as any other open —
+    // otherwise it'd only exist in activeSong until the next full reload.
+    const { songs } = getState();
+    const alreadyListed = songs.some((s) => s.id === song.id);
+    setState({
+      songs: alreadyListed ? songs : [song, ...songs],
+      activeSong: song,
+      activeAlbumId: null,
+      screen: 'canvas',
+      inviteStatus: null,
+      inviteError: null,
+    });
+  } finally {
+    consuming = false;
   }
+}
 
-  const { song, error: songError } = await loadSongById(songId);
-  if (songError || !song) {
-    setState({ inviteStatus: 'error', inviteError: 'Joined, but the project could not be opened. Try from the projects list.' });
-    return;
+// "Inicia sesión para editar" on the read-only view. The link stays stashed, so
+// the moment a real account signs in, consumeStoredInvite joins them. A guest
+// session is dropped first: the sign-in screen only shows when there is none
+// (their demo song is simply left to the 3-day cleanup).
+export async function signInToEdit() {
+  signingInToEdit = true;
+  setState({ sharedCode: null, screen: 'auth' });
+  if (isGuest(getState().session)) {
+    await supabase.auth.signOut({ scope: 'local' });
   }
+}
 
-  // Drop it into the normal songs list too, same as any other open —
-  // otherwise it'd only exist in activeSong until the next full reload.
-  const { songs } = getState();
-  const alreadyListed = songs.some((s) => s.id === song.id);
-  setState({
-    songs: alreadyListed ? songs : [song, ...songs],
-    activeSong: song,
-    activeAlbumId: null,
-    screen: 'canvas',
-    inviteStatus: null,
-    inviteError: null,
-  });
+// Leaves the read-only view for good and forgets the link.
+export function leaveSharedView() {
+  signingInToEdit = false;
+  try { localStorage.removeItem(STORAGE_KEY); } catch { /* best-effort */ }
+  setState({ sharedCode: null });
 }
 
 function humanizeInviteError(message) {

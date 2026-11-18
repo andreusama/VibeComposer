@@ -7,7 +7,7 @@
 --   • guests can't upload anything to Storage (voice memos, Baúl photos)
 --   • guests are capped at a few songs, and their accounts (plus everything
 --     they made — every table cascades off auth.users) are deleted
---     automatically after a day
+--     automatically after three days
 --
 -- PREREQUISITE (dashboard, not SQL): Authentication → Sign In / Providers →
 -- enable "Allow anonymous sign-ins". Strongly recommended there too: turn on
@@ -204,7 +204,7 @@ grant execute on function create_demo_song() to authenticated;
 
 -- ─── 5. Auto-delete guest accounts ──────────────────────────────────────────
 -- Deleting the auth user cascades to everything it owns (songs → sections →
--- lines → chords, claude_usage, …). Anything older than a day goes.
+-- lines → chords, claude_usage, …). Anything older than three days goes.
 
 create or replace function cleanup_guest_users()
 returns integer
@@ -218,7 +218,7 @@ begin
   with gone as (
     delete from auth.users
     where is_anonymous = true
-      and created_at < now() - interval '1 day'
+      and created_at < now() - interval '3 days'
     returning 1
   )
   select count(*) into v_deleted from gone;

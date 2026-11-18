@@ -1,6 +1,8 @@
 import { supabase } from './supabaseClient.js';
 import { setState, getState } from '../state/store.js';
 import { loadProjectSummaries } from '../screens/projectsData.js';
+import { updateDisplayName } from '../canvas/collaborationData.js';
+import { guestName } from './guestNames.js';
 
 // ─── "Try the demo" guest sessions ──────────────────────────────────────────
 // A guest is a Supabase ANONYMOUS user: a real session (so every RLS policy
@@ -8,7 +10,7 @@ import { loadProjectSummaries } from '../screens/projectsData.js';
 // no sign-up. What makes it a demo rather than free reign is enforced in the
 // database, not here — see supabase/migration_guest_demo.sql: ~10 Muse calls
 // a day, one shared daily cap across all users, no Storage uploads, a small
-// song cap, and accounts auto-deleted after a day. Everything in this file
+// song cap, and accounts auto-deleted after three days. Everything in this file
 // (hiding upload buttons, the demo banner) is only the friendly face of
 // those limits.
 
@@ -47,6 +49,10 @@ function friendlyError(error) {
 export async function startGuestDemo() {
   const { error } = await supabase.auth.signInAnonymously();
   if (error) return { error: friendlyError(error) };
+
+  // "Invitado" is only the database's fallback; a playful name reads better in
+  // the collaborators list. Cosmetic, so a failure here must not fail the demo.
+  updateDisplayName(guestName()).catch(() => {});
 
   const { error: seedError } = await supabase.rpc('create_demo_song');
   if (seedError) return { error: friendlyError(seedError) };

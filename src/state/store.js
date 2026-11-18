@@ -39,6 +39,7 @@ let state = {
   // small transient screen for 'joining'/'error' instead of the normal one.
   inviteStatus:   null,
   inviteError:    null,
+  sharedCode:     null, // a share link being viewed read-only (see SharedSongScreen)
 };
 
 // ─── Auth session sync ──────────────────────────────────────────────────────────
@@ -69,13 +70,14 @@ captureInviteFromUrl();
 // no recovery.
 getSession().then((session) => {
   setState({ session, sessionChecked: true });
-  if (session) consumeStoredInvite();
+  consumeStoredInvite(session);
 }).catch(() => {
   setState({ session: null, sessionChecked: true });
+  consumeStoredInvite(null);
 });
 onAuthChange((session) => {
   setState({ session });
-  if (session) consumeStoredInvite();
+  consumeStoredInvite(session);
 });
 
 // ─── Pub/sub ───────────────────────────────────────────────────────────────────

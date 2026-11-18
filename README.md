@@ -14,7 +14,7 @@ It is mobile-first: a touch-first editor for writing on the go, with a free-form
 - **Voice memos** — record a melody or idea against a part of the song.
 - **El Baúl** — a chest for raw inspiration (notes, photos, PDFs) that the Muse distils into a description of your voice and vocabulary, and writes with afterwards.
 - **Recursos** — your own library of references, with import from text or a photographed page.
-- **Collaboration** — share a song through an invite link; up to four people edit it together, live.
+- **Collaboration** — share a song through a link. Anyone who opens it sees the song's final read-through, read-only, with no sign-in; signing in with an account joins as an editor (up to four people edit together, live). The owner can make a link that never grants editing.
 - **Chord progressions and a studio** — generate a progression from a feeling, then arrange it in a step sequencer with a drum machine and a from-scratch Hammond organ.
 
 Lyrics can be written in Spanish or Catalan. The interface is mostly Spanish, with some English.
@@ -84,7 +84,7 @@ It drives the real app on a Pixel 7 profile, using real touch events rather than
 - about 10 Muse calls per guest per day, plus one daily cap shared by everyone, so a burst of visitors can't run up the bill;
 - no uploads — voice memos, photos and file imports are disabled and refused by Storage;
 - a small cap on how many songs a guest can create;
-- guest accounts are deleted automatically after a day.
+- guest accounts are deleted automatically after three days.
 
 To use it you need *anonymous sign-ins* enabled in Supabase (Authentication → Sign In / Providers) and `pg_cron` enabled for the cleanup job.
 

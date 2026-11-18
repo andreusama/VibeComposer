@@ -10,6 +10,9 @@ import * as LoadingScreen     from './screens/loading.js';
 import * as JoiningScreen     from './screens/joining.js';
 import * as StudioScreen      from './screens/studio.js';
 import * as AuthScreen        from './screens/auth.js';
+import SharedSongScreen from './screens/SharedSongScreen.jsx';
+import { signInToEdit, leaveSharedView } from './screens/inviteFlow.js';
+import { isGuest } from './utils/guest.js';
 import * as HomeScreen        from './screens/home.js';
 
 const SCREENS = {
@@ -66,6 +69,20 @@ function render(state) {
     if (reactRoot) { reactRoot.unmount(); reactRoot = null; }
     app.innerHTML = JoiningScreen.render(state);
     JoiningScreen.attach(state);
+    lastEffectiveScreen = null;
+    return;
+  }
+
+  // A share link opened without an account: the read-only view of the song,
+  // before anything about where else to land is decided.
+  if (state.sharedCode) {
+    if (!reactRoot) reactRoot = createRoot(app);
+    reactRoot.render(createElement(SharedSongScreen, {
+      code: state.sharedCode,
+      isAccount: Boolean(state.session) && !isGuest(state.session),
+      onSignIn: signInToEdit,
+      onLeave: leaveSharedView,
+    }));
     lastEffectiveScreen = null;
     return;
   }

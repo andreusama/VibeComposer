@@ -28,6 +28,15 @@ export async function seedSongWithChord({ title, lines, chords }) {
   return {
     songId: song.id,
     lineId: line.id,
+    // A share link on this song. Needs migration_shared_readonly_link.sql
+    // (view_only) for viewOnly links.
+    async invite({ viewOnly = false, revoked = false } = {}) {
+      const { data, error } = await sb.from('project_invites')
+        .insert({ song_id: song.id, created_by: auth.user.id, view_only: viewOnly, revoked_at: revoked ? new Date().toISOString() : null })
+        .select().single();
+      if (error) throw error;
+      return data.code;
+    },
     async chordsNow() {
       const { data } = await sb.from('line_chords').select('line_index, position, chord_name').eq('line_id', line.id).order('line_index').order('position');
       return data;

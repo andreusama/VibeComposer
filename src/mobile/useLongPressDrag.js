@@ -1,4 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { getInputMode } from '../utils/inputMode.js';
+
+// With a mouse there is no long-press: the drag starts as soon as the pointer
+// has moved this far with the button held (docs/adr/0002).
+const MOUSE_DRAG_SLOP = 4;
 
 // ─── "hold this thing, then drag it onto a line" — the origin gesture ──────
 // Shared by every chip/row that can be picked up and dropped onto a lyric
@@ -63,11 +68,46 @@ export default function useLongPressDrag({ ms = 380, slop = 8, vibrate = 12, onD
 
   const end = useCallback(() => { clearTimer(); setPressed(false); }, [clearTimer]);
 
+  // ── Mouse ────────────────────────────────────────────────────────────────
+  // Call from onMouseDown. Ignored unless the last pointer really was a mouse:
+  // a touch is followed by compatibility mouse events a moment later, which
+  // must not start a second, phantom gesture. Its own document-level listeners
+  // (so a quick flick that leaves the element is still followed), removed the
+  // moment the drag starts, the button is released, or the owner unmounts —
+  // what happens after onDragStart is useLineDragDrop's, exactly as for touch.
+  const mouseCleanupRef = useRef(null);
+  const stopMouse = useCallback(() => { mouseCleanupRef.current?.(); mouseCleanupRef.current = null; }, []);
+  useEffect(() => stopMouse, [stopMouse]);
+
+  const startMouse = useCallback((e, payload) => {
+    if (e.button !== 0 || getInputMode() !== 'mouse') return;
+    stopMouse();
+    const sx = e.clientX;
+    const sy = e.clientY;
+    startRef.current = { x: sx, y: sy, moved: false };
+    // No native text selection or image drag competing with this gesture.
+    e.preventDefault();
+
+    const onMove = (ev) => {
+      if (Math.hypot(ev.clientX - sx, ev.clientY - sy) <= MOUSE_DRAG_SLOP) return;
+      stopMouse();
+      startRef.current.moved = true; // whatever click follows is not a tap
+      onDragStart(payload, ev.clientX, ev.clientY);
+    };
+    document.addEventListener('mousemove', onMove, true);
+    document.addEventListener('mouseup', stopMouse, true);
+    mouseCleanupRef.current = () => {
+      document.removeEventListener('mousemove', onMove, true);
+      document.removeEventListener('mouseup', stopMouse, true);
+    };
+  }, [onDragStart, stopMouse]);
+
   return {
     pressed,
     start,
     move,
     end,
+    startMouse,
     cancel: end,
     moved: () => startRef.current.moved,
     startPoint: () => ({ x: startRef.current.x, y: startRef.current.y }),

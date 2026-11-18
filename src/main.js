@@ -1,7 +1,6 @@
 import { createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { subscribe, getState, setState } from './state/store.js';
-import CanvasScreen from './canvas/CanvasScreen.jsx';
 import SongThreadScreen from './canvas/SongThreadScreen.jsx';
 import MobileHomePager from './screens/MobileHomePager.jsx';
 import MobileAlbumScreen from './screens/MobileAlbumScreen.jsx';
@@ -13,13 +12,13 @@ import * as AuthScreen        from './screens/auth.js';
 import SharedSongScreen from './screens/SharedSongScreen.jsx';
 import { signInToEdit, leaveSharedView } from './screens/inviteFlow.js';
 import { isGuest } from './utils/guest.js';
-import * as HomeScreen        from './screens/home.js';
+import { initInputMode } from './utils/inputMode.js';
+import { installEscapeCloses } from './utils/escapeCloses.js';
 
 const SCREENS = {
   loading:        LoadingScreen,
   studio:         StudioScreen,
   auth:           AuthScreen,
-  home:           HomeScreen,
 };
 
 // The only screen reachable without a session — everything else (including
@@ -45,13 +44,6 @@ let lastEffectiveScreen = null;
 // vanilla code clobber #app while React still thinks it owns that subtree
 // would desync React's internal tree from the real DOM.
 let reactRoot = null;
-
-// Matches style.css's own "narrow viewports (phones, half-split windows)"
-// breakpoint — below it, the canvas's free-form 2D layout doesn't work on
-// touch (see ROADMAP.md Phase 1), so the song thread's linear card list
-// takes over instead.
-const MOBILE_BREAKPOINT = 640;
-const isMobileViewport = () => window.innerWidth <= MOBILE_BREAKPOINT;
 
 function render(state) {
   if (!state.sessionChecked) {
@@ -94,8 +86,7 @@ function render(state) {
 
   if (screenKey === 'canvas') {
     if (!reactRoot) reactRoot = createRoot(app);
-    const ScreenComponent = isMobileViewport() ? SongThreadScreen : CanvasScreen;
-    reactRoot.render(createElement(ScreenComponent, {
+    reactRoot.render(createElement(SongThreadScreen, {
       state,
       justEntered,
       // A track opened from inside an album returns to that album, not to
@@ -117,16 +108,13 @@ function render(state) {
     return;
   }
 
-  // Albums only have a mobile screen so far — on a desktop-width viewport
-  // there's nothing to show, so fall back to the (flat) projects grid.
   if (screenKey === 'album') {
-    if (!isMobileViewport()) { setState({ screen: 'home', activeAlbumId: null }); return; }
     if (!reactRoot) reactRoot = createRoot(app);
     reactRoot.render(createElement(MobileAlbumScreen, { state, justEntered }));
     return;
   }
 
-  if (screenKey === 'home' && isMobileViewport()) {
+  if (screenKey === 'home') {
     if (!reactRoot) reactRoot = createRoot(app);
     reactRoot.render(createElement(MobileHomePager, { state, justEntered }));
     return;
@@ -154,27 +142,7 @@ subscribe((state) => {
   render(state);
 });
 
+initInputMode();
+installEscapeCloses();
 setAccentFromState(getState());
 render(getState());
-
-// Only meant for browser-window/device-emulation testing crossing
-// MOBILE_BREAKPOINT — but real mobile browsers fire `resize` far more than
-// that: the on-screen keyboard opening/closing, and Android Chrome's
-// address bar hiding/showing on scroll, both fire it constantly. Without
-// the isMobile !== lastIsMobile guard, every one of those re-rendered the
-// whole app from a fresh getState() snapshot mid-interaction (e.g. while a
-// song-thread rename/language sheet was mid-edit) — a class of disruption
-// desktop never hits, since nobody resizes their browser window while
-// typing. Now it only actually re-renders when the breakpoint is crossed,
-// which is the one case this was ever meant to handle.
-let resizeTimer = null;
-let lastIsMobile = isMobileViewport();
-window.addEventListener('resize', () => {
-  clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => {
-    const nowMobile = isMobileViewport();
-    if (nowMobile === lastIsMobile) return;
-    lastIsMobile = nowMobile;
-    render(getState());
-  }, 150);
-});

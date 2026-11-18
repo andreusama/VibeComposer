@@ -4546,7 +4546,7 @@ body::before {
     height: 100%;
     transition: left 0.28s cubic-bezier(0.32, 0.72, 0, 1);
 }
-.home-pager-track > .mobile-screen { width: 100vw; flex-shrink: 0; }
+.home-pager-track > .mobile-screen { width: calc(100vw - 2 * var(--gutter)); flex-shrink: 0; }
 
 .mobile-tabbar {
     position: absolute;
@@ -9217,61 +9217,6 @@ body::before {
     color: var(--rose);
 }
 
-/* ─── Desktop: the app lives in a phone-sized frame (src/desktopFrame.js) ─── */
-body.phone-frame-page { background: #1b1b1f; margin: 0; }
-.phone-frame-stage {
-    min-height: 100vh;
-    min-height: 100dvh;
-    box-sizing: border-box;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 14px;
-    padding: 24px 16px;
-}
-.phone-frame-device {
-    width: 412px;
-    max-width: 100%;
-    height: min(880px, calc(100dvh - 90px));
-    box-sizing: border-box;
-    padding: 10px;
-    border-radius: 44px;
-    background: #0b0b0d;
-    box-shadow: 0 0 0 2px #2c2c31, 0 30px 80px rgba(0, 0, 0, 0.55);
-}
-/* The rounded "glass" of the phone. A border-radius on the iframe alone is not
-   enough: Chrome and Safari let anything that gets its own compositing layer
-   inside the page (backdrop-filter bars, sliding sheets, scrims) draw over the
-   iframe's rounded corners as a square. Clipping the WRAPPER, three ways
-   (overflow, clip-path, and a mask for older WebKit), clips those layers too. */
-.phone-frame-clip {
-    width: 100%;
-    height: 100%;
-    border-radius: 34px;
-    overflow: hidden;
-    clip-path: inset(0 round 34px);
-    -webkit-mask-image: -webkit-radial-gradient(white, black);
-    isolation: isolate;
-    transform: translateZ(0);
-    background: #faf8f3;
-}
-.phone-frame-screen {
-    display: block;
-    width: 100%;
-    height: 100%;
-    border: 0;
-    border-radius: 34px;
-    background: #faf8f3;
-}
-.phone-frame-caption {
-    margin: 0;
-    font-family: var(--font-sans, system-ui, sans-serif);
-    font-size: 13px;
-    color: #8a8a93;
-    text-align: center;
-}
-
 /* ─── Shared song, read-only (screens/SharedSongScreen.jsx) ──────────────── */
 .shared-banner {
     display: flex;
@@ -9324,3 +9269,93 @@ body.phone-frame-page { background: #1b1b1f; margin: 0; }
     font-size: var(--fs-label);
     color: var(--ink);
 }
+
+
+/* ═══ Wide screens: the mobile app, expanded (docs/adr/0001) ═══════════════════
+   Desktop has no layout of its own — it is the mobile screens in a centred,
+   wider column with room around it. Everything that is fixed to the viewport
+   stays viewport-relative (JS positions the drag pill, popovers and the like
+   from clientX/clientY, so a transformed ancestor would shift them); the
+   full-width layers are inset by --gutter instead, which is 0 on a phone. */
+:root {
+    --col-w: 760px;
+    --gutter: 0px;
+}
+@media (min-width: 900px) {
+    :root { --gutter: calc((100vw - var(--col-w)) / 2); }
+
+    /* More room means a bigger page: every rem-based size (the lyric included)
+       grows by an eighth. */
+    html { font-size: 112.5%; }
+    body { background-color: var(--paper-deeper); }
+    body::before { display: none; }
+
+    /* The vanilla screens (sign-in, loading) flow inside #app. */
+    #app {
+        max-width: var(--col-w);
+        margin: 0 auto;
+        min-height: 100vh;
+        background: var(--paper);
+        box-shadow: 0 0 0 1px var(--hairline), 0 0 80px rgba(29, 28, 26, 0.08);
+    }
+
+    /* Layers that fill the screen: the column, not the window. */
+    .mobile-screen,
+    .kab,
+    .na-sheet2,
+    .mp-anchored {
+        left: var(--gutter);
+        right: var(--gutter);
+    }
+    .mobile-screen { box-shadow: 0 0 0 1px var(--hairline), 0 0 80px rgba(29, 28, 26, 0.08); }
+    .mobile-screen.mobile-screen-relative { left: auto; right: auto; box-shadow: none; }
+
+    /* Bottom sheets become centred dialogs. The dimmed backdrop still covers
+       the whole window, so a click outside closes them. */
+    .ts-backdrop,
+    .baul-sheet-scrim { align-items: center; justify-content: center; }
+    .ts-sheet .ts-grabber,
+    .baul-sheet .ts-grabber { display: none; } /* a drag handle is a touch affordance */
+    .ts-sheet,
+    .baul-sheet {
+        width: min(560px, calc(100vw - 2 * var(--space-6)));
+        max-height: min(80vh, 720px);
+        border-radius: var(--r-lg);
+        overflow-y: auto;
+    }
+}
+
+
+/* ═══ Mouse mode (docs/adr/0002) — set by src/utils/inputMode.js ═══════════════ */
+/* The dragged pill sits ON the cursor; the touch offset above the finger exists
+   only so a finger doesn't cover it. */
+html[data-input="mouse"] .res-picker-drag-pill { transform: translate(-50%, -50%); }
+
+/* Placed chords: grab cursor, and the delete × appears on hover instead of
+   after a tap. */
+html[data-input="mouse"] .lc-pill:not(.lc-pill-readonly):not(.lc-pill-preview) { cursor: grab; }
+html[data-input="mouse"] .lc-pill-remove { opacity: 0; pointer-events: none; transition: opacity 0.12s; }
+html[data-input="mouse"] .lc-pill:hover .lc-pill-remove,
+html[data-input="mouse"] .lc-pill-remove:focus-visible { opacity: 1; pointer-events: auto; }
+
+/* Chips and rows that can be picked up. */
+html[data-input="mouse"] .cs-chip,
+html[data-input="mouse"] .res-picker-row { cursor: grab; }
+
+/* Project rows: delete on hover (mouse mode has no swipe-to-reveal). */
+.mp-row-hover-delete {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    margin-right: var(--space-2);
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--graphite-soft);
+    cursor: pointer;
+}
+html[data-input="mouse"] .mp-card:hover .mp-row-hover-delete,
+html[data-input="mouse"] .mp-row-hover-delete:focus-visible { display: inline-flex; }
+.mp-row-hover-delete:hover { background: var(--amber-soft); color: var(--ink); }

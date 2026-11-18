@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { spreadRow, computeChordSpans } from '../utils/chordAnchor.js';
 import useLongPressDrag from '../mobile/useLongPressDrag.js';
+import { useInputMode } from '../utils/inputMode.js';
 
 // ─── Chord symbols strung across a verse ────────────────────────────────────
 // A stackable, reorderable, overridable sequence of chords per line — each
@@ -37,6 +38,10 @@ const PILL_GAP = 4; // minimum px between two pills on the same visual row
 // box, but both agree it is CENTRED on the text, which is why everything
 // below is derived from the centre and GLYPH_H instead of from rect.height.
 const GLYPH_H = 22;
+// The lyric font is in rem, so it grows with the root font size (wide screens
+// raise it — see the "mobile app, expanded" block in style.css) and so must
+// the glyph box this positions pills against.
+const rootScale = () => (parseFloat(getComputedStyle(document.documentElement).fontSize) || 16) / 16;
 const PILL_LIFT = 1; // px of air between the bottom of a pill and the text
 
 // How long a tapped pill stays armed with its delete affordance before it
@@ -81,6 +86,8 @@ function ChordPillView({ chord: c, placement: p, armed, onArm, onDismissArm, onR
   // keep listening on it after React re-parents this pill (see useLineDragDrop).
   const touchTargetRef = useRef(null);
   const lp = useLongPressDrag({ onDragStart: (payload, x, y) => onMoveStart?.(payload, x, y, touchTargetRef.current) });
+  // With a mouse there is no tap-to-arm: the × is always there, shown on hover.
+  const mouse = useInputMode() === 'mouse';
 
   // A preview entry (NoteEditorScreen's previewChordsByLine): the phantom
   // this SAME chord would occupy here if the in-flight drag ended right
@@ -122,14 +129,15 @@ function ChordPillView({ chord: c, placement: p, armed, onArm, onDismissArm, onR
       // the rendered pill itself is the only thing a drop can land "on".
       data-chord-id={c.id}
       style={p ? { left: p.left, top: p.top, width: p.width } : { left: 0, top: 0, visibility: 'hidden' }}
+      onMouseDown={(e) => lp.startMouse(e, { id: c.id, chordName: c.chordName })}
       onTouchStart={(e) => { const t = e.touches[0]; touchTargetRef.current = e.target; lp.start(t.clientX, t.clientY, { id: c.id, chordName: c.chordName }); }}
       onTouchMove={(e) => { const t = e.touches[0]; lp.move(t.clientX, t.clientY); }}
       onTouchEnd={lp.end}
       onTouchCancel={lp.end}
-      onClick={() => { if (!lp.moved()) onArm(); }}
+      onClick={() => { if (!lp.moved() && !mouse) onArm(); }}
     >
       {c.chordName}
-      {armed && (
+      {(armed || mouse) && (
         <button
           className="lc-pill-remove"
           onClick={(e) => { e.stopPropagation(); onDismissArm(); onRemove?.(c.id); }}
@@ -214,7 +222,7 @@ export default function LineChordStrip({ text, chords, onRemove, onMoveStart, re
       // never look like one fused bar.
       const width = Math.max(0, rect.width - PILL_GAP);
       rows.get(key).push({ id: c.id, left: rect.left - base.left, width });
-      tops[c.id] = rowCenter - GLYPH_H / 2 - PILL_LIFT - (el ? el.offsetHeight : 0);
+      tops[c.id] = rowCenter - (GLYPH_H * rootScale()) / 2 - PILL_LIFT - (el ? el.offsetHeight : 0);
     });
 
     const next = {};

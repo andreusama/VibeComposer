@@ -56,9 +56,10 @@ thread, mobile projects list, and Muse Eye debug screen are real React
 trees (`createRoot`, mounted/unmounted into `#app` as needed); everything
 else (`auth`, `home`, `studio`, `loading`) is the original vanilla
 `render(state)`/`attach(state)` innerHTML pattern from the pre-Supabase app.
-Below `MOBILE_BREAKPOINT` (640px) the router swaps `CanvasScreen` for
-`SongThreadScreen` and the desktop `home` composer-intro for
-`MobileProjectsScreen` — same session/data, different chrome.
+There is ONE interface at every screen size (docs/adr/0001, 2026-11-18): the
+router always uses the mobile screens (`SongThreadScreen`, `MobileHomePager`,
+…); `CanvasScreen` and the desktop `home` composer-intro are retired and no
+longer routed to (code left in place, parked).
 
 ```
 auth (signed-out only) → home → [canvas | song-thread] → studio (from a chord progression's "arrange")
@@ -78,7 +79,7 @@ auth (signed-out only) → home → [canvas | song-thread] → studio (from a ch
   to change from a `<button>` wrapper to a `<div role="button">` to host
   the delete button as an independently-tappable child without nesting
   buttons.
-- **canvas** (`src/canvas/CanvasScreen.jsx`, desktop only) — free-form 2D
+- **canvas** (`src/canvas/CanvasScreen.jsx`) — RETIRED, parked: no longer routed to (see ADR 0001). Was the free-form 2D
   React Flow board. Node types: `TextNoteNode` (a section/verse — see "A
   note IS a `sections` row" below), `ChordProgressionNode`,
   `InspirationBlackHoleNode`/`BaulFloatNode` (the Baúl, see below),
@@ -397,7 +398,7 @@ from a whitelist otherwise built from Catalan's accent set, which has no
 diphthong — "rayo" computed the *same* rhyme key as "cacao," which don't
 rhyme. Both have regression tests in `rhyme.test.js`.
 
-## Public demo: guests + desktop phone frame
+## Public demo: guests, and the desktop layout
 
 - **"try the demo"** (auth screen) → `src/utils/guest.js` `startGuestDemo()`:
   Supabase *anonymous* sign-in, then the `create_demo_song()` RPC seeds a
@@ -411,13 +412,19 @@ rhyme. Both have regression tests in `rhyme.test.js`.
   turns 429/503 from the proxy into readable errors (`throwIfQuotaRefused`).
   Dashboard prerequisites: enable *anonymous sign-ins*, enable *pg_cron*,
   ideally CAPTCHA.
-- **Desktop = phone frame.** `index.html` loads `src/entry.js`; on a wide
-  screen it mounts a phone-sized iframe of the same URL (`desktopFrame.js`) and
-  never boots the app itself, so the mobile layout runs unmodified at a real
-  phone width. Inside the frame a mouse is translated to touch events
-  (Chromium only) so long-press drags work. `?desktop=1` bypasses the frame
-  (developer escape hatch to the old canvas). Google OAuth redirects the top
-  page, since Google refuses to render in an iframe.
+- **Desktop = the mobile app, expanded** (docs/adr/0001). On a wide screen
+  (≥900px) the same screens sit in a centred 760px column (`--col-w`,
+  `--gutter` in style.css; `html` font-size raised an eighth). Everything
+  `position: fixed` stays viewport-relative — JS positions the drag pill and
+  popovers from `clientX/Y`, so no transformed ancestor — and the full-width
+  layers are inset by `--gutter` instead. Bottom sheets become centred dialogs.
+- **Input mode** (docs/adr/0002, `src/utils/inputMode.js`): `data-input="touch|mouse"`
+  on `<html>`, taken from the LAST pointer used. Touch keeps its long-press/swipe
+  gestures untouched; a mouse gets press-and-drag after 4px
+  (`useLongPressDrag.startMouse`, `useLineDragDrop`'s mouse listeners),
+  hover-only × on chords and delete on project rows, Esc to close the top sheet
+  (`escapeCloses.js`) or abandon a drag, and a mouse-driven strum pad. Not done
+  yet for the mouse: drag-to-reorder project rows, the Baúl cabinet swipe.
 
 ## Deployment
 

@@ -2,7 +2,7 @@
 
 A songwriting app built around **La Musa**, an AI co-writer that helps you write, rhyme and refine lyrics — and a chord layer you place by hand, right on the words.
 
-It is mobile-first: a touch-first editor for writing on the go, with a free-form canvas version for larger screens. On a desktop browser the mobile app is shown inside a phone-sized frame.
+It is one interface for every screen: a touch-first editor for writing on the go, which on a wide screen becomes a centred, wider column with mouse-friendly gestures (hover to delete a chord, drag without a long-press, Esc to close a sheet).
 
 **Try it:** <https://vibecomposer-demo.vercel.app> — tap *try the demo*, no sign-up. You get a sample song to play with and a handful of Muse calls a day.
 
@@ -23,7 +23,7 @@ Lyrics can be written in Spanish or Catalan. The interface is mostly Spanish, wi
 
 | | |
 |---|---|
-| Front end | Vite, React 18, `@xyflow/react` (canvas) |
+| Front end | Vite, React 18 |
 | Back end | Supabase — Postgres with row-level security, Auth, Storage, Realtime |
 | AI | Claude, through a small serverless proxy (`api/claude.js`) so the key never reaches the browser |
 | Mobile | Capacitor (Android; iOS not added yet) |
@@ -49,7 +49,7 @@ npm run dev                  # http://localhost:5173
 
 Vite forwards `/api/claude` to the Python proxy in development; on Vercel the same path is served by `api/claude.js`.
 
-Open <http://localhost:5173>. On a wide window you get the phone frame; add `?desktop=1` to the URL for the original desktop canvas.
+Open <http://localhost:5173>. On a wide window the same app is shown in a centred column.
 
 ### Your own Supabase project
 
@@ -75,7 +75,7 @@ PLAYWRIGHT_TEST_EMAIL=...
 PLAYWRIGHT_TEST_PASSWORD=...
 ```
 
-It drives the real app on a Pixel 7 profile, using real touch events rather than synthetic ones, and covers the long-press-and-drag gestures, the guest demo and the desktop phone frame.
+It drives the real app on a Pixel 7 profile, using real touch events rather than synthetic ones, and covers the long-press-and-drag gestures on touch, the mouse gestures and layout on desktop, the guest demo and the shared read-only link.
 
 ## The public demo
 

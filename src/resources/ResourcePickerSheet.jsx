@@ -85,6 +85,7 @@ function ResourcePickerRow({ resource, onInsert, onDragStart }) {
   return (
     <div
       className={`res-picker-row${lp.pressed ? ' pressed' : ''}`}
+      onMouseDown={(e) => lp.startMouse(e, resource)}
       onTouchStart={onTouchStart}
       onTouchMove={onTouchMove}
       onTouchEnd={onTouchEnd}

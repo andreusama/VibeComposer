@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { lineIndexFromPoint, effectiveDragPoint } from '../utils/lineHitTest.js';
+import { getInputMode } from '../utils/inputMode.js';
 
 // ─── "carry a picked-up thing across the screen, onto a line" ──────────────
 // The live half of a long-press-and-drag-onto-a-line gesture, picked up
@@ -68,7 +69,9 @@ export default function useLineDragDrop({ onDragHoverLine, onDragActiveChange, o
   // node could simply be kept mounted, here re-parenting is unavoidable).
   // Listening on the target itself keeps hearing the gesture regardless.
   const beginDrag = useCallback((payload, x, y, touchTarget) => {
-    const next = { payload, x, y };
+    // Who is driving: a mouse reports through mousemove/mouseup, a finger through
+    // the touch events. Each path ignores the other's (docs/adr/0002).
+    const next = { payload, x, y, source: getInputMode() === 'mouse' ? 'mouse' : 'touch' };
     dragRef.current = next;
     setDrag(next);
     unbindTouchTarget();
@@ -111,25 +114,42 @@ export default function useLineDragDrop({ onDragHoverLine, onDragActiveChange, o
   }, [onDrop, onDragHoverLine, onDragActiveChange, unbindTouchTarget]);
 
   useEffect(() => {
-    const handleMove = (e) => {
-      if (!dragRef.current) return;
-      e.preventDefault();
-      const t = e.touches[0];
-      if (!t) return;
+    // One move for both inputs; only where the coordinates come from differs.
+    const applyMove = (clientX, clientY) => {
       // `next` (and the `drag` state it becomes) keeps the RAW point —
       // that's what LineDragPill's own x/y props position the floating
       // pill from, offset included. Only the hit-test below switches to
       // the pill's own effective (visual) point.
-      const next = { ...dragRef.current, x: t.clientX, y: t.clientY };
+      const next = { ...dragRef.current, x: clientX, y: clientY };
       dragRef.current = next;
       setDrag(next);
-      const hit = effectiveDragPoint(t.clientX, t.clientY);
+      const hit = effectiveDragPoint(clientX, clientY);
       onDragHoverLine?.(lineIndexFromPoint(hit.x, hit.y), hit.x, hit.y, next.payload);
     };
+    const handleMove = (e) => {
+      if (!dragRef.current || dragRef.current.source !== 'touch') return;
+      e.preventDefault();
+      const t = e.touches[0];
+      if (!t) return;
+      applyMove(t.clientX, t.clientY);
+    };
     const handleEnd = (e) => {
-      if (!dragRef.current) return;
+      if (!dragRef.current || dragRef.current.source !== 'touch') return;
       const t = e.changedTouches[0];
       endDrag(t?.clientX ?? null, t?.clientY ?? null);
+    };
+    const handleMouseMove = (e) => {
+      if (!dragRef.current || dragRef.current.source !== 'mouse') return;
+      e.preventDefault();
+      applyMove(e.clientX, e.clientY);
+    };
+    const handleMouseUp = (e) => {
+      if (!dragRef.current || dragRef.current.source !== 'mouse') return;
+      endDrag(e.clientX, e.clientY);
+    };
+    // Escape abandons a mouse drag where it stands, dropping nothing.
+    const handleKey = (e) => {
+      if (e.key === 'Escape' && dragRef.current) endDrag(null, null);
     };
     const handleCancel = () => {
       if (dragRef.current) endDrag(null, null);
@@ -138,10 +158,16 @@ export default function useLineDragDrop({ onDragHoverLine, onDragActiveChange, o
     document.addEventListener('touchmove', handleMove, { passive: false });
     document.addEventListener('touchend', handleEnd);
     document.addEventListener('touchcancel', handleCancel);
+    document.addEventListener('mousemove', handleMouseMove, true);
+    document.addEventListener('mouseup', handleMouseUp, true);
+    document.addEventListener('keydown', handleKey);
     return () => {
       document.removeEventListener('touchmove', handleMove);
       document.removeEventListener('touchend', handleEnd);
       document.removeEventListener('touchcancel', handleCancel);
+      document.removeEventListener('mousemove', handleMouseMove, true);
+      document.removeEventListener('mouseup', handleMouseUp, true);
+      document.removeEventListener('keydown', handleKey);
     };
   }, [endDrag, onDragHoverLine]);
 

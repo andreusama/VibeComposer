@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import StrumPattern from './StrumPattern.jsx';
 import LineDragPill from './LineDragPill.jsx';
 import useLongPressDrag from './useLongPressDrag.js';
+import { getInputMode } from '../utils/inputMode.js';
 import useLineDragDrop from './useLineDragDrop.js';
 import { IcChord, IcStrumDown, IcStrumUp, IcTrash, IcPlus, IcRegenerate } from './icons.jsx';
 import {
@@ -95,6 +96,7 @@ function ChordChip({ name, variant = 'major', onPick, onDragStart }) {
   return (
     <button
       className={`cs-chip cs-chip-${variant}${lp.pressed ? ' pressed' : ''}`}
+      onMouseDown={(e) => lp.startMouse(e, name)}
       onTouchStart={(e) => { const t = e.touches[0]; lp.start(t.clientX, t.clientY, name); }}
       onTouchMove={(e) => { const t = e.touches[0]; lp.move(t.clientX, t.clientY); }}
       onTouchEnd={lp.end}
@@ -200,12 +202,44 @@ function StrumPad({ recording, onStroke, children }) {
     setPreview(null);
   }, []);
 
+  // Mouse (docs/adr/0002): press, drag up or down, release — the same segmenter,
+  // fed from document-level mouse listeners so a stroke that runs off the pad
+  // still ends where the button is released.
+  const mouseStopRef = useRef(null);
+  useEffect(() => () => mouseStopRef.current?.(), []);
+  const handleMouseDown = useCallback((e) => {
+    if (e.button !== 0 || getInputMode() !== 'mouse') return;
+    e.preventDefault();
+    mouseStopRef.current?.();
+    segmenterRef.current.start(e.clientY, Date.now());
+    setPreview(null);
+    const onMove = (ev) => {
+      const now = Date.now();
+      emit(segmenterRef.current.move(ev.clientY, now));
+      setPreview(segmenterRef.current.preview(ev.clientY, now));
+    };
+    const stop = () => {
+      document.removeEventListener('mousemove', onMove, true);
+      document.removeEventListener('mouseup', onUp, true);
+      mouseStopRef.current = null;
+    };
+    const onUp = (ev) => {
+      stop();
+      setPreview(null);
+      emit(segmenterRef.current.end(ev.clientY, Date.now()));
+    };
+    document.addEventListener('mousemove', onMove, true);
+    document.addEventListener('mouseup', onUp, true);
+    mouseStopRef.current = stop;
+  }, [emit]);
+
   const PreviewArrow = preview?.direction === 'up' ? IcStrumUp : IcStrumDown;
 
   return (
     <div
       ref={padRef}
       className={`cs-pad${recording ? ' cs-pad-live' : ''}`}
+      onMouseDown={handleMouseDown}
       onTouchStart={handleStart}
       onTouchEnd={handleEnd}
       onTouchCancel={handleCancel}

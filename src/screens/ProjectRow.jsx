@@ -1,6 +1,7 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { computePreviewLayout } from './projectsData.js';
-import { IcChevronRight } from '../mobile/icons.jsx';
+import { IcChevronRight, IcTrash } from '../mobile/icons.jsx';
+import { useInputMode } from '../utils/inputMode.js';
 
 // "editado hoy" for anything from the last 24h of calendar days, otherwise a
 // plain lowercase date.
@@ -208,6 +209,8 @@ export default function ProjectRow({
     onOpen();
   };
 
+  const mouse = useInputMode() === 'mouse';
+
   const cardClass = `mp-card${pressed ? ' pressed' : ''}${drag ? ' dragging' : ''}${dropReady ? ' drop-ready' : ''}${dropActive ? ' drop-active' : ''}${insertMark ? ` mark-${insertMark}` : ''}`;
 
   return (
@@ -239,6 +242,18 @@ export default function ProjectRow({
           <div className="mp-row-title">{title || 'Sin título'}</div>
           <div className="mp-row-meta">{meta}</div>
         </div>
+        {/* A mouse has no swipe-to-reveal: delete is an icon shown on hover. */}
+        {mouse && (
+          <button
+            className="mp-row-hover-delete"
+            title="eliminar"
+            aria-label="eliminar"
+            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <IcTrash size={15} />
+          </button>
+        )}
         <span className="mp-row-chevron" aria-hidden="true"><IcChevronRight size={15} /></span>
       </div>
     </div>

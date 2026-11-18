@@ -9330,6 +9330,13 @@ body::before {
     .baul-sheet-scrim { align-items: center; justify-content: center; }
     .ts-sheet .ts-grabber,
     .baul-sheet .ts-grabber { display: none; } /* a drag handle is a touch affordance */
+    /* ...and with it gone the title needs the room the handle used to give it. */
+    .ts-sheet,
+    .baul-sheet { padding-top: var(--space-5); }
+    /* The 280px reading width is a phone's; in a dialog it left the intro text in
+       a third of the box. */
+    .ts-sheet .attach-sub,
+    .baul-sheet .attach-sub { max-width: none; }
     .ts-sheet,
     .baul-sheet {
         width: min(35rem, calc(100vw - 2 * var(--space-6)));

@@ -69,5 +69,9 @@ export default function useSwipePager({ count, index, setIndex, width = () => wi
   // in progress) — what the pager track's transform should be.
   const offsetPx = -index * width() + (dragPx ?? 0);
 
-  return { offsetPx, dragging: dragPx !== null, handlers: { onTouchStart, onTouchMove, onTouchEnd, onTouchCancel: onTouchEnd } };
+  // `dragOffset` is just the finger's travel; the resting position is better
+  // expressed as a percentage of the pager (see MobileHomePager) so it can never
+  // disagree with the pager's own width — on a wide window that is the column,
+  // not window.innerWidth.
+  return { offsetPx, dragOffset: dragPx ?? 0, dragging: dragPx !== null, handlers: { onTouchStart, onTouchMove, onTouchEnd, onTouchCancel: onTouchEnd } };
 }

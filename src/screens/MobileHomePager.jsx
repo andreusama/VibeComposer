@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { setState } from '../state/store.js';
 import MobileScreen from '../mobile/MobileScreen.jsx';
 import MobileTabBar from '../mobile/MobileTabBar.jsx';
@@ -21,7 +21,14 @@ const TABS = [
 export default function MobileHomePager({ state, justEntered }) {
   const index = Math.max(0, PAGES.indexOf(state.homeTab || 'projects'));
   const setIndex = (next) => setState({ homeTab: PAGES[next] });
-  const pager = useSwipePager({ count: PAGES.length, index, setIndex });
+  // The pager's own width — the column on a wide window, the screen on a phone —
+  // not the window's: a swipe must clear a fraction of THIS, and the resting
+  // offset below is a percentage of it.
+  const viewportRef = useRef(null);
+  const pager = useSwipePager({
+    count: PAGES.length, index, setIndex,
+    width: () => viewportRef.current?.clientWidth || window.innerWidth,
+  });
 
   // Both pages stay mounted, but each only fetches its own data when it's
   // actually the one on screen: the first time it becomes the active page,
@@ -37,10 +44,10 @@ export default function MobileHomePager({ state, justEntered }) {
 
   return (
     <MobileScreen className="home-pager-shell">
-      <div className="home-pager-viewport" {...pager.handlers}>
+      <div className="home-pager-viewport" ref={viewportRef} {...pager.handlers}>
         <div
           className="home-pager-track"
-          style={{ left: pager.offsetPx, transition: pager.dragging ? 'none' : undefined }}
+          style={{ left: `calc(${-index * 100}% + ${pager.dragOffset}px)`, transition: pager.dragging ? 'none' : undefined }}
         >
           <MobileProjectsScreen state={state} justEntered={enter(0)} />
           <MobileResourcesScreen state={state} justEntered={enter(1)} />

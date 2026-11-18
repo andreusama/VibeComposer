@@ -71,6 +71,10 @@ export default defineConfig({
       use: {
         ...devices['Desktop Chrome'],
         storageState: 'e2e/.auth/user.json',
+        // Headless Chromium hides scrollbars, a real desktop browser shows 15px
+        // ones — and everything measured in vw includes them. Test with them on,
+        // or layout bugs that only exist with a visible scrollbar stay invisible.
+        launchOptions: { ignoreDefaultArgs: ['--hide-scrollbars'] },
       },
       dependencies: ['setup'],
     },

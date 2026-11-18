@@ -195,3 +195,42 @@ test('a mouse can strum on the pad', async ({ page }) => {
     await seed.cleanup();
   }
 });
+
+// A real desktop browser shows scrollbars (this project runs with them on).
+test('the page itself does not scroll, so nothing is measured against a scrollbar', async ({ page }) => {
+  await page.setViewportSize({ width: 1692, height: 993 });
+  await page.goto('/');
+  await expect(page.locator('.mobile-screen').first()).toBeVisible();
+  const m = await page.evaluate(() => ({
+    scrollH: document.documentElement.scrollHeight, innerH: innerHeight,
+    clientW: document.documentElement.clientWidth, innerW: innerWidth,
+  }));
+  expect(m.scrollH).toBeLessThanOrEqual(m.innerH);
+  expect(m.clientW).toBe(m.innerW); // no scrollbar taking width
+});
+
+test('switching to Recursos lines the page up with the column, also after a resize', async ({ page }) => {
+  await page.setViewportSize({ width: 1692, height: 993 });
+  await page.goto('/');
+  await expect(page.locator('.home-pager-track').first()).toBeVisible();
+  await page.locator('.mobile-tabbar').getByText('Recursos', { exact: true }).click();
+
+  const aligned = async () => page.evaluate(() => {
+    const viewport = document.querySelector('.home-pager-viewport').getBoundingClientRect();
+    const slides = [...document.querySelectorAll('.home-pager-track > .mobile-screen')].map((e) => e.getBoundingClientRect());
+    return {
+      slideWidth: Math.round(slides[1].width), viewportWidth: Math.round(viewport.width),
+      // the visible page must start exactly at the left edge of the column
+      offset: Math.round(slides[1].left - viewport.left),
+    };
+  });
+
+  await expect.poll(async () => (await aligned()).offset, { timeout: 4000 }).toBe(0);
+  let a = await aligned();
+  expect(a.slideWidth).toBe(a.viewportWidth);
+
+  await page.setViewportSize({ width: 1200, height: 800 });
+  await expect.poll(async () => (await aligned()).offset, { timeout: 4000 }).toBe(0);
+  a = await aligned();
+  expect(a.slideWidth).toBe(a.viewportWidth);
+});

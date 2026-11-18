@@ -4546,7 +4546,9 @@ body::before {
     height: 100%;
     transition: left 0.28s cubic-bezier(0.32, 0.72, 0, 1);
 }
-.home-pager-track > .mobile-screen { width: calc(100vw - 2 * var(--gutter)); flex-shrink: 0; }
+/* 100% of the track, which is as wide as the pager viewport — the column on a
+   wide window — and never 100vw, which also counts a scrollbar. */
+.home-pager-track > .mobile-screen { width: 100%; flex-shrink: 0; }
 
 .mobile-tabbar {
     position: absolute;
@@ -9293,11 +9295,20 @@ body::before {
     body { background-color: var(--paper-deeper); }
     body::before { display: none; }
 
+    /* The page itself never scrolls: every screen is fixed, and the vanilla ones
+       (sign-in, loading) scroll inside #app. Otherwise the document grows a
+       scrollbar of its own (body has min-height + padding-bottom for phones),
+       and 100vw — which counts that scrollbar — stops matching what is laid out. */
+    html, body { height: 100%; overflow: hidden; }
+    body { min-height: 0; padding-bottom: 0; }
+
     /* The vanilla screens (sign-in, loading) flow inside #app. */
     #app {
         max-width: var(--col-w);
         margin: 0 auto;
-        min-height: 100vh;
+        height: 100%;
+        min-height: 0;
+        overflow-y: auto;
         background: var(--paper);
         box-shadow: 0 0 0 1px var(--hairline), 0 0 80px rgba(29, 28, 26, 0.08);
     }

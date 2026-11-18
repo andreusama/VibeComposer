@@ -9440,3 +9440,13 @@ html[data-input="mouse"] .mp-row-hover-delete:focus-visible { display: inline-fl
     cursor: pointer;
 }
 .range-bar button:hover { background: rgba(255, 255, 255, 0.14); }
+
+/* A mouse-sized delete target: the bare × glyph is ~15px, easy to miss and, with a
+   wobbly hand, to press without releasing on. The padding is part of the button
+   (so it is clickable) and costs nothing visually. */
+html[data-input="mouse"] .lc-pill-remove {
+    min-width: 22px;
+    min-height: 22px;
+    margin: -4px -4px -4px 0;
+    padding: 4px;
+}

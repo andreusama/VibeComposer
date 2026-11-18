@@ -270,3 +270,30 @@ test('the Baúl cabinet stays out of the margin when closed, and opens over the 
     await seed.cleanup();
   }
 });
+
+test('deleting a chord survives a wobbly click on the ×', async ({ page }) => {
+  const title = `E2E mouse wobble ${Date.now()}`;
+  const seed = await seedSongWithChord({
+    title, lines: LINES,
+    chords: [{ lineIndex: 0, position: 0, name: 'Am' }, { lineIndex: 0, position: 1, name: 'F' }],
+  });
+  try {
+    await openSong(page, title);
+    const pill = page.locator('.lc-pill[data-chord-id]').first();
+    await expect(pill).toBeVisible();
+    await pill.hover();
+    const box = await pill.locator('.lc-pill-remove').boundingBox();
+    const cx = box.x + box.width / 2;
+    const cy = box.y + box.height / 2;
+    // Press, drift 5px (past the old drag threshold, still on the button), release.
+    await page.mouse.move(cx, cy);
+    await page.mouse.down();
+    await page.mouse.move(cx + 5, cy + 1, { steps: 3 });
+    await page.mouse.move(cx + 1, cy, { steps: 2 });
+    await page.mouse.up();
+    await expect(page.locator('.res-picker-drag-pill')).toHaveCount(0);
+    await expect.poll(async () => (await seed.chordsNow()).map((c) => c.chord_name), { timeout: 8000 }).toEqual(['F']);
+  } finally {
+    await seed.cleanup();
+  }
+});

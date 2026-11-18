@@ -129,7 +129,10 @@ function ChordPillView({ chord: c, placement: p, armed, onArm, onDismissArm, onR
       // the rendered pill itself is the only thing a drop can land "on".
       data-chord-id={c.id}
       style={p ? { left: p.left, top: p.top, width: p.width } : { left: 0, top: 0, visibility: 'hidden' }}
-      onMouseDown={(e) => lp.startMouse(e, { id: c.id, chordName: c.chordName })}
+      // Not from the ×: a click there must stay a click. A real hand wobbles a
+      // few pixels between press and release, which is enough to start a drag and
+      // swallow the delete.
+      onMouseDown={(e) => { if (!e.target.closest('.lc-pill-remove')) lp.startMouse(e, { id: c.id, chordName: c.chordName }); }}
       onTouchStart={(e) => { const t = e.touches[0]; touchTargetRef.current = e.target; lp.start(t.clientX, t.clientY, { id: c.id, chordName: c.chordName }); }}
       onTouchMove={(e) => { const t = e.touches[0]; lp.move(t.clientX, t.clientY); }}
       onTouchEnd={lp.end}

@@ -37,6 +37,11 @@ export async function seedSongWithChord({ title, lines, chords }) {
       if (error) throw error;
       return data.code;
     },
+    // The song's text as stored (the single `lines` row; verse lines joined with \n).
+    async textNow() {
+      const { data } = await sb.from('lines').select('text').eq('id', line.id).single();
+      return data?.text;
+    },
     async chordsNow() {
       const { data } = await sb.from('line_chords').select('line_index, position, chord_name').eq('line_id', line.id).order('line_index').order('position');
       return data;

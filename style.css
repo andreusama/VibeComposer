@@ -9383,3 +9383,60 @@ html[data-input="mouse"] .res-picker-row { cursor: grab; }
 html[data-input="mouse"] .mp-card:hover .mp-row-hover-delete,
 html[data-input="mouse"] .mp-row-hover-delete:focus-visible { display: inline-flex; }
 .mp-row-hover-delete:hover { background: var(--amber-soft); color: var(--ink); }
+
+/* ═══ Editor: plain-text view of lines that aren't being edited ═══════════════
+   (src/mobile/NoteEditorScreen.jsx, LineRow). The view shares .ne-line-input with
+   the textarea, so font, leading, chord headroom and colours are identical and a
+   line doesn't move when it turns into a field. */
+.ne-line-view {
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    word-break: break-word;
+    cursor: text;
+    -webkit-user-select: text;
+    user-select: text;
+}
+/* The textarea of a line that is showing as text: still mounted and focusable
+   (focus, caret and every ref-based helper depend on it), just out of the way. */
+/* .ne-input-wrap .ne-line-input (above) sets position: relative; this must outrank it
+   or the hidden field stays in the row and halves the text's width. */
+.ne-input-wrap .ne-line-input-hidden {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+    z-index: -1;
+}
+/* A selection across lines must hold lyrics only — not syllable counts, rhyme
+   letters or chord names. */
+/* (Scoped to the editor's rows: the read-through's own text must stay copyable.) */
+.ne-gutter, .ne-row .lc-layer, .ne-row .lc-mirror { -webkit-user-select: none; user-select: none; }
+.ne-line-view::selection { background: color-mix(in srgb, var(--amber) 35%, transparent); }
+
+/* Copy / Cut / Delete over a selection that spans lines. */
+.range-bar {
+    position: fixed;
+    z-index: 70;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 2px;
+    padding: 4px;
+    border-radius: 999px;
+    background: rgba(29, 28, 26, 0.94);
+    box-shadow: var(--sh-3);
+}
+.range-bar button {
+    border: 0;
+    border-radius: 999px;
+    padding: 8px 14px;
+    background: transparent;
+    color: var(--paper);
+    font-family: var(--font-sans);
+    font-size: var(--fs-secondary);
+    font-weight: 600;
+    cursor: pointer;
+}
+.range-bar button:hover { background: rgba(255, 255, 255, 0.14); }

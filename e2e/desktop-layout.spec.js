@@ -151,7 +151,7 @@ test('a mouse drags a chord out of the palette onto a line', async ({ page }) =>
   const seed = await seedSongWithChord({ title, lines: LINES, chords: [] });
   try {
     await openSong(page, title);
-    await page.locator('[data-line-index="1"] textarea').first().click();
+    await page.locator('[data-line-index="1"] .ne-line-view').first().click();
     await page.getByRole('button', { name: 'Acordes y rasgueo' }).click();
 
     const chip = page.locator('.cs-chip').first();
@@ -177,7 +177,7 @@ test('a mouse can strum on the pad', async ({ page }) => {
   const seed = await seedSongWithChord({ title, lines: LINES, chords: [] });
   try {
     await openSong(page, title);
-    await page.locator('[data-line-index="1"] textarea').first().click();
+    await page.locator('[data-line-index="1"] .ne-line-view').first().click();
     await page.getByRole('button', { name: 'Acordes y rasgueo' }).click();
     await page.getByText('Rasgueo', { exact: true }).click();
     await page.getByRole('button', { name: /Grabar/ }).click();

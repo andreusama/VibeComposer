@@ -58,7 +58,7 @@ test('drag a chord from the picker sheet onto a line', async ({ page }) => {
     await page.getByText(title).first().click();
     await page.locator('.thread-card').first().click();
 
-    await page.locator('[data-line-index="1"] textarea, [data-line-index="1"] .ne-line-input').first().tap();
+    await page.locator('[data-line-index="1"] .ne-line-view').first().tap();
     await page.getByRole('button', { name: 'Acordes y rasgueo' }).tap();
 
     const chip = page.locator('.cs-chip').first();

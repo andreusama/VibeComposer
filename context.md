@@ -432,6 +432,24 @@ rhyme. Both have regression tests in `rhyme.test.js`.
   (`escapeCloses.js`) or abandon a drag, and a mouse-driven strum pad. Not done
   yet for the mouse: drag-to-reorder project rows, the Baúl cabinet swipe.
 
+## Editor: selecting and editing across lines (version A)
+
+Each verse line is still its own `<textarea>`, which no browser can select across.
+So a line that is not being edited is drawn as plain text (`.ne-line-view`, same
+class as the textarea so metrics are identical) and the textarea stays mounted but
+hidden (`.ne-line-input-hidden`, absolutely positioned) so focus, caret and the
+ref-based helpers keep working. A click turns the line back into the field with the
+caret where it landed (`LineRow.handleViewClick`; with a mouse a word selection
+inside one line is handed to the field, so Musa/Rima still work). A drag across
+lines is an ordinary native selection; `NoteEditorScreen` mirrors it as a
+`(line, offset)` range (`viewSelection.js`) and does Copy / Cut / Delete / typing /
+pasting over it on the lines array (`lineRangeEdit.js`, unit-tested), with a small
+`.range-bar` for Copy / Cut / Delete. The gutter and chord pills are
+`user-select: none`, so a copy holds lyrics only. Long-press-to-copy-a-line is gone
+from the editor (it fought native selection); the read-through and the thread cards
+keep their own. Chords are keyed by line index and, as with Enter/Backspace, are
+not re-mapped when lines are removed or joined.
+
 ## Deployment
 
 - Web: Vercel, `vercel.json` rewrites `/api/claude` to the serverless

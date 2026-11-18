@@ -28,6 +28,9 @@ import useLineDragDrop from './useLineDragDrop.js';
 import LineDragPill from './LineDragPill.jsx';
 import { IcChevronLeft, IcMuse, IcHistory, IcTrash, IcPencil, IcTools } from './icons.jsx';
 import { applySuggestionToLine } from '../utils/suggestionReplace.js';
+import { rangeText, applyRangeEdit } from '../utils/lineRangeEdit.js';
+import { viewSelectionToRange, sameRange, caretOffsetFromPoint, offsetInView } from '../utils/viewSelection.js';
+import { getInputMode } from '../utils/inputMode.js';
 
 // The "talk to the muse right inside the lyric" pattern from the design
 // ref — always the same wake word, like addressing Alexa, so it reads
@@ -45,23 +48,14 @@ const MUSE_COMMAND_RE = /^\s*musa\s*[,:]\s*/i;
 // preview can never show one outcome and commit a different one.
 const RESOURCE_EDGE_FRACTION = 0.3;
 
-// Long-press-to-copy timing — same hold-without-much-movement convention
-// ProjectRow.jsx uses for its own long-press, just a touch longer here
-// since it competes with the OS's own native long-press-to-select on a
-// real <textarea>: firing distinctly before that (typically ~500ms on
-// mobile browsers) is what makes this read as "one deliberate action"
-// instead of a selection UI flickering in first.
-const LONG_PRESS_COPY_MS = 420;
-const LONG_PRESS_COPY_SLOP = 10;
-
 // One physical line's row: number+rhyme-letter gutter + an auto-growing
 // single logical line of text (still wraps visually across more than one
 // screen row, same as any textarea — "single line" here means one entry in
 // the lines array, one row in the margin, not one row of pixels).
 function LineRow({
   id, index, text, previewText, syllables, rhyme, friction, dimmed, showPlaceholder,
-  variantRanges, chords, hasHistory, justCopied, dropTarget,
-  onChange, onEnter, onBackspaceAtStart, onPasteLines, onFocus, onBlurLine, onSelectionChange, onFrictionTap, onVariantTap, onHistoryTap, onLongPressCopy, onRemoveChord, onMoveChordStart, inputRef,
+  variantRanges, chords, hasHistory, dropTarget, active,
+  onChange, onEnter, onBackspaceAtStart, onPasteLines, onFocus, onBlurLine, onSelectionChange, onFrictionTap, onVariantTap, onHistoryTap, onRemoveChord, onMoveChordStart, inputRef,
 }) {
   // Live, not just on submit — the moment the line reads as addressing the
   // muse (the wake word + its disambiguating comma/colon typed), the row's
@@ -173,41 +167,43 @@ function LineRow({
     if (hit) onVariantTap(hit.variantId);
   }, [variantRanges, onVariantTap]);
 
-  // Long-press the verse to copy its whole text — scoped to .ne-input-wrap
-  // (the textarea's own wrapper, not the gutter's icon buttons) so it reads
-  // as "hold the verse itself," and deliberately never calls
-  // preventDefault() on touchstart — doing so would also block the
-  // textarea's normal tap-to-focus/tap-to-place-caret, which this must not
-  // touch. Best-effort against the native long-press-to-select that mobile
-  // browsers already run on a real <textarea>: firing first (see
-  // LONG_PRESS_COPY_MS) and collapsing whatever selection may have started
-  // is the mitigation, not a guarantee — genuinely device-dependent.
-  const pressTimerRef = useRef(null);
-  const pressStartRef = useRef({ x: 0, y: 0 });
-  const clearPressTimer = useCallback(() => { clearTimeout(pressTimerRef.current); pressTimerRef.current = null; }, []);
-  useEffect(() => clearPressTimer, [clearPressTimer]);
-
-  const handleWrapTouchStart = useCallback((e) => {
-    const t = e.touches[0];
-    pressStartRef.current = { x: t.clientX, y: t.clientY };
-    clearPressTimer();
-    pressTimerRef.current = setTimeout(() => {
-      pressTimerRef.current = null;
-      onLongPressCopy(index);
-      const el = localRef.current;
-      if (el) { const pos = el.selectionStart ?? displayedText.length; el.setSelectionRange(pos, pos); }
-    }, LONG_PRESS_COPY_MS);
-  }, [index, onLongPressCopy, displayedText, clearPressTimer]);
-
-  const handleWrapTouchMove = useCallback((e) => {
-    if (!pressTimerRef.current) return;
-    const t = e.touches[0];
-    if (Math.hypot(t.clientX - pressStartRef.current.x, t.clientY - pressStartRef.current.y) > LONG_PRESS_COPY_SLOP) clearPressTimer();
-  }, [clearPressTimer]);
+  // A line that isn't being edited is drawn as plain text (.ne-line-view), so a
+  // drag from one line into the next is an ordinary browser selection that
+  // can be copied, and Notes-style multi-line selection just works. Turning the
+  // line into the text field it really is happens on a click:
+  //   • a plain click puts the caret exactly where it landed;
+  //   • with a mouse, a selection made inside this one line (a double-click on a
+  //     word, a drag) is handed to the field so Musa / Rima / Alternativa can
+  //     act on it;
+  //   • a selection that crosses lines never reaches here (the click lands on a
+  //     common ancestor), so it stays a text selection for NoteEditorScreen's
+  //     Copy / Cut / Delete bar.
+  const viewRef = useRef(null);
+  const handleViewClick = useCallback((e) => {
+    const field = localRef.current;
+    const view = viewRef.current;
+    if (!field || !view) return;
+    const sel = window.getSelection();
+    let from;
+    let to;
+    if (sel && !sel.isCollapsed) {
+      if (getInputMode() !== 'mouse' || !view.contains(sel.anchorNode) || !view.contains(sel.focusNode)) return;
+      const a = offsetInView(view, sel.anchorNode, sel.anchorOffset);
+      const b = offsetInView(view, sel.focusNode, sel.focusOffset);
+      from = Math.min(a, b);
+      to = Math.max(a, b);
+    } else {
+      from = caretOffsetFromPoint(view, e.clientX, e.clientY);
+      to = from;
+    }
+    field.focus({ preventScroll: true });
+    field.setSelectionRange(Math.min(from, field.value.length), Math.min(to, field.value.length));
+    sel?.removeAllRanges();
+  }, []);
 
   return (
     <div
-      className={`ne-row${dimmed ? ' ne-row-dimmed' : ''}${isMuseCommand ? ' ne-row-muse' : ''}${previewText != null ? ' ne-row-preview' : ''}${justCopied ? ' ne-row-copied' : ''}${dropTarget ? ' ne-row-drop-target' : ''}${chords?.length ? ' ne-row-has-chords' : ''}`}
+      className={`ne-row${dimmed ? ' ne-row-dimmed' : ''}${isMuseCommand ? ' ne-row-muse' : ''}${previewText != null ? ' ne-row-preview' : ''}${dropTarget ? ' ne-row-drop-target' : ''}${chords?.length ? ' ne-row-has-chords' : ''}`}
       data-line-index={index}
     >
       <div className="ne-gutter">
@@ -228,13 +224,7 @@ function LineRow({
           <button className="ne-gutter-history" title="versiones anteriores de este verso" onClick={() => onHistoryTap(index)}><IcHistory size={13} /></button>
         )}
       </div>
-      <div
-        className="ne-input-wrap"
-        onTouchStart={handleWrapTouchStart}
-        onTouchMove={handleWrapTouchMove}
-        onTouchEnd={clearPressTimer}
-        onTouchCancel={clearPressTimer}
-      >
+      <div className="ne-input-wrap">
         <LineHighlight text={displayedText} ranges={variantRanges} />
         {/* Chord symbols aligned above the exact words they're strummed on,
             plus the transparent text mirror the chord drag-and-drop
@@ -242,9 +232,21 @@ function LineRow({
             line, chorded or not, because an empty line is exactly the one
             you're about to drop the first chord onto. */}
         <LineChordStrip text={displayedText} chords={chords} onRemove={onRemoveChord} onMoveStart={onMoveChordStart} />
+        {/* The visible text while this line isn't being edited. The textarea
+            below stays mounted (hidden) so focus, caret and every ref-based
+            helper keep working; it takes over on a click. */}
+        {!active && (
+          <div
+            ref={viewRef}
+            className="ne-line-input ne-line-view"
+            onClick={handleViewClick}
+          >{displayedText || '\u200b'}</div>
+        )}
         <textarea
           ref={setRefs}
-          className="ne-line-input"
+          tabIndex={active ? undefined : -1}
+          aria-hidden={active ? undefined : true}
+          className={`ne-line-input${active ? '' : ' ne-line-input-hidden'}`}
           rows={1}
           value={displayedText}
           readOnly={previewText != null}
@@ -1435,29 +1437,129 @@ export default function NoteEditorScreen({
     });
   }, [getLineRect]);
 
-  // LineRow's long-press-the-verse gesture. Silently no-ops on an empty
-  // line (nothing to copy) or if the Clipboard API isn't available in this
-  // context — same defensive style as MuseEyeScreen's own clipboard write,
-  // the only other place this app touches it.
-  const handleLongPressCopy = useCallback((index) => {
-    const text = lines[index]?.text?.trim();
-    if (!text) return;
-    navigator.clipboard?.writeText(text).then(() => {
-      navigator.vibrate?.(12);
-      setCopyToast(true);
-      clearTimeout(copyToastTimerRef.current);
-      copyToastTimerRef.current = setTimeout(() => setCopyToast(false), 1400);
-      // Deliberately no requestAnimationFrame-based "clear then re-set" dance
-      // here to force the keyframe animation to restart on a same-line
-      // re-copy — rAF is throttled/suspended in backgrounded or inactive
-      // tabs (confirmed while testing this: it silently never fired at
-      // all), which would make the flash randomly not show rather than
-      // just not replaying cleanly on the rare back-to-back-same-line case.
-      setCopiedIndex(index);
-      clearTimeout(copiedFlashTimerRef.current);
-      copiedFlashTimerRef.current = setTimeout(() => setCopiedIndex(null), 650);
-    }).catch(() => {});
-  }, [lines]);
+  // ─── Selecting and editing across lines ───────────────────────────────────
+  // Lines not being edited are plain text, so a drag from one into another is
+  // a native selection (see LineRow's .ne-line-view). `viewRange` mirrors it as
+  // a (line, offset) range; Copy, Cut, Delete, Enter, typing and pasting over it
+  // are done here, on the lines array, because no browser can edit across
+  // several <textarea>s (docs/adr, "editor_multiline_selection").
+  const bodyRef = useRef(null);
+  const [viewRange, setViewRange] = useState(null);
+  const [rangeBarPos, setRangeBarPos] = useState(null); // { x, y } above the selection
+
+  useEffect(() => {
+    const sync = () => {
+      const next = viewSelectionToRange(bodyRef.current);
+      setViewRange((cur) => (sameRange(cur, next) ? cur : next));
+      if (!next) { setRangeBarPos(null); return; }
+      const sel = window.getSelection();
+      const rect = sel.rangeCount ? sel.getRangeAt(0).getBoundingClientRect() : null;
+      setRangeBarPos(rect && rect.width + rect.height > 0 ? { x: rect.left + rect.width / 2, y: rect.top } : null);
+    };
+    document.addEventListener('selectionchange', sync);
+    return () => document.removeEventListener('selectionchange', sync);
+  }, []);
+
+  const flashCopied = useCallback(() => {
+    navigator.vibrate?.(12);
+    setCopyToast(true);
+    clearTimeout(copyToastTimerRef.current);
+    copyToastTimerRef.current = setTimeout(() => setCopyToast(false), 1400);
+  }, []);
+
+  const copyViewRange = useCallback(async () => {
+    if (!viewRange) return false;
+    const text = rangeText(lines.map((l) => l.text), viewRange);
+    if (!text) return false;
+    try { await navigator.clipboard?.writeText(text); flashCopied(); return true; } catch { return false; }
+  }, [viewRange, lines, flashCopied]);
+
+  // Replace the selected range with `replacement` ('' = delete / cut). Keeps each
+  // surviving line's id (focus and chords hang off it), gives new lines fresh ids.
+  const editViewRange = useCallback((replacement) => {
+    if (!viewRange) return;
+    const texts = lines.map((l) => l.text);
+    const { startLine, endLine } = viewRange;
+    const out = applyRangeEdit(texts, viewRange, replacement);
+    const tail = lines.length - endLine - 1;
+    const next = out.lines.map((text, i) => {
+      if (i < startLine) return { ...lines[i], text };
+      if (i === startLine) return { ...lines[startLine], text };
+      if (i >= out.lines.length - tail) return { ...lines[endLine + 1 + (i - (out.lines.length - tail))], text };
+      return { id: crypto.randomUUID(), text };
+    });
+    pushUndo(lines);
+    logLineHistory(startLine, lines[startLine]?.text ?? '');
+    setLines(ensureTrailingEmpty(next));
+    persist(next);
+    window.getSelection()?.removeAllRanges();
+    setViewRange(null);
+    setRangeBarPos(null);
+    const target = next[out.caret.line];
+    if (target) pendingFocusRef.current = { id: target.id, caret: out.caret.offset };
+    pendingFrictionCheckRef.current = true;
+  }, [viewRange, lines, persist, pushUndo, logLineHistory]);
+
+  // The keyboard, clipboard and paste while a range is selected in the plain-text
+  // view. Not while typing in a field — that is the browser's own business.
+  useEffect(() => {
+    if (!viewRange) return undefined;
+    const typingInField = () => {
+      const a = document.activeElement;
+      return a && (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT' || a.isContentEditable);
+    };
+    const onCopy = (e) => {
+      if (typingInField()) return;
+      e.preventDefault();
+      e.clipboardData?.setData('text/plain', rangeText(lines.map((l) => l.text), viewRange));
+      flashCopied();
+    };
+    const onCut = (e) => {
+      if (typingInField()) return;
+      e.preventDefault();
+      e.clipboardData?.setData('text/plain', rangeText(lines.map((l) => l.text), viewRange));
+      flashCopied();
+      editViewRange('');
+    };
+    const onPaste = (e) => {
+      if (typingInField()) return;
+      const pasted = e.clipboardData?.getData('text/plain');
+      if (pasted == null) return;
+      e.preventDefault();
+      editViewRange(pasted);
+    };
+    const onKey = (e) => {
+      if (typingInField() || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key === 'Backspace' || e.key === 'Delete') { e.preventDefault(); editViewRange(''); }
+      else if (e.key === 'Enter') { e.preventDefault(); editViewRange('\n'); }
+      else if (e.key === 'Escape') { window.getSelection()?.removeAllRanges(); }
+      else if (e.key.length === 1) { e.preventDefault(); editViewRange(e.key); }
+    };
+    document.addEventListener('copy', onCopy);
+    document.addEventListener('cut', onCut);
+    document.addEventListener('paste', onPaste);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('copy', onCopy);
+      document.removeEventListener('cut', onCut);
+      document.removeEventListener('paste', onPaste);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [viewRange, lines, editViewRange, flashCopied]);
+
+  // With a mouse, pressing on the text turns every line back into plain text
+  // BEFORE the drag starts: the field that was being edited would otherwise sit
+  // in the middle of the selection, and swap to text mid-drag.
+  const handleBodyMouseDown = useCallback((e) => {
+    if (getInputMode() !== 'mouse' || e.button !== 0) return;
+    if (e.target.closest('textarea, button, input, select, .lc-pill')) return;
+    const active = document.activeElement;
+    if (active && active.tagName === 'TEXTAREA') {
+      cancelBlurCleanup();
+      active.blur();
+      setFocusedIndex(null);
+    }
+  }, [cancelBlurCleanup]);
 
   // Accepting a muse suggestion force-overwrites the textarea's controlled
   // value with no real keystroke behind it — which silently clears the
@@ -1471,22 +1573,14 @@ export default function NoteEditorScreen({
   // seconds via a snackbar, no new table/round trip needed.
   const [lastReplacement, setLastReplacement] = useState(null); // {lineIndex, previousText}
   const undoTimerRef = useRef(null);
-  // "Copiado" toast + a brief flash on the row itself, after a
-  // long-press-the-verse copy (see handleLongPressCopy). Two signals on
-  // purpose — a bottom toast alone is easy to miss since a long-press
-  // keeps your eyes on the line, not the bottom of the screen; the flash
-  // is the one that actually answers "did that work?" where you're
-  // already looking.
+  // "Copiado" toast after copying from the selection bar or a copy shortcut.
   const [copyToast, setCopyToast] = useState(false);
   const copyToastTimerRef = useRef(null);
-  const [copiedIndex, setCopiedIndex] = useState(null);
-  const copiedFlashTimerRef = useRef(null);
 
   useEffect(() => () => {
     clearTimeout(undoTimerRef.current);
     clearTimeout(blurCleanupRef.current);
     clearTimeout(copyToastTimerRef.current);
-    clearTimeout(copiedFlashTimerRef.current);
   }, []);
 
   const handlePopoverReplace = useCallback((newText, scope) => {
@@ -1588,7 +1682,7 @@ export default function NoteEditorScreen({
 
   return (
     <MobileScreen className="ne-screen">
-      <div className="ne-body">
+      <div className="ne-body" ref={bodyRef} onMouseDown={handleBodyMouseDown}>
         {/* Dims during any chord/resource drag (externalDragActive) — the
             whole point of collapsing the sheet to a strip is that the
             lyric becomes the thing being looked at, and a full-strength
@@ -1651,10 +1745,9 @@ export default function NoteEditorScreen({
             onFrictionTap={handleFrictionTap}
             onVariantTap={handleVariantTap}
             onHistoryTap={handleHistoryTap}
-            onLongPressCopy={handleLongPressCopy}
             onRemoveChord={handleRemoveChord}
             onMoveChordStart={handleChordMoveStart}
-            justCopied={copiedIndex === i}
+            active={focusedIndex === i || line.id === lines[lines.length - 1].id || (previewOverride?.lineIndex === i) || (resourceDragPreview?.mode === 'into' && resourceDragPreview.lineIndex === i)}
             dropTarget={dropTargetIndex === i}
             inputRef={(id, el) => {
               if (el) rowRefs.current[id] = el;
@@ -1711,6 +1804,22 @@ export default function NoteEditorScreen({
         <div className="ne-undo-toast">
           <span>Verso reemplazado</span>
           <button onClick={handleUndoReplace}>Deshacer</button>
+        </div>
+      )}
+
+      {viewRange && rangeBarPos && !anyOverlayOpen && (
+        // pointerdown is cancelled so pressing a button never clears the very
+        // selection it is about to act on.
+        <div
+          className="range-bar"
+          style={{ left: rangeBarPos.x, top: Math.max(8, rangeBarPos.y - 52) }}
+          onPointerDown={(e) => e.preventDefault()}
+          role="toolbar"
+          aria-label="Selección"
+        >
+          <button onClick={copyViewRange}>Copiar</button>
+          <button onClick={() => { copyViewRange().then(() => editViewRange('')); }}>Cortar</button>
+          <button onClick={() => editViewRange('')}>Borrar</button>
         </div>
       )}
 
